@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // User profiles - allow read for counterparty lookup and write
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // User expense & debits records
+    match /debit_items/{debitId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // User monthly salary & income records
+    match /salary_records/{recordId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // User custom categories
+    match /custom_categories/{catId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // P2P Loans (Lent & Borrowed Ledger) - allow read/write for participants
+    match /loans/{loanId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Real-time counterparty notifications & alerts
+    match /notifications/{notifId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Shared Chit Fund Groups for Managers & Members
+    match /chit_groups/{groupId} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}

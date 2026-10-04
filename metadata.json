@@ -1,0 +1,6 @@
+{
+  "name": "FinMoney",
+  "description": "Smart monthly salary utility, EMI & recurring debit tracker, and peer-to-peer loan ledger with mutual party approvals in INDmoney styling.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

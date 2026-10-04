@@ -1,0 +1,34 @@
+{
+  "listing": {
+    "title": "FinMoney - Salary & Chit Sync",
+    "title_length": 29,
+    "short_description": "Monthly salary budget calculator, chit fund manager sync, and loan ledger.",
+    "short_description_length": 74,
+    "full_description": "FinMoney is a monthly financial utility designed to calculate your net flexible spending, manage committed outflows, sync chit funds between managers and members, and track borrowed or lent money with mutual approvals.\n\nKey Features:\n\n1. Monthly Salary & Outflow Utility\n- Calculate net available flexible cash: Income minus committed debits.\n- Track Chit Fund installments, Loan EMIs, Investment SIPs, Savings RDs/FDs, and custom expense categories.\n- Automatic prefilling of recurring debits from previous months.\n- Daily safe spend allowance indicator.\n\n2. Chit Fund Manager & Member Sync\n- Fund Managers: Create chit groups, share join codes (CHIT-XXXX), track live collection progress, conduct monthly auctions, and mark winning lifted bids.\n- Automatic dividend calculation and discount distribution across all members.\n- Member View: Check exact monthly dues after dividend deductions and track completed payment months.\n\n3. Lent & Borrowed Khaata with Mutual Approvals\n- Record money given (lent) and money taken (borrowed) with interest rates.\n- Multi-person group expense split calculator with equal share distribution.\n- Dual-party approval workflow: mark transactions as Pending, Mutual Approved, or Settled.\n\n4. Audio Voice Assistant\n- Tap the speaker icon to hear audio summaries of your monthly budget and dues.\n\n5. Secure Google Sign-In\n- Single-tap Google Authentication to sync records safely across devices.",
+    "full_description_length": 1500
+  },
+  "capability_inventory": [
+    {
+      "capability": "Monthly Salary & Flexible Cash Computation",
+      "evidence": "app/src/main/java/com/example/ui/FinMoneyViewModel.kt (calculateMonthlySummary)"
+    },
+    {
+      "capability": "Chit Fund Manager & Member Cloud Sync",
+      "evidence": "app/src/main/java/com/example/data/remote/ChitFirestoreRepository.kt (observeUserChits, createChitGroup, joinChitByCode, markChitLifted)"
+    },
+    {
+      "capability": "Lent & Borrowed Khaata with Mutual Verification",
+      "evidence": "app/src/main/java/com/example/data/local/LoanDao.kt, app/src/main/java/com/example/ui/screens/LentBorrowedScreen.kt"
+    },
+    {
+      "capability": "Google Sign-In Authentication",
+      "evidence": "app/src/main/java/com/example/data/auth/AuthManager.kt, app/src/main/java/com/example/ui/screens/AuthScreen.kt"
+    },
+    {
+      "capability": "Voice Audio Financial Readout",
+      "evidence": "app/src/main/java/com/example/service/VoiceTtsManager.kt"
+    }
+  ],
+  "disclosures_applied": [],
+  "omitted_for_lack_of_evidence": []
+}

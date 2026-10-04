@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Outer Floating Halo Glow -->
+    <path
+        android:fillColor="#1800E699"
+        android:pathData="M54,18 C73.88,18 90,34.12 90,54 C90,73.88 73.88,90 54,90 C34.12,90 18,73.88 18,54 C18,34.12 34.12,18 54,18 Z" />
+
+    <!-- Main Fintech Squircle Card Container -->
+    <path
+        android:pathData="M32,28 L76,28 C80.42,28 84,31.58 84,36 L84,72 C84,76.42 80.42,80 76,80 L32,80 C27.58,80 24,76.42 24,72 L24,36 C24,31.58 27.58,28 32,28 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="24"
+                android:startY="28"
+                android:endX="84"
+                android:endY="80"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#1E293B" />
+                <item android:offset="1.0" android:color="#0F172A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Sleek Card Accent Ribbon (Left highlight) -->
+    <path
+        android:pathData="M24,40 L28,40 L28,68 L24,68 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="24"
+                android:startY="40"
+                android:endX="28"
+                android:endY="68"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#00E699" />
+                <item android:offset="1.0" android:color="#38BDF8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Upward Wealth Growth Area / Trend Shape -->
+    <path
+        android:pathData="M34,68 L48,54 L58,60 L74,40 L74,70 C74,72.2 72.2,74 70,74 L38,74 C35.8,74 34,72.2 34,70 Z"
+        android:fillColor="#1500E699" />
+
+    <!-- Dynamic Growth Curve Line -->
+    <path
+        android:pathData="M34,66 L48,52 L58,58 L74,38">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="34"
+                android:startY="66"
+                android:endX="74"
+                android:endY="38"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#38BDF8" />
+                <item android:offset="0.6" android:color="#00E699" />
+                <item android:offset="1.0" android:color="#A7F3D0" />
+            </gradient>
+        </aapt:attr>
+        <aapt:attr name="android:strokeWidth">
+            <int value="4" />
+        </aapt:attr>
+    </path>
+
+    <!-- Growth Peak Arrow Tip -->
+    <path
+        android:fillColor="#00E699"
+        android:pathData="M68,36 L75,36 L75,43 Z" />
+
+    <!-- Currency Growth Node -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M54,39 C56.76,39 59,36.76 59,34 C59,31.24 56.76,29 54,29 C51.24,29 49,31.24 49,34 C49,36.76 51.24,39 54,39 Z" />
+
+    <!-- Glowing Core Center Dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,35.5 C54.83,35.5 55.5,34.83 55.5,34 C55.5,33.17 54.83,32.5 54,32.5 C53.17,32.5 52.5,33.17 52.5,34 C52.5,34.83 53.17,35.5 54,35.5 Z" />
+</vector>

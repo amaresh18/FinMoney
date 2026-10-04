@@ -1,0 +1,110 @@
+{
+  "entities": {
+    "UserProfile": {
+      "collection": "users",
+      "fields": {
+        "userId": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "createdAt": { "type": "timestamp" }
+      }
+    },
+    "SalaryRecord": {
+      "collection": "salary_records",
+      "fields": {
+        "userPhone": { "type": "string" },
+        "month": { "type": "number" },
+        "year": { "type": "number" },
+        "salaryAmount": { "type": "number" },
+        "additionalIncome": { "type": "number" },
+        "currencySymbol": { "type": "string" },
+        "notes": { "type": "string" },
+        "incomeSourcesJson": { "type": "string" },
+        "updatedAt": { "type": "timestamp" }
+      }
+    },
+    "DebitItem": {
+      "collection": "debit_items",
+      "fields": {
+        "cloudId": { "type": "string" },
+        "userPhone": { "type": "string" },
+        "month": { "type": "number" },
+        "year": { "type": "number" },
+        "category": { "type": "string" },
+        "customCategoryName": { "type": "string" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "dueDateDay": { "type": "number" },
+        "isRecurring": { "type": "boolean" },
+        "isPaid": { "type": "boolean" },
+        "interestRate": { "type": "number" },
+        "totalTenureMonths": { "type": "number" },
+        "currentMonthTenure": { "type": "number" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "timestamp" }
+      }
+    },
+    "CustomCategory": {
+      "collection": "custom_categories",
+      "fields": {
+        "userPhone": { "type": "string" },
+        "name": { "type": "string" },
+        "iconName": { "type": "string" },
+        "colorHex": { "type": "string" }
+      }
+    },
+    "LoanTransaction": {
+      "collection": "loans",
+      "fields": {
+        "cloudId": { "type": "string" },
+        "type": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "counterpartyName": { "type": "string" },
+        "counterpartyContact": { "type": "string" },
+        "creatorContact": { "type": "string" },
+        "status": { "type": "string" },
+        "participants": { "type": "array" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      }
+    },
+    "AppNotification": {
+      "collection": "notifications",
+      "fields": {
+        "cloudId": { "type": "string" },
+        "targetPhone": { "type": "string" },
+        "senderPhone": { "type": "string" },
+        "senderName": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "actionType": { "type": "string" },
+        "timestamp": { "type": "timestamp" },
+        "isRead": { "type": "boolean" }
+      }
+    },
+    "SharedChitGroup": {
+      "collection": "chit_groups",
+      "fields": {
+        "chitCode": { "type": "string" },
+        "title": { "type": "string" },
+        "managerUid": { "type": "string" },
+        "managerName": { "type": "string" },
+        "managerPhone": { "type": "string" },
+        "totalPotAmount": { "type": "number" },
+        "monthlyInstallment": { "type": "number" },
+        "totalMonths": { "type": "number" },
+        "currentMonth": { "type": "number" },
+        "dividendDiscount": { "type": "number" },
+        "memberUids": { "type": "array" },
+        "membersJson": { "type": "string" },
+        "liftedMemberName": { "type": "string" },
+        "liftedBidAmount": { "type": "number" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      }
+    }
+  }
+}
