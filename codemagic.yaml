@@ -22,21 +22,22 @@ workflows:
       - name: Set up environment and permissions
         script: |
           echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/local.properties"
-          if [ -f "gradlew" ]; then chmod +x gradlew; fi
+          if [ -x "/usr/libexec/java_home" ]; then
+            export JAVA_HOME=$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home)
+          fi
+          chmod +x ./gradlew
       - name: Build Android App Bundle (AAB)
         script: |
-          if [ -f "gradlew" ]; then
-            ./gradlew :app:bundleRelease --no-daemon
-          else
-            gradle :app:bundleRelease --no-daemon
+          if [ -x "/usr/libexec/java_home" ]; then
+            export JAVA_HOME=$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home)
           fi
+          ./gradlew :app:bundleRelease --no-daemon --stacktrace
       - name: Build Android Release APK
         script: |
-          if [ -f "gradlew" ]; then
-            ./gradlew :app:assembleRelease --no-daemon
-          else
-            gradle :app:assembleRelease --no-daemon
+          if [ -x "/usr/libexec/java_home" ]; then
+            export JAVA_HOME=$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home)
           fi
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
     artifacts:
       - app/build/outputs/bundle/release/*.aab
       - app/build/outputs/apk/release/*.apk
