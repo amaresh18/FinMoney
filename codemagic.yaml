@@ -1,0 +1,49 @@
+workflows:
+  android-release:
+    name: FinMoney Android Release Build
+    max_build_duration: 30
+    instance_type: linux_x2
+    environment:
+      java: 17
+      vars:
+        PACKAGE_NAME: "com.aistudio.finmoney.vqpz"
+    triggering:
+      events:
+        - push
+        - tag
+      branch_patterns:
+        - pattern: 'main'
+          include: true
+          source: true
+        - pattern: 'master'
+          include: true
+          source: true
+    scripts:
+      - name: Set up environment and permissions
+        script: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/local.properties"
+          if [ -f "gradlew" ]; then chmod +x gradlew; fi
+      - name: Build Android App Bundle (AAB)
+        script: |
+          if [ -f "gradlew" ]; then
+            ./gradlew :app:bundleRelease --no-daemon
+          else
+            gradle :app:bundleRelease --no-daemon
+          fi
+      - name: Build Android Release APK
+        script: |
+          if [ -f "gradlew" ]; then
+            ./gradlew :app:assembleRelease --no-daemon
+          else
+            gradle :app:assembleRelease --no-daemon
+          fi
+    artifacts:
+      - app/build/outputs/bundle/release/*.aab
+      - app/build/outputs/apk/release/*.apk
+    publishing:
+      email:
+        recipients:
+          - g.amaresh18@gmail.com
+        notify:
+          success: true
+          failure: true
