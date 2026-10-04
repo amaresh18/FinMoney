@@ -12,39 +12,36 @@ workflows:
         - push
         - tag
       branch_patterns:
-        - pattern: 'main'
-          include: true
-          source: true
-        - pattern: 'master'
+        - pattern: '*'
           include: true
           source: true
     scripts:
-      - name: Set up environment and permissions
+      - name: Build Android Release (AAB & APK)
         script: |
+          set -e
+          
+          # 1. Setup Android SDK path
           if [ -n "$ANDROID_SDK_ROOT" ]; then
             echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
           elif [ -n "$ANDROID_HOME" ]; then
             echo "sdk.dir=$ANDROID_HOME" > local.properties
           fi
+          
+          # 2. Setup Java 17
           if [ -x "/usr/libexec/java_home" ]; then
             export JAVA_HOME=$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home)
           fi
+          
+          # 3. Restore keystore if missing
           if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
             python3 -c "import base64; open('debug.keystore', 'wb').write(base64.b64decode(open('debug.keystore.base64').read().strip()))" || true
           fi
+          
+          # 4. Make Gradle wrapper executable
           chmod +x ./gradlew
-      - name: Build Android App Bundle (AAB)
-        script: |
-          if [ -x "/usr/libexec/java_home" ]; then
-            export JAVA_HOME=$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home)
-          fi
-          ./gradlew :app:bundleRelease --no-daemon --stacktrace
-      - name: Build Android Release APK
-        script: |
-          if [ -x "/usr/libexec/java_home" ]; then
-            export JAVA_HOME=$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home)
-          fi
-          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+          
+          # 5. Build Release AAB & Release APK
+          ./gradlew :app:bundleRelease :app:assembleRelease --no-daemon --stacktrace
     artifacts:
       - app/build/outputs/bundle/release/*.aab
       - app/build/outputs/apk/release/*.apk
