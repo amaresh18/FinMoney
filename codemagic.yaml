@@ -21,9 +21,16 @@ workflows:
     scripts:
       - name: Set up environment and permissions
         script: |
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/local.properties"
+          if [ -n "$ANDROID_SDK_ROOT" ]; then
+            echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+          elif [ -n "$ANDROID_HOME" ]; then
+            echo "sdk.dir=$ANDROID_HOME" > local.properties
+          fi
           if [ -x "/usr/libexec/java_home" ]; then
             export JAVA_HOME=$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home)
+          fi
+          if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
+            python3 -c "import base64; open('debug.keystore', 'wb').write(base64.b64decode(open('debug.keystore.base64').read().strip()))" || true
           fi
           chmod +x ./gradlew
       - name: Build Android App Bundle (AAB)
