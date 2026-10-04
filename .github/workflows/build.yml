@@ -25,21 +25,24 @@ jobs:
         gradle-version: '9.3.1'
 
     - name: Build Release App Bundle (AAB)
-      run: gradle :app:bundleRelease
+      run: |
+        chmod +x ./gradlew
+        ./gradlew :app:bundleRelease --stacktrace
 
     - name: Build Release APK
-      run: gradle :app:assembleRelease
+      run: |
+        ./gradlew :app:assembleRelease --stacktrace
 
     - name: Upload AAB Bundle Artifact
       uses: actions/upload-artifact@v4
       with:
         name: app-release-aab
-        path: app/build/outputs/bundle/release/app-release.aab
+        path: app/build/outputs/bundle/release/*.aab
         retention-days: 30
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
         name: app-release-apk
-        path: app/build/outputs/apk/release/app-release-unsigned.apk
+        path: app/build/outputs/apk/release/*.apk
         retention-days: 30
