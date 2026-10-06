@@ -19,10 +19,14 @@ import java.util.Calendar
 
 data class CategorySummary(
     val categoryName: String,
-    val totalAmount: Double,
-    val itemCount: Int,
-    val colorHex: String,
-    val iconKey: String
+    val categoryKey: String = "",
+    val totalAmount: Double = 0.0,
+    val paidAmount: Double = 0.0,
+    val yetToPayAmount: Double = 0.0,
+    val itemCount: Int = 0,
+    val paidCount: Int = 0,
+    val colorHex: String = "#00D09C",
+    val iconKey: String = "general"
 )
 
 data class PeerThread(
@@ -262,10 +266,11 @@ class FinMoneyViewModel(application: Application) : AndroidViewModel(application
         _currentYear
     ) { salary, debits, month, year ->
         val salAmount = salary?.salaryAmount ?: 0.0
-        val extraIncome = salary?.additionalIncome ?: 0.0
         val customSources = parseIncomeSources(salary?.incomeSourcesJson ?: "")
         val customIncomeTotal = customSources.sumOf { it.amount }
-        val totalInc = salAmount + extraIncome + customIncomeTotal
+        // When custom sources are present, they are the source of truth for extra credits.
+        val extraIncome = if (customSources.isNotEmpty()) customIncomeTotal else (salary?.additionalIncome ?: 0.0)
+        val totalInc = salAmount + extraIncome
 
         val totalDeb = debits.sumOf { it.amount }
         val paidDeb = debits.filter { it.isPaid }.sumOf { it.amount }
@@ -322,7 +327,8 @@ class FinMoneyViewModel(application: Application) : AndroidViewModel(application
             val creatorPhone = loan.creatorContact.trim()
             val isCreator = (creatorPhone.isNotBlank() && currentPhone.isNotBlank() && currentPhone.takeLast(10) == creatorPhone.takeLast(10)) ||
                             (creatorPhone.isBlank() && loan.createdBy.equals(currentName, ignoreCase = true)) ||
-                            (creatorPhone.isBlank() && loan.createdBy == "You")
+                            (creatorPhone.isBlank() && loan.createdBy == "You") ||
+                            (currentPhone.isBlank() && (loan.createdBy.equals(currentName, ignoreCase = true) || loan.createdBy == "You" || currentName.isBlank()))
 
             // Effective direction for the current user
             val isGivenForUser = if (!isCreator) {
@@ -381,20 +387,22 @@ class FinMoneyViewModel(application: Application) : AndroidViewModel(application
 
             val isCreator = (creatorPhone.isNotBlank() && currentPhone.isNotBlank() && currentPhone.takeLast(10) == creatorPhone.takeLast(10)) ||
                             (creatorPhone.isBlank() && loan.createdBy.equals(currentName, ignoreCase = true)) ||
-                            (creatorPhone.isBlank() && loan.createdBy == "You")
+                            (creatorPhone.isBlank() && loan.createdBy == "You") ||
+                            (currentPhone.isBlank() && (loan.createdBy.equals(currentName, ignoreCase = true) || loan.createdBy == "You" || currentName.isBlank()))
 
             val otherPhone = if (isCreator) targetPhone else creatorPhone
             val otherName = if (isCreator) loan.counterpartyName.trim() else loan.createdBy.trim()
 
-            if (otherPhone.isNotBlank()) otherPhone.takeLast(10) else otherName.lowercase()
+            if (otherPhone.isNotBlank()) otherPhone.takeLast(10) else otherName.lowercase().ifBlank { "counterparty" }
         }
 
-        groups.map { (_, loanList) ->
-            val first = loanList.first()
+        groups.mapNotNull { (_, loanList) ->
+            val first = loanList.firstOrNull() ?: return@mapNotNull null
             val creatorPhone = first.creatorContact.trim()
             val isFirstCreator = (creatorPhone.isNotBlank() && currentPhone.isNotBlank() && currentPhone.takeLast(10) == creatorPhone.takeLast(10)) ||
                                  (creatorPhone.isBlank() && first.createdBy.equals(currentName, ignoreCase = true)) ||
-                                 (creatorPhone.isBlank() && first.createdBy == "You")
+                                 (creatorPhone.isBlank() && first.createdBy == "You") ||
+                                 (currentPhone.isBlank() && (first.createdBy.equals(currentName, ignoreCase = true) || first.createdBy == "You" || currentName.isBlank()))
 
             val displayCounterpartyName = if (isFirstCreator) first.counterpartyName else first.createdBy.ifBlank { "Counterparty" }
             val displayCounterpartyContact = if (isFirstCreator) first.counterpartyContact else first.creatorContact
@@ -474,21 +482,35 @@ class FinMoneyViewModel(application: Application) : AndroidViewModel(application
         isEmailVerified: Boolean = true
     ) {
         viewModelScope.launch(Dispatchers.IO) {
-            val combinedName = if (name.isNotBlank()) name.trim() else "$firstName $lastName".trim().ifBlank { "You" }
-            val profile = UserProfile(
-                id = 1,
-                name = combinedName,
-                firstName = firstName.trim(),
-                lastName = lastName.trim(),
-                email = email.trim(),
-                phoneNumber = phoneNumber.trim(),
-                profilePicUri = profilePicUri.trim(),
-                isOtpVerified = isOtpVerified,
-                isEmailVerified = isEmailVerified,
-                createdAt = System.currentTimeMillis()
-            )
-            repository.saveUserProfile(profile)
-            _toastMessage.emit("Profile saved successfully!")
+            try {
+                val cleanFirst = firstName.trim()
+                val cleanLast = lastName.trim()
+                val combinedName = if (name.isNotBlank()) name.trim() else "$cleanFirst $cleanLast".trim().ifBlank { "You" }
+                val cleanEmail = email.trim()
+                val cleanPhone = phoneNumber.trim()
+                val cleanPic = profilePicUri.trim()
+
+                android.util.Log.i("FinMoneyVM", "[Save Profile Request] name='$combinedName', phone='$cleanPhone', email='$cleanEmail'")
+
+                val profile = UserProfile(
+                    id = 1,
+                    name = combinedName,
+                    firstName = cleanFirst,
+                    lastName = cleanLast,
+                    email = cleanEmail,
+                    phoneNumber = cleanPhone,
+                    profilePicUri = cleanPic,
+                    isOtpVerified = isOtpVerified,
+                    isEmailVerified = isEmailVerified,
+                    createdAt = System.currentTimeMillis()
+                )
+                val rowId = repository.saveUserProfile(profile)
+                android.util.Log.i("FinMoneyVM", "[Save Profile Success] Room rowId=$rowId")
+                _toastMessage.emit("Profile saved successfully!")
+            } catch (e: Exception) {
+                android.util.Log.e("FinMoneyVM", "[Save Profile Error] ${e.message}", e)
+                _toastMessage.emit("Failed to save profile: ${e.message}")
+            }
         }
     }
 
@@ -521,6 +543,10 @@ class FinMoneyViewModel(application: Application) : AndroidViewModel(application
 
     fun clearUserProfile() {
         viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.signOut()
+            } catch (_: Exception) {
+            }
             val emptyProfile = UserProfile(
                 id = 1,
                 name = "",
@@ -534,6 +560,7 @@ class FinMoneyViewModel(application: Application) : AndroidViewModel(application
                 createdAt = 0L
             )
             repository.saveUserProfile(emptyProfile)
+            _toastMessage.emit("Signed out successfully 👋")
         }
     }
 
@@ -1039,40 +1066,55 @@ class FinMoneyViewModel(application: Application) : AndroidViewModel(application
     private fun groupDebitsByCategory(debits: List<DebitItem>): List<CategorySummary> {
         val map = debits.groupBy {
             if (it.category == DebitCategory.CUSTOM.name) {
-                if (it.customCategoryName.isNotBlank()) it.customCategoryName else "Custom"
+                if (it.customCategoryName.isNotBlank()) it.customCategoryName.trim() else "Custom"
             } else {
                 it.category
             }
         }
 
-        return map.map { (catName, items) ->
+        return map.map { (catKey, items) ->
             val total = items.sumOf { it.amount }
-            val (colorHex, iconKey) = when (catName) {
-                DebitCategory.RENT.name -> "#0066FF" to "home"
-                DebitCategory.EMI.name -> "#F43F5E" to "emi"
-                DebitCategory.ELECTRICITY.name -> "#F59E0B" to "flash"
-                DebitCategory.INTERNET.name -> "#0284C7" to "internet"
-                DebitCategory.SHOPPING.name -> "#DB2777" to "shopping"
-                DebitCategory.INVESTMENT.name -> "#00B377" to "investment"
-                DebitCategory.SAVING.name -> "#0F766E" to "saving"
-                DebitCategory.GENERAL.name -> "#64748B" to "general"
+            val paid = items.filter { it.isPaid }.sumOf { it.amount }
+            val unpaid = items.filter { !it.isPaid }.sumOf { it.amount }
+            val paidCount = items.count { it.isPaid }
+            val (colorHex, iconKey) = when (catKey.trim().lowercase()) {
+                "rent", DebitCategory.RENT.name.lowercase() -> "#0066FF" to "home"
+                "emi", DebitCategory.EMI.name.lowercase() -> "#F43F5E" to "emi"
+                "electricity", DebitCategory.ELECTRICITY.name.lowercase() -> "#F59E0B" to "flash"
+                "internet", DebitCategory.INTERNET.name.lowercase() -> "#0284C7" to "internet"
+                "groceries", DebitCategory.GROCERIES.name.lowercase() -> "#059669" to "groceries"
+                "recharge", DebitCategory.RECHARGE.name.lowercase() -> "#0284C7" to "recharge"
+                "chit", "chit payments", DebitCategory.CHIT.name.lowercase() -> "#6D28D9" to "chit"
+                "fuel", DebitCategory.FUEL.name.lowercase() -> "#EA580C" to "fuel"
+                "shopping", DebitCategory.SHOPPING.name.lowercase() -> "#DB2777" to "shopping"
+                "investment", DebitCategory.INVESTMENT.name.lowercase() -> "#00B377" to "investment"
+                "saving", DebitCategory.SAVING.name.lowercase() -> "#0F766E" to "saving"
+                "general", DebitCategory.GENERAL.name.lowercase() -> "#64748B" to "general"
                 else -> "#7C3AED" to "custom"
             }
-            val displayName = when (catName) {
+            val displayName = when (catKey.trim().uppercase()) {
                 DebitCategory.RENT.name -> "Rent / Housing"
                 DebitCategory.EMI.name -> "Loan / EMI"
                 DebitCategory.ELECTRICITY.name -> "Electricity"
                 DebitCategory.INTERNET.name -> "Internet & WiFi"
+                DebitCategory.GROCERIES.name -> "Groceries"
+                DebitCategory.RECHARGE.name -> "Recharge & Mobile"
+                DebitCategory.CHIT.name -> "Chit Payments"
+                DebitCategory.FUEL.name -> "Fuel / Petrol"
                 DebitCategory.SHOPPING.name -> "Shopping"
                 DebitCategory.INVESTMENT.name -> "Investments / SIP"
                 DebitCategory.SAVING.name -> "Savings & RD"
                 DebitCategory.GENERAL.name -> "General Expenses"
-                else -> catName
+                else -> catKey
             }
             CategorySummary(
                 categoryName = displayName,
+                categoryKey = catKey,
                 totalAmount = total,
+                paidAmount = paid,
+                yetToPayAmount = unpaid,
                 itemCount = items.size,
+                paidCount = paidCount,
                 colorHex = colorHex,
                 iconKey = iconKey
             )

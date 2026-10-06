@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -99,10 +101,10 @@ fun LentBorrowedScreen(
             },
             onRecordPayment = { loan -> paymentLoan = loan },
             onRequestSettlement = { loanId ->
-                viewModel.requestSettlement(loanId)
+                viewModel.requestSettlement(loanId, userProfile?.name ?: "You")
             },
             onConfirmSettlement = { loanId, approve ->
-                viewModel.confirmSettlement(loanId, approve)
+                viewModel.confirmSettlement(loanId, approve, userProfile?.name ?: "You")
             },
             onApprovePayment = { loanId, paymentId ->
                 viewModel.approvePartialPayment(loanId, paymentId, userProfile?.name ?: "You")
@@ -376,7 +378,7 @@ fun LentBorrowedScreen(
                             .weight(1f)
                             .height(48.dp)
                             .testTag("give_money_button"),
-                        colors = ButtonDefaults.buttonColors(containerColor = IndGreenDark),
+                        colors = ButtonDefaults.buttonColors(containerColor = IndBlue),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(Icons.Filled.ArrowUpward, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -594,24 +596,58 @@ fun LentBorrowedScreen(
         )
     }
 
-    // Delete Confirmation Dialog (Requirement #3 - Mutual Confirmation)
+    // Delete Confirmation Dialog (Direct Delete or Mutual Approval Request)
     if (loanToDelete != null) {
         val currentUserName = userProfile?.name?.trim() ?: "You"
         val isMutuallySigned = loanToDelete!!.userSigned && loanToDelete!!.counterpartySigned
-        DeleteConfirmationDialog(
-            title = if (isMutuallySigned) "Request Mutual Record Deletion?" else "Delete Transaction Record?",
-            message = if (isMutuallySigned)
-                "Since this record of $currencySymbol${"%,.0f".format(loanToDelete!!.totalAmount)} with ${loanToDelete!!.counterpartyName} is mutually signed, deleting it requires confirmation from both parties. Send deletion request?"
-                else "Are you sure you want to delete the record of $currencySymbol${"%,.0f".format(loanToDelete!!.totalAmount)} with ${loanToDelete!!.counterpartyName}? This action cannot be undone.",
-            onConfirm = {
-                if (isMutuallySigned) {
-                    viewModel.requestLoanDeletion(loanToDelete!!.id, currentUserName)
-                } else {
-                    viewModel.deleteLoan(loanToDelete!!.id)
+        AlertDialog(
+            onDismissRequest = { loanToDelete = null },
+            icon = { Icon(Icons.Filled.DeleteForever, contentDescription = null, tint = IndRed) },
+            title = { Text("Delete Transaction Record", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Delete record of $currencySymbol${"%,.0f".format(loanToDelete!!.totalAmount)} with ${loanToDelete!!.counterpartyName}?",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (isMutuallySigned)
+                            "• Delete Now: Permanently deletes this transaction and all associated payment logs immediately.\n• Request Approval: Sends a deletion request to ${loanToDelete!!.counterpartyName} for mutual confirmation."
+                            else "This will permanently remove this transaction and its payment logs from your device.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = IndTextSecondary
+                    )
                 }
-                loanToDelete = null
             },
-            onDismiss = { loanToDelete = null }
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteLoan(loanToDelete!!.id)
+                        loanToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = IndRed)
+                ) {
+                    Text("Delete Now", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(onClick = { loanToDelete = null }) {
+                        Text("Cancel")
+                    }
+                    if (isMutuallySigned && loanToDelete!!.counterpartyContact.isNotBlank()) {
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.requestLoanDeletion(loanToDelete!!.id, currentUserName)
+                                loanToDelete = null
+                            }
+                        ) {
+                            Text("Request Approval")
+                        }
+                    }
+                }
+            }
         )
     }
 
@@ -712,6 +748,7 @@ fun LentBorrowedScreen(
                 showProfileEditor = false
             },
             onSignOut = {
+                viewModel.clearUserProfile()
                 showProfileEditor = false
             }
         )
@@ -1073,7 +1110,7 @@ fun SinglePeerThreadConversationView(
                             .weight(1f)
                             .height(48.dp)
                             .testTag("thread_you_gave_button"),
-                        colors = ButtonDefaults.buttonColors(containerColor = IndGreenDark),
+                        colors = ButtonDefaults.buttonColors(containerColor = IndBlue),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Icon(Icons.Filled.ArrowUpward, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1184,6 +1221,8 @@ fun SinglePeerThreadConversationView(
                         onRequestPaymentDeletion = onRequestPaymentDeletion,
                         onConfirmPaymentDeletion = onConfirmPaymentDeletion,
                         onDeletePayment = onDeletePayment,
+                        onRequestLoanDeletion = { onRequestLoanDeletion(loan.id) },
+                        onConfirmLoanDeletion = { approve -> onConfirmLoanDeletion(loan.id, approve) },
                         onViewProof = onViewProof,
                         onSendReminder = { onSendReminder(loan.id) }
                     )
@@ -1209,6 +1248,8 @@ fun TransactionBubbleCard(
     onRequestPaymentDeletion: (loanId: Long, paymentId: String) -> Unit = { _, _ -> },
     onConfirmPaymentDeletion: (loanId: Long, paymentId: String, Boolean) -> Unit = { _, _, _ -> },
     onDeletePayment: (loanId: Long, payment: PaymentRecord) -> Unit = { _, _ -> },
+    onRequestLoanDeletion: () -> Unit = {},
+    onConfirmLoanDeletion: (Boolean) -> Unit = {},
     onViewProof: (String) -> Unit,
     onSendReminder: () -> Unit
 ) {
@@ -1219,6 +1260,8 @@ fun TransactionBubbleCard(
     val isCreator = (creatorPhone.isNotBlank() && currentPhone.isNotBlank() && currentPhone.takeLast(10) == creatorPhone.takeLast(10)) ||
                     (creatorPhone.isBlank() && loan.createdBy.equals(currentName, ignoreCase = true)) ||
                     (creatorPhone.isBlank() && loan.createdBy == "You")
+
+    val otherPartyName = if (isCreator) loan.counterpartyName else loan.createdBy
 
     val isGiven = if (isCreator) (loan.type == LoanType.GIVEN.name) else (loan.type == LoanType.TAKEN.name)
     val isApproved = loan.status == ApprovalStatus.APPROVED.name || loan.status == ApprovalStatus.SETTLED.name
@@ -1238,36 +1281,7 @@ fun TransactionBubbleCard(
     }
 
     val cardBgColor = IndSurface
-
-    var paymentToDelete by remember { mutableStateOf<PaymentRecord?>(null) }
     var showSettleConfirmDialog by remember { mutableStateOf(false) }
-
-    if (paymentToDelete != null) {
-        AlertDialog(
-            onDismissRequest = { paymentToDelete = null },
-            title = { Text("Delete Payment Entry", fontWeight = FontWeight.Bold) },
-            text = {
-                Text("Delete payment record of $currencySymbol${"%,.0f".format(paymentToDelete!!.amount)}? This will remove the record, recalculate remaining balance, and update the transaction.")
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val p = paymentToDelete!!
-                        paymentToDelete = null
-                        onConfirmPaymentDeletion(loan.id, p.id, true)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = IndRed)
-                ) {
-                    Text("Delete Record", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { paymentToDelete = null }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
 
     if (showSettleConfirmDialog) {
         AlertDialog(
@@ -1307,13 +1321,14 @@ fun TransactionBubbleCard(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Header: Type Flag & Date
+            // Header: Type Flag, Status & Actions
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
+                    modifier = Modifier.weight(1f, fill = false),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -1361,7 +1376,7 @@ fun TransactionBubbleCard(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
                         text = dateFormatter.format(Date(loan.startDateTimestamp)),
@@ -1370,15 +1385,22 @@ fun TransactionBubbleCard(
                         fontSize = 11.sp
                     )
 
-                    // Edit / Delete overflow (allowed if pending or with confirm)
+                    // Edit Action (allowed if pending)
                     if (isPendingApproval) {
-                        IconButton(onClick = onEdit, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Filled.Edit, contentDescription = "Edit", tint = IndBlue, modifier = Modifier.size(16.dp))
+                        IconButton(
+                            onClick = onEdit,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Outlined.Edit, contentDescription = "Edit", tint = IndBlue, modifier = Modifier.size(17.dp))
                         }
                     }
 
-                    IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = IndRed, modifier = Modifier.size(16.dp))
+                    // Delete Action (Always visible and positioned at top right)
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = IndRed, modifier = Modifier.size(17.dp))
                     }
                 }
             }
@@ -1462,34 +1484,44 @@ fun TransactionBubbleCard(
                     // Interest & Principal Status Card (Requirement #6)
                     if (loan.interestRatePercent > 0.0) {
                         Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = IndCardSecondary,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, IndBlue.copy(alpha = 0.3f)),
-                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFFF8FAFC),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, IndNavyHeader.copy(alpha = 0.25f)),
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                         ) {
                             Column(
-                                modifier = Modifier.padding(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Icon(Icons.Filled.Percent, contentDescription = null, tint = IndNavyHeader, modifier = Modifier.size(13.dp))
-                                        Text(
-                                            text = "Interest: ${loan.interestRatePercent}% ${if (loan.isMonthlyInterest) "pm" else "pa"} (${interestBreakdown.daysElapsed} days elapsed)",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = IndNavyHeader
-                                        )
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFFFEF3C7),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD97706).copy(alpha = 0.8f))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(Icons.Filled.Percent, contentDescription = null, tint = Color(0xFF92400E), modifier = Modifier.size(12.dp))
+                                            Text(
+                                                text = "${loan.interestRatePercent}% ${if (loan.isMonthlyInterest) "/ month" else "/ year"} (${interestBreakdown.daysElapsed} days)",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = Color(0xFF92400E)
+                                            )
+                                        }
                                     }
                                     Text(
                                         text = "Accrued: $currencySymbol${"%,.0f".format(interestBreakdown.accruedInterest)}",
-                                        fontSize = 11.sp,
+                                        fontSize = 12.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = if (interestBreakdown.remainingInterestDue > 0) IndAmber else IndGreenDark
+                                        color = if (interestBreakdown.remainingInterestDue > 0) Color(0xFFB45309) else IndGreenDark
                                     )
                                 }
                                 Row(
@@ -1497,22 +1529,31 @@ fun TransactionBubbleCard(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        text = "Principal Due: $currencySymbol${"%,.0f".format(interestBreakdown.remainingPrincipalDue)}",
-                                        fontSize = 10.sp,
+                                        text = "Principal: $currencySymbol${"%,.0f".format(interestBreakdown.remainingPrincipalDue)}",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
                                         color = IndTextSecondary
                                     )
                                     Text(
                                         text = "Interest Due: $currencySymbol${"%,.0f".format(interestBreakdown.remainingInterestDue)}",
-                                        fontSize = 10.sp,
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (interestBreakdown.remainingInterestDue > 0) Color(0xFFB45309) else IndGreenDark
                                     )
                                 }
-                                Text(
-                                    text = "Total Money (Principal + Interest): $currencySymbol${"%,.0f".format(interestBreakdown.totalAmountWithInterest)}",
-                                    fontSize = 9.sp,
-                                    color = IndTextMuted
-                                )
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = IndCardSecondary,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = "Total Repayable (Principal + Interest): $currencySymbol${"%,.0f".format(interestBreakdown.totalAmountWithInterest)}",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = IndTextPrimary,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
                             }
                         }
                     } else if (loan.settledAmount > 0) {
@@ -1524,13 +1565,69 @@ fun TransactionBubbleCard(
                         )
                     }
 
+                    // Line-Clamped & Expandable Note / Purpose View (INDmoney style)
                     if (loan.note.isNotBlank()) {
-                        Text(
-                            text = "Purpose: ${loan.note}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = IndTextPrimary
-                        )
+                        var isNoteExpanded by remember { mutableStateOf(false) }
+                        val isLongNote = loan.note.length > 75
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = IndCardSecondary.copy(alpha = 0.7f),
+                            border = androidx.compose.foundation.BorderStroke(0.8.dp, IndBorderSubtle),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                                .animateContentSize()
+                                .clickable(enabled = isLongNote) { isNoteExpanded = !isNoteExpanded }
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Notes,
+                                        contentDescription = null,
+                                        tint = IndBlueDark,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text(
+                                        text = "Purpose / Description",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = IndBlueDark,
+                                        fontSize = 10.sp
+                                    )
+                                }
+
+                                Text(
+                                    text = loan.note,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = IndTextPrimary,
+                                    fontSize = 12.sp,
+                                    maxLines = if (isNoteExpanded) Int.MAX_VALUE else 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+
+                                if (isLongNote) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End
+                                    ) {
+                                        Text(
+                                            text = if (isNoteExpanded) "Show less ▴" else "Read more ▾",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = IndBlue,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     if (loan.dueDateTimestamp != null) {
@@ -1721,7 +1818,7 @@ fun TransactionBubbleCard(
                             Button(
                                 onClick = { onSign(false) },
                                 modifier = Modifier.fillMaxWidth().height(38.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = IndGreenDark),
+                                colors = ButtonDefaults.buttonColors(containerColor = IndBlue),
                                 shape = RoundedCornerShape(8.dp)
                             ) {
                                 Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1847,7 +1944,10 @@ fun TransactionBubbleCard(
                                         )
                                     }
 
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
                                         Text(
                                             text = "$currencySymbol${"%,.0f".format(pay.amount)}",
                                             fontSize = 13.sp,
@@ -1856,15 +1956,41 @@ fun TransactionBubbleCard(
                                         )
                                         IconButton(
                                             onClick = { onDeletePayment(loan.id, pay) },
-                                            modifier = Modifier.size(24.dp)
+                                            modifier = Modifier.size(28.dp)
                                         ) {
-                                            Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete Payment Record", tint = IndRed, modifier = Modifier.size(16.dp))
+                                            Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete Payment Record", tint = IndRed, modifier = Modifier.size(17.dp))
                                         }
                                     }
                                 }
 
                                 if (pay.note.isNotBlank()) {
-                                    Text("Note: ${pay.note}", fontSize = 11.sp, color = IndTextSecondary)
+                                    var isPayNoteExpanded by remember { mutableStateOf(false) }
+                                    val isLongPayNote = pay.note.length > 50
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .animateContentSize()
+                                            .clickable(enabled = isLongPayNote) { isPayNoteExpanded = !isPayNoteExpanded },
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Note: ${pay.note}",
+                                            fontSize = 11.sp,
+                                            color = IndTextSecondary,
+                                            maxLines = if (isPayNoteExpanded) Int.MAX_VALUE else 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (isLongPayNote) {
+                                            Text(
+                                                text = if (isPayNoteExpanded) " Less" else " More",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = IndBlue
+                                            )
+                                        }
+                                    }
                                 }
 
                                 // Mutual Payment Deletion Banner (Requirement #3)
@@ -2046,7 +2172,7 @@ fun TransactionBubbleCard(
                                                 Button(
                                                     onClick = { onApprovePayment(pay.id) },
                                                     shape = RoundedCornerShape(6.dp),
-                                                    colors = ButtonDefaults.buttonColors(containerColor = IndGreenDark),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = IndBlue),
                                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                                     modifier = Modifier.height(30.dp)
                                                 ) {
@@ -2064,12 +2190,102 @@ fun TransactionBubbleCard(
                 }
             }
 
+            // Mutual Loan Deletion Banner
+            if (loan.deletionRequestedBy.isNotBlank()) {
+                val isDelRequester = loan.deletionRequestedBy.equals(currentName, ignoreCase = true) ||
+                                     (isCreator && (loan.deletionRequestedBy == loan.createdBy || loan.deletionRequestedBy == "You")) ||
+                                     (!isCreator && (loan.deletionRequestedBy == loan.counterpartyName))
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = IndAmberLight,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, IndAmber.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isDelRequester) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Filled.Schedule, contentDescription = null, tint = Color(0xFFB45309), modifier = Modifier.size(16.dp))
+                                Text(
+                                    text = "Deletion requested by You. Awaiting confirmation from $otherPartyName.",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    color = Color(0xFFB45309)
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { onConfirmLoanDeletion(false) },
+                                modifier = Modifier.fillMaxWidth().height(30.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("Cancel Deletion Request", fontSize = 10.sp, color = IndTextSecondary)
+                            }
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Filled.Warning, contentDescription = null, tint = IndRed, modifier = Modifier.size(16.dp))
+                                Text(
+                                    text = "⚠️ ${loan.deletionRequestedBy} requested to delete this agreement",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = IndRed
+                                )
+                            }
+                            Text("Do you confirm deleting this entire transaction record of ₹${"%,.0f".format(loan.totalAmount)}?", fontSize = 11.sp, color = IndTextPrimary)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { onConfirmLoanDeletion(false) },
+                                    modifier = Modifier.weight(1f).height(32.dp),
+                                    shape = RoundedCornerShape(6.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Decline", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndRed)
+                                }
+                                Button(
+                                    onClick = { onConfirmLoanDeletion(true) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = IndRed),
+                                    modifier = Modifier.weight(1f).height(32.dp),
+                                    shape = RoundedCornerShape(6.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Confirm Delete 🗑️", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Settlement / Payment Actions
-            if (!isSettled && loan.userSigned && loan.counterpartySigned) {
+            if (!isSettled) {
                 if (isPendingSettlement) {
-                    val currentUserName = userProfile?.name?.trim() ?: "You"
-                    val isRequester = loan.settlementRequestedBy.equals(currentUserName, ignoreCase = true) ||
-                                      (loan.settlementRequestedBy == "You" && currentUserName == "You")
+                    val isSettlementRequester = if (loan.settlementRequestedBy.isBlank()) false else {
+                        val req = loan.settlementRequestedBy.trim()
+                        val isReqCreator = req.equals(loan.createdBy.trim(), ignoreCase = true) || req.equals("You", ignoreCase = true) || req.equals("CREATOR", ignoreCase = true)
+                        val isReqCounterparty = req.equals(loan.counterpartyName.trim(), ignoreCase = true) || req.equals("COUNTERPARTY", ignoreCase = true)
+                        if (isCreator) {
+                            isReqCreator || req.equals(currentName, ignoreCase = true)
+                        } else {
+                            isReqCounterparty || req.equals(currentName, ignoreCase = true)
+                        }
+                    }
 
                     Surface(
                         shape = RoundedCornerShape(8.dp),
@@ -2081,20 +2297,20 @@ fun TransactionBubbleCard(
                             modifier = Modifier.padding(10.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            if (isRequester) {
+                            if (isSettlementRequester) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Icon(Icons.Filled.Schedule, contentDescription = null, tint = Color(0xFFB45309), modifier = Modifier.size(16.dp))
                                     Text(
-                                        text = "Settlement requested by You. Awaiting confirmation from ${loan.counterpartyName}.",
+                                        text = "Settlement requested by You. Awaiting confirmation from $otherPartyName.",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp,
                                         color = Color(0xFFB45309)
                                     )
                                 }
-                                Text("Dual Approval: Counterparty must review and approve this settlement before it is closed.", fontSize = 10.sp, color = IndTextSecondary)
+                                Text("Dual Approval: $otherPartyName must review and approve this settlement before it is closed.", fontSize = 10.sp, color = IndTextSecondary)
                                 OutlinedButton(
                                     onClick = { onConfirmSettlement(false) },
                                     modifier = Modifier.fillMaxWidth().height(32.dp),
@@ -2110,7 +2326,7 @@ fun TransactionBubbleCard(
                                 ) {
                                     Icon(Icons.Filled.Handshake, contentDescription = null, tint = Color(0xFFB45309), modifier = Modifier.size(16.dp))
                                     Text(
-                                        text = "⚠️ ${loan.settlementRequestedBy} requested to settle this loan",
+                                        text = "🤝 ${loan.settlementRequestedBy} requested to settle this loan",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
                                         color = Color(0xFFB45309)
@@ -2131,7 +2347,7 @@ fun TransactionBubbleCard(
 
                                     Button(
                                         onClick = { onConfirmSettlement(true) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = IndGreenDark),
+                                        colors = ButtonDefaults.buttonColors(containerColor = IndBlue),
                                         modifier = Modifier.weight(1f).height(34.dp),
                                         shape = RoundedCornerShape(6.dp)
                                     ) {

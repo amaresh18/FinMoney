@@ -4,12 +4,10 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.util.Calendar
 
 @Database(
     entities = [
@@ -20,7 +18,7 @@ import java.util.Calendar
         LoanTransaction::class,
         AppNotification::class
     ],
-    version = 9,
+    version = 1,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -31,40 +29,36 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
-        fun getDatabase(context: Context, scope: CoroutineScope): AppDatabase {
+        fun getDatabase(context: Context, scope: CoroutineScope? = null): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "finmoney_database"
                 )
-                .addCallback(AppDatabaseCallback(scope))
-                .fallbackToDestructiveMigration(dropAllTables = true)
-                .build()
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
-                instance
-            }
-        }
 
-        private class AppDatabaseCallback(
-            private val scope: CoroutineScope
-        ) : RoomDatabase.Callback() {
-            override fun onCreate(db: SupportSQLiteDatabase) {
-                super.onCreate(db)
-                INSTANCE?.let { database ->
-                    scope.launch(Dispatchers.IO) {
-                        populateInitialData(database.finMoneyDao())
+                // Populate default custom categories if needed
+                scope?.launch(Dispatchers.IO) {
+                    val dao = instance.finMoneyDao()
+                    val existing = dao.getUserProfileDirect()
+                    if (existing == null) {
+                        dao.insertOrUpdateUserProfile(
+                            UserProfile(
+                                id = 1,
+                                name = "You",
+                                email = "",
+                                phoneNumber = "",
+                                isOtpVerified = true,
+                                isEmailVerified = true
+                            )
+                        )
                     }
                 }
-            }
 
-            suspend fun populateInitialData(dao: FinMoneyDao) {
-                // Default Custom Categories only for clean production onboarding
-                dao.insertCustomCategory(CustomCategory(name = "House Rent", iconName = "home", colorHex = "#38BDF8", isDefault = true))
-                dao.insertCustomCategory(CustomCategory(name = "Utilities & Bills", iconName = "flash", colorHex = "#F59E0B", isDefault = true))
-                dao.insertCustomCategory(CustomCategory(name = "Insurance Premium", iconName = "shield", colorHex = "#EC4899", isDefault = true))
-                dao.insertCustomCategory(CustomCategory(name = "Child Education", iconName = "school", colorHex = "#8B5CF6", isDefault = true))
-                dao.insertCustomCategory(CustomCategory(name = "Subscriptions", iconName = "tv", colorHex = "#6366F1", isDefault = true))
+                instance
             }
         }
     }

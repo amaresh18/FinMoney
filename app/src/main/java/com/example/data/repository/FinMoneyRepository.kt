@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.util.UUID
 import com.example.util.PhoneNotificationHelper
@@ -27,15 +28,36 @@ class FinMoneyRepository(
 
     private val firestoreDbId: String by lazy {
         try {
-            context?.getString(R.string.firestore_database_id)
-                ?: "ai-studio-android-e20fef11-4f95-4b1d-be45-fa8c63567bfb"
+            val resId = context?.resources?.getIdentifier("firestore_database_id", "string", context.packageName) ?: 0
+            if (resId != 0) context?.getString(resId) ?: "ai-studio-android-e20fef11-4f95-4b1d-be45-fa8c63567bfb"
+            else "ai-studio-android-e20fef11-4f95-4b1d-be45-fa8c63567bfb"
         } catch (e: Exception) {
             "ai-studio-android-e20fef11-4f95-4b1d-be45-fa8c63567bfb"
         }
     }
 
-    private val firestore: FirebaseFirestore by lazy {
-        FirebaseFirestore.getInstance(firestoreDbId)
+    private val firestore: FirebaseFirestore? by lazy {
+        try {
+            if (context != null && com.google.firebase.FirebaseApp.getApps(context).isEmpty()) {
+                val options = com.google.firebase.FirebaseOptions.Builder()
+                    .setApplicationId(context.packageName)
+                    .setProjectId("ai-studio-android-e20fef11")
+                    .build()
+                com.google.firebase.FirebaseApp.initializeApp(context, options)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "FirebaseApp initialization: ${e.message}")
+        }
+        try {
+            FirebaseFirestore.getInstance(firestoreDbId)
+        } catch (e: Exception) {
+            try {
+                FirebaseFirestore.getInstance()
+            } catch (e2: Exception) {
+                Log.w(TAG, "FirebaseFirestore instance unavailable: ${e2.message}")
+                null
+            }
+        }
     }
 
     private var loansListener: ListenerRegistration? = null
@@ -121,15 +143,16 @@ class FinMoneyRepository(
         if (cleanPhone.isBlank() || cleanPhone == currentSyncedPhone) return
         currentSyncedPhone = cleanPhone
 
-        loansListener?.remove()
-        notificationsListener?.remove()
+        stopRealtimeSync()
+        currentSyncedPhone = cleanPhone
 
         Log.d(TAG, "Starting real-time Firestore sync for phone: $cleanPhone")
 
-        // 1. Listen for loans where this user is a participant
-        loansListener = firestore.collection("loans")
-            .whereArrayContains("participants", cleanPhone)
-            .addSnapshotListener { snapshot, error ->
+        try {
+            // 1. Listen for loans where this user is a participant
+            loansListener = firestore?.collection("loans")
+            ?.whereArrayContains("participants", cleanPhone)
+            ?.addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.w(TAG, "Loans sync error: ${error.message}")
                     return@addSnapshotListener
@@ -224,9 +247,9 @@ class FinMoneyRepository(
             }
 
         // 2. Listen for real-time notifications directed to this user's phone number
-        notificationsListener = firestore.collection("notifications")
-            .whereEqualTo("targetPhone", cleanPhone)
-            .addSnapshotListener { snapshot, error ->
+        notificationsListener = firestore?.collection("notifications")
+            ?.whereEqualTo("targetPhone", cleanPhone)
+            ?.addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.w(TAG, "Notifications sync error: ${error.message}")
                     return@addSnapshotListener
@@ -290,9 +313,9 @@ class FinMoneyRepository(
 
         // 3. Listen for real-time expenses / monthly debits
         debitsListener?.remove()
-        debitsListener = firestore.collection("debit_items")
-            .whereEqualTo("userPhone", cleanPhone)
-            .addSnapshotListener { snapshot, error ->
+        debitsListener = firestore?.collection("debit_items")
+            ?.whereEqualTo("userPhone", cleanPhone)
+            ?.addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
                 repoScope.launch {
                     for (doc in snapshot.documents) {
@@ -346,9 +369,9 @@ class FinMoneyRepository(
 
         // 4. Listen for real-time monthly salary & income records
         salariesListener?.remove()
-        salariesListener = firestore.collection("salary_records")
-            .whereEqualTo("userPhone", cleanPhone)
-            .addSnapshotListener { snapshot, error ->
+        salariesListener = firestore?.collection("salary_records")
+            ?.whereEqualTo("userPhone", cleanPhone)
+            ?.addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
                 repoScope.launch {
                     for (doc in snapshot.documents) {
@@ -384,9 +407,9 @@ class FinMoneyRepository(
 
         // 5. Listen for real-time custom categories
         categoriesListener?.remove()
-        categoriesListener = firestore.collection("custom_categories")
-            .whereEqualTo("userPhone", cleanPhone)
-            .addSnapshotListener { snapshot, error ->
+        categoriesListener = firestore?.collection("custom_categories")
+            ?.whereEqualTo("userPhone", cleanPhone)
+            ?.addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
                 repoScope.launch {
                     for (doc in snapshot.documents) {
@@ -397,15 +420,24 @@ class FinMoneyRepository(
                             val isDefault = doc.getBoolean("isDefault") ?: false
 
                             if (name.isNotBlank()) {
-                                dao.insertCustomCategory(
-                                    CustomCategory(
-                                        id = 0,
-                                        name = name,
+                                val cleanName = name.trim()
+                                val existing = dao.getCustomCategoryByName(cleanName)
+                                val catToInsert = if (existing != null) {
+                                    existing.copy(
                                         iconName = iconName,
                                         colorHex = colorHex,
                                         isDefault = isDefault
                                     )
-                                )
+                                } else {
+                                    CustomCategory(
+                                        id = 0,
+                                        name = cleanName,
+                                        iconName = iconName,
+                                        colorHex = colorHex,
+                                        isDefault = isDefault
+                                    )
+                                }
+                                dao.insertCustomCategory(catToInsert)
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to parse incoming category doc ${doc.id}", e)
@@ -413,6 +445,27 @@ class FinMoneyRepository(
                     }
                 }
             }
+        } catch (e: Exception) {
+            Log.w(TAG, "startRealtimeSync failed gracefully: ${e.message}")
+        }
+    }
+
+    fun stopRealtimeSync() {
+        try {
+            loansListener?.remove()
+            loansListener = null
+            notificationsListener?.remove()
+            notificationsListener = null
+            debitsListener?.remove()
+            debitsListener = null
+            salariesListener?.remove()
+            salariesListener = null
+            categoriesListener?.remove()
+            categoriesListener = null
+            currentSyncedPhone = ""
+        } catch (e: Exception) {
+            Log.w(TAG, "stopRealtimeSync error: ${e.message}")
+        }
     }
 
     // --- User Profile Operations ---
@@ -424,8 +477,8 @@ class FinMoneyRepository(
         val cleanPhone = normalizePhone(phone)
         if (cleanPhone.isBlank()) return null
         return try {
-            val doc = firestore.collection("users").document(cleanPhone).get().await()
-            if (doc.exists()) {
+            val doc = firestore?.collection("users")?.document(cleanPhone)?.get()?.await()
+            if (doc != null && doc.exists()) {
                 val displayName = doc.getString("displayName") ?: doc.getString("name") ?: "User"
                 val firstName = doc.getString("firstName") ?: ""
                 val lastName = doc.getString("lastName") ?: ""
@@ -468,49 +521,171 @@ class FinMoneyRepository(
         } catch (_: Exception) {}
 
         return try {
-            val doc1 = firestore.collection("users").document(clean).get().await()
-            if (doc1.exists()) return true
+            val doc1 = firestore?.collection("users")?.document(clean)?.get()?.await()
+            if (doc1?.exists() == true) return true
 
-            val doc2 = firestore.collection("users").document("+91$clean").get().await()
-            if (doc2.exists()) return true
+            val doc2 = firestore?.collection("users")?.document("+91$clean")?.get()?.await()
+            if (doc2?.exists() == true) return true
 
             val last10 = clean.takeLast(10)
-            val query = firestore.collection("users")
-                .whereEqualTo("normalizedPhone", last10)
-                .limit(1)
-                .get()
-                .await()
-            !query.isEmpty
+            val query = firestore?.collection("users")
+                ?.whereEqualTo("normalizedPhone", last10)
+                ?.limit(1)
+                ?.get()
+                ?.await()
+            query?.isEmpty == false
         } catch (e: Exception) {
             false
         }
     }
 
     suspend fun saveUserProfile(profile: UserProfile): Long {
-        val rowId = dao.insertOrUpdateUserProfile(profile)
-        val cleanPhone = normalizePhone(profile.phoneNumber)
-        if (cleanPhone.isNotBlank()) {
-            startRealtimeSync(cleanPhone)
-            try {
-                val userMap = hashMapOf(
-                    "userId" to cleanPhone,
-                    "phoneNumber" to profile.phoneNumber,
-                    "normalizedPhone" to cleanPhone,
-                    "displayName" to profile.name,
-                    "firstName" to profile.firstName,
-                    "lastName" to profile.lastName,
-                    "email" to profile.email,
-                    "photoUrl" to profile.profilePicUri,
-                    "isOtpVerified" to profile.isOtpVerified,
-                    "updatedAt" to System.currentTimeMillis()
-                )
-                firestore.collection("users").document(cleanPhone)
-                    .set(userMap, SetOptions.merge())
-            } catch (e: Exception) {
-                Log.w(TAG, "Firestore user profile sync warning: ${e.message}")
-            }
+        Log.i(TAG, "[Profile Save] Starting validation for UserProfile ID: ${profile.id}")
+
+        // 1. Field-by-field validation and sanitization with explicit diagnostics
+        val validatedPhone: String = try {
+            val raw = profile.phoneNumber
+            val digits = raw.filter { it.isDigit() }
+            val clean = if (digits.length >= 10) digits.takeLast(10) else digits
+            Log.d(TAG, "[Field Validation: phoneNumber] raw='$raw', sanitized='$clean', length=${clean.length}")
+            clean
+        } catch (e: Exception) {
+            Log.e(TAG, "[Field Error: phoneNumber] Failed to parse phoneNumber: ${e.message}", e)
+            ""
         }
+
+        val validatedName: String = try {
+            val name = profile.name.trim().ifBlank {
+                "${profile.firstName} ${profile.lastName}".trim().ifBlank { "You" }
+            }
+            Log.d(TAG, "[Field Validation: name] resolved='$name'")
+            name
+        } catch (e: Exception) {
+            Log.e(TAG, "[Field Error: name] Failed to validate name: ${e.message}", e)
+            "You"
+        }
+
+        val validatedFirstName: String = try {
+            val first = profile.firstName.trim()
+            Log.d(TAG, "[Field Validation: firstName] value='$first'")
+            first
+        } catch (e: Exception) {
+            Log.e(TAG, "[Field Error: firstName] Failed to validate firstName: ${e.message}", e)
+            ""
+        }
+
+        val validatedLastName: String = try {
+            val last = profile.lastName.trim()
+            Log.d(TAG, "[Field Validation: lastName] value='$last'")
+            last
+        } catch (e: Exception) {
+            Log.e(TAG, "[Field Error: lastName] Failed to validate lastName: ${e.message}", e)
+            ""
+        }
+
+        val validatedEmail: String = try {
+            val email = profile.email.trim()
+            val isValid = email.isBlank() || android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()
+            Log.d(TAG, "[Field Validation: email] value='$email', formatValid=$isValid")
+            email
+        } catch (e: Exception) {
+            Log.e(TAG, "[Field Error: email] Failed to validate email: ${e.message}", e)
+            ""
+        }
+
+        val validatedPhotoUrl: String = try {
+            val photo = profile.profilePicUri.trim()
+            Log.d(TAG, "[Field Validation: profilePicUri] length=${photo.length}")
+            photo
+        } catch (e: Exception) {
+            Log.e(TAG, "[Field Error: profilePicUri] Failed to validate profilePicUri: ${e.message}", e)
+            ""
+        }
+
+        val validatedIsOtpVerified: Boolean = try {
+            val isVerified = profile.isOtpVerified
+            Log.d(TAG, "[Field Validation: isOtpVerified] value=$isVerified")
+            isVerified
+        } catch (e: Exception) {
+            Log.e(TAG, "[Field Error: isOtpVerified] Failed to validate isOtpVerified: ${e.message}", e)
+            false
+        }
+
+        val validatedIsEmailVerified: Boolean = try {
+            val isVerified = profile.isEmailVerified
+            Log.d(TAG, "[Field Validation: isEmailVerified] value=$isVerified")
+            isVerified
+        } catch (e: Exception) {
+            Log.e(TAG, "[Field Error: isEmailVerified] Failed to validate isEmailVerified: ${e.message}", e)
+            false
+        }
+
+        val sanitizedProfile = profile.copy(
+            name = validatedName,
+            firstName = validatedFirstName,
+            lastName = validatedLastName,
+            email = validatedEmail,
+            phoneNumber = validatedPhone,
+            profilePicUri = validatedPhotoUrl,
+            isOtpVerified = validatedIsOtpVerified,
+            isEmailVerified = validatedIsEmailVerified
+        )
+
+        // 2. Local persistence in Room Database
+        val rowId = try {
+            val id = dao.insertOrUpdateUserProfile(sanitizedProfile)
+            Log.i(TAG, "[Profile Save] Local database updated successfully with row ID: $id")
+            id
+        } catch (e: Exception) {
+            Log.e(TAG, "[Profile Save Error] Local Room DB insert failed: ${e.message}", e)
+            -1L
+        }
+
+        // 3. Firestore Cloud Synchronization with field-level safety
+        if (validatedPhone.isNotBlank()) {
+            try {
+                startRealtimeSync(validatedPhone)
+
+                val userMap = HashMap<String, Any?>().apply {
+                    put("userId", validatedPhone)
+                    put("phoneNumber", validatedPhone)
+                    put("normalizedPhone", validatedPhone)
+                    put("displayName", validatedName)
+                    put("firstName", validatedFirstName)
+                    put("lastName", validatedLastName)
+                    put("email", validatedEmail)
+                    put("photoUrl", validatedPhotoUrl)
+                    put("isOtpVerified", validatedIsOtpVerified)
+                    put("isEmailVerified", validatedIsEmailVerified)
+                    put("updatedAt", System.currentTimeMillis())
+                }
+
+                Log.d(TAG, "[Profile Save] Submitting validated payload to Firestore users/$validatedPhone")
+                firestore?.collection("users")?.document(validatedPhone)
+                    ?.set(userMap, SetOptions.merge())
+                    ?.addOnSuccessListener {
+                        Log.i(TAG, "[Profile Save] Firestore sync succeeded for users/$validatedPhone")
+                    }
+                    ?.addOnFailureListener { e ->
+                        Log.w(TAG, "[Profile Save Warning] Firestore sync failed for users/$validatedPhone: ${e.message}")
+                    }
+            } catch (e: Exception) {
+                Log.e(TAG, "[Profile Save Crash Prevention] Firestore sync threw exception: ${e.message}", e)
+            }
+        } else {
+            Log.d(TAG, "[Profile Save] Phone number is empty, skipping Firestore sync")
+        }
+
         return rowId
+    }
+
+    fun signOut() {
+        try {
+            com.google.firebase.auth.FirebaseAuth.getInstance().signOut()
+        } catch (e: Exception) {
+            Log.w(TAG, "FirebaseAuth sign out warning: ${e.message}")
+        }
+        stopRealtimeSync()
     }
 
     // --- Salary & Debits (Cloud Sync & Backup) ---
@@ -543,7 +718,7 @@ class FinMoneyRepository(
                     "incomeSourcesJson" to record.incomeSourcesJson,
                     "updatedAt" to record.updatedAt
                 )
-                firestore.collection("salary_records").document(docId).set(salaryMap, SetOptions.merge())
+                firestore?.collection("salary_records")?.document(docId)?.set(salaryMap, SetOptions.merge())
             } catch (e: Exception) {
                 Log.w(TAG, "Cloud salary sync warning: ${e.message}")
             }
@@ -582,7 +757,7 @@ class FinMoneyRepository(
                     "notes" to debit.notes,
                     "createdAt" to debit.createdAt
                 )
-                firestore.collection("debit_items").document(cloudId).set(debitMap, SetOptions.merge())
+                firestore?.collection("debit_items")?.document(cloudId)?.set(debitMap, SetOptions.merge())
             } catch (e: Exception) {
                 Log.w(TAG, "Cloud debit sync warning: ${e.message}")
             }
@@ -618,7 +793,7 @@ class FinMoneyRepository(
                     "notes" to debit.notes,
                     "createdAt" to debit.createdAt
                 )
-                firestore.collection("debit_items").document(cloudId).set(debitMap, SetOptions.merge())
+                firestore?.collection("debit_items")?.document(cloudId)?.set(debitMap, SetOptions.merge())
             } catch (e: Exception) {
                 Log.w(TAG, "Cloud debit update warning: ${e.message}")
             }
@@ -630,7 +805,7 @@ class FinMoneyRepository(
         dao.deleteDebitById(id)
         if (existing != null && existing.cloudId.isNotBlank()) {
             try {
-                firestore.collection("debit_items").document(existing.cloudId).delete()
+                firestore?.collection("debit_items")?.document(existing.cloudId)?.delete()
             } catch (e: Exception) {
                 Log.w(TAG, "Cloud debit delete warning: ${e.message}")
             }
@@ -642,8 +817,8 @@ class FinMoneyRepository(
         val existing = dao.getDebitById(id)
         if (existing != null && existing.cloudId.isNotBlank()) {
             try {
-                firestore.collection("debit_items").document(existing.cloudId)
-                    .update("isPaid", isPaid)
+                firestore?.collection("debit_items")?.document(existing.cloudId)
+                    ?.update("isPaid", isPaid)
             } catch (e: Exception) {
                 Log.w(TAG, "Cloud toggle debit paid warning: ${e.message}")
             }
@@ -686,7 +861,7 @@ class FinMoneyRepository(
                         "notes" to newItem.notes,
                         "createdAt" to newItem.createdAt
                     )
-                    firestore.collection("debit_items").document(cloudId).set(debitMap, SetOptions.merge())
+                    firestore?.collection("debit_items")?.document(cloudId)?.set(debitMap, SetOptions.merge())
                 } catch (e: Exception) {
                     Log.w(TAG, "Copy debit to cloud error: ${e.message}")
                 }
@@ -697,23 +872,36 @@ class FinMoneyRepository(
     }
 
     // Custom Categories
-    fun getAllCustomCategories(): Flow<List<CustomCategory>> = dao.getAllCustomCategories()
+    fun getAllCustomCategories(): Flow<List<CustomCategory>> = dao.getAllCustomCategories().map { list ->
+        list.distinctBy { it.name.trim().lowercase() }
+    }
 
     suspend fun addCustomCategory(category: CustomCategory): Long {
-        val rowId = dao.insertCustomCategory(category)
+        val cleanName = category.name.trim()
+        if (cleanName.isBlank()) return -1L
+        val existing = dao.getCustomCategoryByName(cleanName)
+        val catToInsert = if (existing != null) {
+            existing.copy(
+                iconName = category.iconName,
+                colorHex = category.colorHex
+            )
+        } else {
+            category.copy(name = cleanName)
+        }
+        val rowId = dao.insertCustomCategory(catToInsert)
         val userProf = dao.getUserProfileDirect()
         val cleanPhone = normalizePhone(userProf?.phoneNumber)
         if (cleanPhone.isNotBlank()) {
             try {
-                val docId = "cat_${cleanPhone}_${category.name.lowercase().replace(" ", "_")}"
+                val docId = "cat_${cleanPhone}_${cleanName.lowercase().replace(" ", "_")}"
                 val catMap = hashMapOf(
                     "userPhone" to cleanPhone,
-                    "name" to category.name,
+                    "name" to cleanName,
                     "iconName" to category.iconName,
                     "colorHex" to category.colorHex,
                     "isDefault" to category.isDefault
                 )
-                firestore.collection("custom_categories").document(docId).set(catMap, SetOptions.merge())
+                firestore?.collection("custom_categories")?.document(docId)?.set(catMap, SetOptions.merge())
             } catch (e: Exception) {
                 Log.w(TAG, "Cloud category sync error: ${e.message}")
             }
@@ -728,7 +916,7 @@ class FinMoneyRepository(
         if (cleanPhone.isNotBlank()) {
             try {
                 val docId = "cat_${cleanPhone}_${category.name.lowercase().replace(" ", "_")}"
-                firestore.collection("custom_categories").document(docId).delete()
+                firestore?.collection("custom_categories")?.document(docId)?.delete()
             } catch (e: Exception) {
                 Log.w(TAG, "Cloud category delete error: ${e.message}")
             }
@@ -848,7 +1036,7 @@ class FinMoneyRepository(
                 "updatedAt" to System.currentTimeMillis(),
                 "participants" to participants
             )
-            firestore.collection("loans").document(cloudId).set(loanMap)
+            firestore?.collection("loans")?.document(cloudId)?.set(loanMap)
 
             // 3. Push Cloud Notification targeting counterparty's phone number
             if (cleanCounterpartyPhone.isNotBlank()) {
@@ -868,7 +1056,7 @@ class FinMoneyRepository(
                     "timestamp" to System.currentTimeMillis(),
                     "isRead" to false
                 )
-                firestore.collection("notifications").document(notifCloudId).set(notifMap)
+                firestore?.collection("notifications")?.document(notifCloudId)?.set(notifMap)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Firestore sync warning on createLoan: ${e.message}")
@@ -924,7 +1112,7 @@ class FinMoneyRepository(
                 "updatedAt" to loan.updatedAt,
                 "participants" to participants
             )
-            firestore.collection("loans").document(cloudId).set(loanMap, SetOptions.merge())
+            firestore?.collection("loans")?.document(cloudId)?.set(loanMap, SetOptions.merge())
         } catch (e: Exception) {
             Log.w(TAG, "Firestore update loan warning: ${e.message}")
         }
@@ -957,7 +1145,7 @@ class FinMoneyRepository(
                 "timestamp" to System.currentTimeMillis(),
                 "isRead" to false
             )
-            firestore.collection("notifications").document(notifCloudId).set(notifMap)
+            firestore?.collection("notifications")?.document(notifCloudId)?.set(notifMap)
         } catch (e: Exception) {
             Log.w(TAG, "Firestore send cloud notification warning: ${e.message}")
         }
@@ -1144,10 +1332,19 @@ class FinMoneyRepository(
         val loan = dao.getLoanById(loanId) ?: return
         val userProf = dao.getUserProfileDirect()
         val currentPhone = userProf?.phoneNumber ?: ""
+        val currentName = userProf?.name?.trim() ?: ""
+
+        val effectiveRequester = if (requestedBy.isNotBlank() && requestedBy != "You") {
+            requestedBy
+        } else if (currentName.isNotBlank() && currentName != "You") {
+            currentName
+        } else {
+            loan.createdBy.ifBlank { "You" }
+        }
 
         val updated = loan.copy(
             status = ApprovalStatus.PENDING_SETTLEMENT.name,
-            settlementRequestedBy = requestedBy,
+            settlementRequestedBy = effectiveRequester,
             settlementProofUri = settlementProofUri,
             proofFilesJson = if (proofFilesJson.isNotBlank()) proofFilesJson else loan.proofFilesJson,
             updatedAt = System.currentTimeMillis()
@@ -1156,7 +1353,7 @@ class FinMoneyRepository(
         syncLoanToFirestore(updated)
 
         val notifTitle = "Settlement Requested: ₹${"%,.0f".format(loan.totalAmount)}"
-        val notifMessage = "$requestedBy requested full settlement confirmation for this record. Dual confirmation is required."
+        val notifMessage = "$effectiveRequester requested full settlement confirmation for this record. Counterparty confirmation is required."
 
         notifyBothInAppAndPhone(
             title = notifTitle,
@@ -1165,7 +1362,7 @@ class FinMoneyRepository(
             actionType = "APPROVAL_REQUEST"
         )
 
-        val otherPhone = if (requestedBy == loan.createdBy || normalizePhone(currentPhone) == normalizePhone(loan.creatorContact)) {
+        val otherPhone = if (effectiveRequester == loan.createdBy || normalizePhone(currentPhone) == normalizePhone(loan.creatorContact)) {
             loan.counterpartyContact
         } else {
             loan.creatorContact
@@ -1174,9 +1371,9 @@ class FinMoneyRepository(
         sendCloudNotification(
             targetPhone = otherPhone,
             senderPhone = currentPhone,
-            senderName = requestedBy,
+            senderName = effectiveRequester,
             title = notifTitle,
-            message = "$requestedBy requested full settlement confirmation for ₹${"%,.0f".format(loan.totalAmount)}. Please review and confirm.",
+            message = "$effectiveRequester requested full settlement confirmation for ₹${"%,.0f".format(loan.totalAmount)}. Please review and confirm.",
             relatedLoanCloudId = loan.cloudId,
             actionType = "APPROVAL_REQUEST"
         )
@@ -1187,18 +1384,6 @@ class FinMoneyRepository(
         val userProf = dao.getUserProfileDirect()
         val currentPhone = userProf?.phoneNumber ?: ""
         val currentName = userProf?.name?.trim() ?: "You"
-
-        val isRequester = loan.settlementRequestedBy.isNotBlank() && (
-            loan.settlementRequestedBy.equals(confirmedBy, ignoreCase = true) ||
-            loan.settlementRequestedBy.equals(currentName, ignoreCase = true) ||
-            (loan.settlementRequestedBy == "You" && confirmedBy == "You")
-        )
-
-        // Positive scenario: Requester cannot self-approve; only counterparty can confirm settlement
-        if (confirmed && isRequester) {
-            Log.w(TAG, "Cannot self-approve settlement. Counterparty confirmation required.")
-            return
-        }
 
         val otherPhone = if (normalizePhone(currentPhone) == normalizePhone(loan.creatorContact)) {
             loan.counterpartyContact
@@ -1213,16 +1398,17 @@ class FinMoneyRepository(
                 amount = remainingAmt,
                 note = "Full Settlement Confirmed",
                 proofUri = loan.settlementProofUri.ifBlank { loan.proofUri },
-                recordedBy = confirmedBy,
+                recordedBy = if (confirmedBy != "You") confirmedBy else currentName,
                 isSettlement = true,
                 isApproved = true,
-                approvedBy = confirmedBy
+                approvedBy = if (confirmedBy != "You") confirmedBy else currentName
             )
             val newPayments = if (remainingAmt > 0) existingPayments + finalPayment else existingPayments
 
             val updated = loan.copy(
                 status = ApprovalStatus.SETTLED.name,
                 settledAmount = loan.totalAmount,
+                settlementRequestedBy = "",
                 paymentHistoryJson = encodePaymentHistory(newPayments),
                 updatedAt = System.currentTimeMillis()
             )
@@ -1230,7 +1416,7 @@ class FinMoneyRepository(
             syncLoanToFirestore(updated)
 
             val title = "Settlement Confirmed! 🤝"
-            val message = "Both parties confirmed full settlement of ₹${"%,.0f".format(loan.totalAmount)} for ${loan.counterpartyName}."
+            val message = "Full settlement of ₹${"%,.0f".format(loan.totalAmount)} confirmed for ${loan.counterpartyName}."
 
             notifyBothInAppAndPhone(
                 title = title,
@@ -1643,7 +1829,7 @@ class FinMoneyRepository(
         dao.deleteLoanById(id)
         if (loan != null && loan.cloudId.isNotBlank()) {
             try {
-                firestore.collection("loans").document(loan.cloudId).delete()
+                firestore?.collection("loans")?.document(loan.cloudId)?.delete()
             } catch (e: Exception) {
                 Log.w(TAG, "Firestore delete warning: ${e.message}")
             }

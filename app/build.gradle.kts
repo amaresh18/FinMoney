@@ -3,6 +3,7 @@ import java.util.Base64
 
 plugins {
   alias(libs.plugins.android.application)
+  alias(libs.plugins.kotlin.android)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.secrets)
@@ -11,14 +12,14 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk = 36
 
   defaultConfig {
     applicationId = "com.aistudio.finmoney.vqpz"
     minSdk = 24
     targetSdk = 36
-    versionCode = 35
-    versionName = "35.0"
+    versionCode = 46
+    versionName = "46.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -56,17 +57,32 @@ android {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      signingConfig = if (file(keystorePath).exists()) {
-        signingConfigs.getByName("release")
+      val releaseKeystoreFile = file(keystorePath)
+      if (releaseKeystoreFile.exists()) {
+        signingConfig = signingConfigs.getByName("release")
+        logger.lifecycle("=================================================================")
+        logger.lifecycle("[SIGNING INFO] RELEASE SIGNING CONFIGURATION ACTIVE")
+        logger.lifecycle("               Production Keystore File: ${releaseKeystoreFile.absolutePath}")
+        logger.lifecycle("               Status: Signed with Production Release Keystore.")
+        logger.lifecycle("=================================================================")
       } else {
-        signingConfigs.getByName("debugConfig")
+        signingConfig = signingConfigs.getByName("debugConfig")
+        logger.lifecycle("=================================================================")
+        logger.lifecycle("[SIGNING WARNING] FALLBACK TO DEBUG SIGNING CONFIGURATION")
+        logger.lifecycle("                  Production Keystore File Not Found: $keystorePath")
+        logger.lifecycle("                  Status: Artifact will be signed with DEBUG keystore.")
+        logger.lifecycle("                  Action: Provide 'my-upload-key.jks' or 'RELEASE_KEYSTORE_BASE64' secret for Play Console release.")
+        logger.lifecycle("=================================================================")
       }
     }
     debug { signingConfig = signingConfigs.getByName("debugConfig") }
   }
   compileOptions {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+  }
+  kotlinOptions {
+    jvmTarget = "17"
   }
   buildFeatures {
     compose = true
@@ -122,8 +138,8 @@ dependencies {
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
   implementation(libs.googleid)
-  implementation(libs.firebase.appcheck.recaptcha)
-  implementation(libs.firebase.appcheck.debug)
+  // implementation(libs.firebase.appcheck.recaptcha)
+  // implementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.logging.interceptor)

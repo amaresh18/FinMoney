@@ -1,3 +1,13 @@
+# ==============================================================================
+# GitHub Actions CI Workflow for FinMoney Android Release (AAB & APK)
+#
+# NOTE ON GITHUB ACTIONS BILLING:
+# - Public GitHub repositories have UNLIMITED FREE runner minutes for standard Linux runners.
+# - If your repository is private and fails due to spending limits or billing restrictions,
+#   you can either switch the repository to "Public" in Settings -> Change Visibility,
+#   or use Codemagic Free Tier (mac_mini_m2) as configured in codemagic.yaml.
+# ==============================================================================
+
 name: Build Android App (AAB & APK)
 
 on:
@@ -24,14 +34,36 @@ jobs:
       with:
         gradle-version: '9.3.1'
 
-    - name: Build Release App Bundle (AAB)
+    - name: Configure Keystore & Signing Secrets
+      env:
+        RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+      run: |
+        # Decode production release keystore if present in repository secrets
+        if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
+          echo "[CI] Decoding release keystore secret into my-upload-key.jks..."
+          python3 -c "import base64, os; open('my-upload-key.jks', 'wb').write(base64.b64decode(os.environ['RELEASE_KEYSTORE_BASE64'].strip()))" || true
+        fi
+        
+        if [ -f "my-upload-key.jks" ]; then
+          echo "[CI] SUCCESS: Release keystore detected. Build will be signed with production release key."
+        else
+          echo "[CI] NOTICE: No 'my-upload-key.jks' found. Decoding fallback debug keystore."
+          if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
+            python3 -c "import base64; open('debug.keystore', 'wb').write(base64.b64decode(open('debug.keystore.base64').read().strip()))" || true
+          fi
+        fi
+
+    - name: Clean previous build artifacts
       run: |
         chmod +x ./gradlew
-        ./gradlew :app:bundleRelease --stacktrace
+        ./gradlew clean --no-daemon
 
-    - name: Build Release APK
+    - name: Build Release App Bundle (AAB) & APK
+      env:
+        STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
-        ./gradlew :app:assembleRelease --stacktrace
+        ./gradlew :app:bundleRelease :app:assembleRelease --no-daemon --stacktrace
 
     - name: Upload AAB Bundle Artifact
       uses: actions/upload-artifact@v4

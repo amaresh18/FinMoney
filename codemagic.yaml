@@ -20,6 +20,9 @@ workflows:
         script: |
           set -e
           
+          # Root directory: . (repository root)
+          # Module directory: app
+          
           # 1. Setup Android SDK path
           if [ -n "$ANDROID_SDK_ROOT" ]; then
             echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
@@ -27,20 +30,33 @@ workflows:
             echo "sdk.dir=$ANDROID_HOME" > local.properties
           fi
           
-          # 2. Setup Java 17
+          # 2. Setup Java 17 for macOS runner (Free tier mac_mini_m2)
           if [ -x "/usr/libexec/java_home" ]; then
             export JAVA_HOME=$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home)
           fi
           
-          # 3. Restore keystore if missing
-          if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
-            python3 -c "import base64; open('debug.keystore', 'wb').write(base64.b64decode(open('debug.keystore.base64').read().strip()))" || true
+          # 3. Decode release keystore if provided in CI environment variables
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "[CI] Decoding release keystore secret into my-upload-key.jks..."
+            python3 -c "import base64, os; open('my-upload-key.jks', 'wb').write(base64.b64decode(os.environ['RELEASE_KEYSTORE_BASE64'].strip()))" || true
           fi
           
-          # 4. Make Gradle wrapper executable
+          if [ -f "my-upload-key.jks" ]; then
+            echo "[CI] SUCCESS: Release keystore 'my-upload-key.jks' detected. Artifacts will be signed with production release key."
+          else
+            echo "[CI] NOTICE: No 'my-upload-key.jks' found. Decoding fallback debug keystore if present."
+            if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
+              python3 -c "import base64; open('debug.keystore', 'wb').write(base64.b64decode(open('debug.keystore.base64').read().strip()))" || true
+            fi
+          fi
+          
+          # 4. Make Gradle wrapper executable at root
           chmod +x ./gradlew
           
-          # 5. Build Release AAB & Release APK
+          # 5. Clean stale build artifacts and cache
+          ./gradlew clean --no-daemon
+          
+          # 6. Build clean Release AAB & Release APK
           ./gradlew :app:bundleRelease :app:assembleRelease --no-daemon --stacktrace
     artifacts:
       - app/build/outputs/bundle/release/*.aab

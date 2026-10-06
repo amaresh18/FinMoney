@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,12 +51,12 @@ fun SalaryUtilityScreen(
     val summary by viewModel.monthlySummary.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
 
     var showSalaryDialog by remember { mutableStateOf(false) }
     var editingDebit by remember { mutableStateOf<DebitItem?>(null) }
     var debitToDelete by remember { mutableStateOf<DebitItem?>(null) }
     var selectedFilterCategory by remember { mutableStateOf<String?>("ALL") }
+    var isAggregatedView by remember { mutableStateOf(true) }
 
     val monthName = FinMoneyViewModel.getMonthName(month)
 
@@ -71,12 +73,36 @@ fun SalaryUtilityScreen(
     }
 
     val filteredDebits = remember(sortedDebits, selectedFilterCategory) {
-        if (selectedFilterCategory == "ALL" || selectedFilterCategory == null) {
-            sortedDebits
-        } else {
-            sortedDebits.filter { it.category == selectedFilterCategory }
+        when (selectedFilterCategory) {
+            "ALL", null -> sortedDebits
+            "PAID" -> sortedDebits.filter { it.isPaid }
+            "UNPAID" -> sortedDebits.filter { !it.isPaid }
+            DebitCategory.RENT.name,
+            DebitCategory.EMI.name,
+            DebitCategory.ELECTRICITY.name,
+            DebitCategory.INTERNET.name,
+            DebitCategory.GROCERIES.name,
+            DebitCategory.RECHARGE.name,
+            DebitCategory.CHIT.name,
+            DebitCategory.FUEL.name,
+            DebitCategory.SHOPPING.name,
+            DebitCategory.INVESTMENT.name,
+            DebitCategory.SAVING.name,
+            DebitCategory.GENERAL.name -> sortedDebits.filter { it.category == selectedFilterCategory }
+            DebitCategory.CUSTOM.name -> sortedDebits.filter { it.category == DebitCategory.CUSTOM.name }
+            else -> sortedDebits.filter {
+                (it.category == DebitCategory.CUSTOM.name && it.customCategoryName.equals(selectedFilterCategory, ignoreCase = true)) ||
+                it.category.equals(selectedFilterCategory, ignoreCase = true) ||
+                it.customCategoryName.equals(selectedFilterCategory, ignoreCase = true)
+            }
         }
     }
+
+    val totalOutflow = summary.totalDebits
+    val totalPaid = summary.paidDebits
+    val totalUnpaid = summary.unpaidDebits
+    val completionFraction = if (totalOutflow > 0) (totalPaid / totalOutflow).toFloat().coerceIn(0f, 1f) else 0f
+    val animatedCompletion by animateFloatAsState(targetValue = completionFraction, label = "outflowProgress")
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -214,79 +240,61 @@ fun SalaryUtilityScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // Paid vs Yet to Pay (Pending) Row (Requirement #5)
-                    Row(
+                    // Outflow Status Progress Bar (Overall payment completion)
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .background(IndBackground)
                             .border(1.dp, IndBorderSubtle, RoundedCornerShape(12.dp))
-                            .padding(10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Surface(
-                                shape = CircleShape,
-                                color = IndGreenLight
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.CheckCircle,
-                                    contentDescription = null,
-                                    tint = IndGreenDark,
-                                    modifier = Modifier.size(16.dp).padding(2.dp)
-                                )
-                            }
-                            Column {
-                                Text("Paid Debits", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary, fontSize = 10.sp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Filled.PieChart, contentDescription = null, tint = IndNavyHeader, modifier = Modifier.size(15.dp))
                                 Text(
-                                    text = "$currencySymbol${"%,.0f".format(summary.paidDebits)}",
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    text = "Payment Completion",
+                                    style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = IndGreenDark
+                                    color = IndTextPrimary
                                 )
                             }
+                            Text(
+                                text = "${(completionFraction * 100).toInt()}% Paid • $currencySymbol${"%,.0f".format(totalPaid)} / $currencySymbol${"%,.0f".format(totalOutflow)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (completionFraction >= 1f) IndGreenDark else IndNavyHeader
+                            )
                         }
 
-                        Box(modifier = Modifier.width(1.dp).height(28.dp).background(IndBorder))
-
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Surface(
-                                shape = CircleShape,
-                                color = IndAmberLight
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Schedule,
-                                    contentDescription = null,
-                                    tint = Color(0xFFB45309),
-                                    modifier = Modifier.size(16.dp).padding(2.dp)
-                                )
-                            }
-                            Column {
-                                Text("Yet to Pay (Pending)", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary, fontSize = 10.sp)
-                                Text(
-                                    text = "$currencySymbol${"%,.0f".format(summary.unpaidDebits)}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (summary.unpaidDebits > 0) Color(0xFFB45309) else IndGreenDark
-                                )
-                            }
+                        // Progress track
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(IndBorderSubtle)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(fraction = animatedCompletion)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (completionFraction >= 1f) IndGreen else IndNavyHeader)
+                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Segmented Progress Bar
-                    CategorySpendProgressBar(
-                        totalIncome = summary.totalIncome,
-                        breakdown = summary.categoryBreakdown
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Stats: Safe daily spend and savings rate
+                    // Stats: Safe daily spend and wealth rate
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -322,7 +330,7 @@ fun SalaryUtilityScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     // Action Button for Salary
                     Row(
@@ -334,7 +342,7 @@ fun SalaryUtilityScreen(
                                 .fillMaxWidth()
                                 .testTag("update_salary_button"),
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IndGreen, contentColor = Color.White)
+                            colors = ButtonDefaults.buttonColors(containerColor = IndNavyHeader, contentColor = Color.White)
                         ) {
                             Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
@@ -348,7 +356,360 @@ fun SalaryUtilityScreen(
                 }
             }
 
-            // 3. Category Filter Chips (Categorized neatly)
+            // 3. View Switcher Pill (Aggregated View as Default vs List View)
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(IndSurface)
+                        .border(1.dp, IndBorder, RoundedCornerShape(12.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val aggBg by animateColorAsState(if (isAggregatedView) IndNavyHeader else Color.Transparent, label = "aggBg")
+                    val aggText by animateColorAsState(if (isAggregatedView) Color.White else IndTextSecondary, label = "aggText")
+                    val listBg by animateColorAsState(if (!isAggregatedView) IndNavyHeader else Color.Transparent, label = "listBg")
+                    val listText by animateColorAsState(if (!isAggregatedView) Color.White else IndTextSecondary, label = "listText")
+
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(9.dp))
+                            .clickable { isAggregatedView = true },
+                        shape = RoundedCornerShape(9.dp),
+                        color = aggBg
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Filled.Dashboard, contentDescription = null, tint = aggText, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Aggregated View", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = aggText)
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(9.dp))
+                            .clickable { isAggregatedView = false },
+                        shape = RoundedCornerShape(9.dp),
+                        color = listBg
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Filled.FormatListBulleted, contentDescription = null, tint = listText, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("List View", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = listText)
+                        }
+                    }
+                }
+            }
+
+            // 4. Aggregated View Components
+            if (isAggregatedView) {
+                // Interactive Paid vs. Yet To Pay Cards (Side by Side)
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        val isPaidSelected = selectedFilterCategory == "PAID"
+                        val isUnpaidSelected = selectedFilterCategory == "UNPAID"
+
+                        // Paid Outflows Card
+                        IndCard(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    selectedFilterCategory = if (isPaidSelected) "ALL" else "PAID"
+                                },
+                            backgroundColor = if (isPaidSelected) IndGreenLight.copy(alpha = 0.5f) else IndSurface,
+                            borderColor = if (isPaidSelected) IndGreen else IndBorder,
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(IndGreenLight),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = IndGreenDark, modifier = Modifier.size(17.dp))
+                                    }
+                                    if (isPaidSelected) {
+                                        Surface(shape = RoundedCornerShape(4.dp), color = IndGreen) {
+                                            Text("ACTIVE", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                                        }
+                                    }
+                                }
+                                Text("Paid Outflows", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = "$currencySymbol${"%,.0f".format(totalPaid)}",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = IndGreenDark
+                                )
+                                Text(
+                                    text = "${debits.count { it.isPaid }} items cleared",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = IndTextMuted,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        // Yet To Pay (Pending) Card
+                        IndCard(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    selectedFilterCategory = if (isUnpaidSelected) "ALL" else "UNPAID"
+                                },
+                            backgroundColor = if (isUnpaidSelected) IndAmberLight.copy(alpha = 0.5f) else IndSurface,
+                            borderColor = if (isUnpaidSelected) IndAmber else IndBorder,
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(IndAmberLight),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Filled.Schedule, contentDescription = null, tint = Color(0xFFB45309), modifier = Modifier.size(17.dp))
+                                    }
+                                    if (isUnpaidSelected) {
+                                        Surface(shape = RoundedCornerShape(4.dp), color = Color(0xFFD97706)) {
+                                            Text("ACTIVE", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                                        }
+                                    }
+                                }
+                                Text("Yet to Pay (Pending)", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = "$currencySymbol${"%,.0f".format(totalUnpaid)}",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (totalUnpaid > 0) Color(0xFFB45309) else IndGreenDark
+                                )
+                                Text(
+                                    text = "${debits.count { !it.isPaid }} items due",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = IndTextMuted,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Interactive Category Carousel
+                item {
+                    val allCategoryCards = remember(summary.categoryBreakdown, customCategories) {
+                        val existingKeys = summary.categoryBreakdown.map { it.categoryKey.lowercase() }.toSet()
+                        val defaultList = listOf(
+                            Triple(DebitCategory.GROCERIES.name, "Groceries", "#059669"),
+                            Triple(DebitCategory.RECHARGE.name, "Recharge", "#0284C7"),
+                            Triple(DebitCategory.CHIT.name, "Chit Payments", "#6D28D9"),
+                            Triple(DebitCategory.FUEL.name, "Fuel", "#EA580C"),
+                            Triple(DebitCategory.RENT.name, "Rent / Housing", "#0066FF"),
+                            Triple(DebitCategory.EMI.name, "Loan / EMI", "#F43F5E"),
+                            Triple(DebitCategory.ELECTRICITY.name, "Electricity", "#F59E0B"),
+                            Triple(DebitCategory.INTERNET.name, "Internet & WiFi", "#0284C7"),
+                            Triple(DebitCategory.SHOPPING.name, "Shopping", "#DB2777"),
+                            Triple(DebitCategory.INVESTMENT.name, "Investments / SIP", "#00B377"),
+                            Triple(DebitCategory.SAVING.name, "Savings & RD", "#0F766E"),
+                            Triple(DebitCategory.GENERAL.name, "General Expenses", "#64748B")
+                        )
+                        val customList = customCategories.distinctBy { it.name.trim().lowercase() }.map {
+                            Triple(it.name, it.name, it.colorHex)
+                        }
+
+                        val fullList = mutableListOf<CategorySummary>()
+                        // First add active categories with expenses
+                        fullList.addAll(summary.categoryBreakdown)
+                        // Then add remaining default & custom categories
+                        (defaultList + customList).forEach { (catKey, displayName, colorHex) ->
+                            if (!existingKeys.contains(catKey.lowercase())) {
+                                fullList.add(
+                                    CategorySummary(
+                                        categoryName = displayName,
+                                        categoryKey = catKey,
+                                        totalAmount = 0.0,
+                                        paidAmount = 0.0,
+                                        yetToPayAmount = 0.0,
+                                        itemCount = 0,
+                                        paidCount = 0,
+                                        colorHex = colorHex
+                                    )
+                                )
+                            }
+                        }
+                        fullList
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Aggregate by Category (${allCategoryCards.size})",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = IndTextPrimary
+                            )
+                            if (selectedFilterCategory != "ALL" && selectedFilterCategory != "PAID" && selectedFilterCategory != "UNPAID") {
+                                TextButton(
+                                    onClick = { selectedFilterCategory = "ALL" },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Clear Category Filter", fontSize = 11.sp, color = IndBlue)
+                                }
+                            }
+                        }
+
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(horizontal = 2.dp)
+                        ) {
+                            items(allCategoryCards, key = { it.categoryKey }) { cat ->
+                                val isCatSelected = selectedFilterCategory == cat.categoryKey || selectedFilterCategory.equals(cat.categoryName, ignoreCase = true)
+                                val catPaidProgress = if (cat.totalAmount > 0) (cat.paidAmount / cat.totalAmount).toFloat().coerceIn(0f, 1f) else 0f
+
+                                IndCard(
+                                    modifier = Modifier
+                                        .width(180.dp)
+                                        .clickable {
+                                            if (cat.totalAmount == 0.0) {
+                                                onOpenAddDebit(cat.categoryKey)
+                                            } else {
+                                                selectedFilterCategory = if (isCatSelected) "ALL" else cat.categoryKey
+                                            }
+                                        },
+                                    backgroundColor = if (isCatSelected) IndCardHighlight else IndSurface,
+                                    borderColor = if (isCatSelected) IndNavyHeader else IndBorder,
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            CategoryIconBadge(
+                                                categoryKey = cat.categoryKey,
+                                                modifier = Modifier.size(36.dp)
+                                            )
+                                            if (cat.totalAmount > 0) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = if (cat.yetToPayAmount == 0.0) IndGreenLight else IndCardSecondary,
+                                                    border = androidx.compose.foundation.BorderStroke(0.8.dp, IndBorderSubtle)
+                                                ) {
+                                                    Text(
+                                                        text = "${cat.paidCount}/${cat.itemCount} paid",
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = if (cat.yetToPayAmount == 0.0) IndGreenDark else IndTextSecondary,
+                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            } else {
+                                                Surface(
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = IndBlueLight.copy(alpha = 0.5f)
+                                                ) {
+                                                    Text(
+                                                        text = "+ Add",
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = IndBlue,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Column {
+                                            Text(
+                                                text = cat.categoryName,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = IndTextPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = if (cat.totalAmount > 0) "$currencySymbol${"%,.0f".format(cat.totalAmount)}" else "₹0 Planned",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = if (cat.totalAmount > 0) IndNavyHeader else IndTextMuted
+                                            )
+                                        }
+
+                                        // Progress bar or prompt
+                                        if (cat.totalAmount > 0) {
+                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(5.dp)
+                                                        .clip(RoundedCornerShape(3.dp))
+                                                        .background(IndBorderSubtle)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth(fraction = catPaidProgress)
+                                                            .fillMaxHeight()
+                                                            .clip(RoundedCornerShape(3.dp))
+                                                            .background(if (catPaidProgress >= 1f) IndGreen else parseHexColor(cat.colorHex))
+                                                    )
+                                                }
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Text("Paid: $currencySymbol${"%,.0f".format(cat.paidAmount)}", fontSize = 10.sp, color = IndGreenDark, fontWeight = FontWeight.SemiBold)
+                                                    Text("Due: $currencySymbol${"%,.0f".format(cat.yetToPayAmount)}", fontSize = 10.sp, color = if (cat.yetToPayAmount > 0) Color(0xFFB45309) else IndTextMuted)
+                                                }
+                                            }
+                                        } else {
+                                            Text(
+                                                text = "Tap to add debit",
+                                                fontSize = 10.sp,
+                                                color = IndBlue,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5. Header for the Entries List (with Action Buttons)
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     // Header Section Title
@@ -358,8 +719,14 @@ fun SalaryUtilityScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
+                            val filterDescription = when (selectedFilterCategory) {
+                                "ALL", null -> "All Commitments"
+                                "PAID" -> "Paid Debits"
+                                "UNPAID" -> "Yet to Pay (Pending)"
+                                else -> "Filtered: $selectedFilterCategory"
+                            }
                             Text(
-                                text = "Monthly Debits (${debits.size})",
+                                text = "$filterDescription (${filteredDebits.size})",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = IndTextPrimary
@@ -369,6 +736,15 @@ fun SalaryUtilityScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = IndTextSecondary
                             )
+                        }
+
+                        if (selectedFilterCategory != "ALL" && selectedFilterCategory != null) {
+                            TextButton(
+                                onClick = { selectedFilterCategory = "ALL" },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("Reset Filter", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = IndNavyHeader)
+                            }
                         }
                     }
 
@@ -395,7 +771,9 @@ fun SalaryUtilityScreen(
 
                         Button(
                             onClick = {
-                                val cat = if (!selectedFilterCategory.isNullOrBlank() && selectedFilterCategory != "ALL") selectedFilterCategory!! else DebitCategory.GENERAL.name
+                                val cat = if (!selectedFilterCategory.isNullOrBlank() && selectedFilterCategory != "ALL" && selectedFilterCategory != "PAID" && selectedFilterCategory != "UNPAID") {
+                                    selectedFilterCategory!!
+                                } else DebitCategory.GENERAL.name
                                 onOpenAddDebit(cat)
                             },
                             shape = RoundedCornerShape(10.dp),
@@ -411,40 +789,63 @@ fun SalaryUtilityScreen(
                         }
                     }
 
-                    val filterList = listOf(
-                        "ALL" to "All (${debits.size})",
-                        DebitCategory.RENT.name to "Rent",
-                        DebitCategory.EMI.name to "EMIs",
-                        DebitCategory.ELECTRICITY.name to "Electricity",
-                        DebitCategory.INTERNET.name to "Internet",
-                        DebitCategory.SHOPPING.name to "Shopping",
-                        DebitCategory.INVESTMENT.name to "Investments",
-                        DebitCategory.SAVING.name to "Savings",
-                        DebitCategory.GENERAL.name to "General",
-                        DebitCategory.CUSTOM.name to "Custom"
-                    )
+                    // In List View, render the horizontal category filter chips
+                    if (!isAggregatedView) {
+                        val filterList = remember(debits, customCategories) {
+                            val list = mutableListOf<Pair<String, String>>()
+                            list.add("ALL" to "All (${debits.size})")
+                            list.add("PAID" to "Paid (${debits.count { it.isPaid }})")
+                            list.add("UNPAID" to "Yet to Pay (${debits.count { !it.isPaid }})")
+                            
+                            list.add(DebitCategory.RENT.name to "Rent")
+                            list.add(DebitCategory.EMI.name to "EMIs")
+                            list.add(DebitCategory.ELECTRICITY.name to "Electricity")
+                            list.add(DebitCategory.INTERNET.name to "Internet")
+                            list.add(DebitCategory.GROCERIES.name to "Groceries")
+                            list.add(DebitCategory.RECHARGE.name to "Recharge")
+                            list.add(DebitCategory.CHIT.name to "Chit Payments")
+                            list.add(DebitCategory.FUEL.name to "Fuel")
+                            list.add(DebitCategory.SHOPPING.name to "Shopping")
+                            list.add(DebitCategory.INVESTMENT.name to "Investments")
+                            list.add(DebitCategory.SAVING.name to "Savings")
+                            list.add(DebitCategory.GENERAL.name to "General")
+                            list.add(DebitCategory.CUSTOM.name to "All Custom")
 
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(horizontal = 2.dp)
-                    ) {
-                        items(filterList) { (key, label) ->
-                            val isSelected = selectedFilterCategory == key
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { selectedFilterCategory = key },
-                                label = { Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = IndNavyHeader,
-                                    selectedLabelColor = Color.White
+                            val activeCustomNames = (customCategories.map { it.name } + debits.filter { it.category == DebitCategory.CUSTOM.name && it.customCategoryName.isNotBlank() }.map { it.customCategoryName })
+                                .map { it.trim() }
+                                .filter { it.isNotBlank() }
+                                .distinctBy { it.lowercase() }
+
+                            activeCustomNames.forEach { customName ->
+                                val count = debits.count { it.category == DebitCategory.CUSTOM.name && it.customCategoryName.equals(customName, ignoreCase = true) }
+                                list.add(customName to if (count > 0) "$customName ($count)" else customName)
+                            }
+
+                            list
+                        }
+
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(horizontal = 2.dp)
+                        ) {
+                            items(filterList) { (key, label) ->
+                                val isSelected = selectedFilterCategory == key
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = { selectedFilterCategory = key },
+                                    label = { Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = IndNavyHeader,
+                                        selectedLabelColor = Color.White
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                 }
             }
 
-            // 4. Debits List (Sorted 1 to 31 by Due Day)
+            // 6. Debits List (Sorted 1 to 31 by Due Day)
             if (filteredDebits.isEmpty()) {
                 item {
                     IndCard(modifier = Modifier.fillMaxWidth()) {
@@ -462,13 +863,13 @@ fun SalaryUtilityScreen(
                                 modifier = Modifier.size(48.dp)
                             )
                             Text(
-                                text = "No debits added for this filter",
+                                text = "No debits found for this filter",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = IndTextPrimary
                             )
                             Text(
-                                text = "Use '+ Add Planned Debit' or 'Prefill Previous Month' in the header above to plan your expenses for this month.",
+                                text = "Use '+ Add Planned Debit' or 'Prefill Prev Month' above to manage your monthly budget.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = IndTextSecondary,
                                 textAlign = TextAlign.Center
@@ -516,7 +917,7 @@ fun SalaryUtilityScreen(
         )
     }
 
-    // Edit Debit Dialog (Requirement #2)
+    // Edit Debit Dialog
     if (editingDebit != null) {
         AddEditDebitDialog(
             debitToEdit = editingDebit,
@@ -547,7 +948,7 @@ fun SalaryUtilityScreen(
         )
     }
 
-    // Delete Confirmation Dialog for Debits (Requirement #7)
+    // Delete Confirmation Dialog for Debits
     if (debitToDelete != null) {
         DeleteConfirmationDialog(
             title = "Delete Monthly Debit?",
@@ -561,6 +962,7 @@ fun SalaryUtilityScreen(
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun DebitItemCard(
     item: DebitItem,
@@ -607,6 +1009,10 @@ fun DebitItemCard(
                             DebitCategory.EMI.name -> "EMI"
                             DebitCategory.ELECTRICITY.name -> "POWER"
                             DebitCategory.INTERNET.name -> "WIFI"
+                            DebitCategory.GROCERIES.name -> "GROCERY"
+                            DebitCategory.RECHARGE.name -> "RECHARGE"
+                            DebitCategory.CHIT.name -> "CHIT"
+                            DebitCategory.FUEL.name -> "FUEL"
                             DebitCategory.SHOPPING.name -> "SHOP"
                             DebitCategory.INVESTMENT.name -> "SIP"
                             DebitCategory.SAVING.name -> "SAVINGS"
@@ -632,10 +1038,10 @@ fun DebitItemCard(
                         }
                     }
 
-                    // Metadata details with Due Day (Requirement #6)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    // Metadata details with Due Day, Tenure Auto-Tracking, and Interest Rate
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Surface(
                             shape = RoundedCornerShape(4.dp),
@@ -646,26 +1052,72 @@ fun DebitItemCard(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = IndBlueDark,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                             )
                         }
 
+                        // Tenure Progress Badge: Month X of Y • Z months remaining
                         if (item.totalTenureMonths > 0) {
-                            Text(
-                                text = "• Tenure: ${item.currentMonthTenure}/${item.totalTenureMonths}m",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = IndBlue,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            val remaining = (item.totalTenureMonths - item.currentMonthTenure).coerceAtLeast(0)
+                            val tenureText = if (item.currentMonthTenure >= item.totalTenureMonths) {
+                                "Tenure: Month ${item.currentMonthTenure} of ${item.totalTenureMonths} • Completed 🎉"
+                            } else {
+                                "Tenure: Month ${item.currentMonthTenure} of ${item.totalTenureMonths} • $remaining months remaining"
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = if (item.isPaid) IndGreenLight else IndCardSecondary,
+                                border = androidx.compose.foundation.BorderStroke(0.8.dp, if (item.isPaid) IndGreen.copy(alpha = 0.4f) else IndBorder)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (item.category == DebitCategory.CHIT.name) Icons.Filled.Savings else Icons.Filled.Timeline,
+                                        contentDescription = null,
+                                        tint = if (item.isPaid) IndGreenDark else IndBlue,
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Text(
+                                        text = tenureText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (item.isPaid) IndGreenDark else IndNavyHeader,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
                         }
 
                         if (item.interestRate > 0) {
-                            Text(
-                                text = "• ${item.interestRate}%",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFFB45309),
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFFFEF3C7),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD97706).copy(alpha = 0.8f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Percent,
+                                        contentDescription = null,
+                                        tint = Color(0xFF92400E),
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Text(
+                                        text = "${item.interestRate}% Interest",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF92400E),
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -692,7 +1144,10 @@ fun DebitItemCard(
                     color = if (item.isPaid) IndTextMuted else IndTextPrimary
                 )
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     // Paid toggle button
                     IconButton(
                         onClick = onTogglePaid,
@@ -706,7 +1161,7 @@ fun DebitItemCard(
                         )
                     }
 
-                    // Edit button (Requirement #2)
+                    // Edit button
                     IconButton(
                         onClick = onEdit,
                         modifier = Modifier.size(28.dp)
@@ -719,7 +1174,7 @@ fun DebitItemCard(
                         )
                     }
 
-                    // Delete button
+                    // Delete button matching Edit button style (clean icon button, no circular highlight)
                     IconButton(
                         onClick = onDelete,
                         modifier = Modifier.size(28.dp)
@@ -727,7 +1182,7 @@ fun DebitItemCard(
                         Icon(
                             imageVector = Icons.Outlined.Delete,
                             contentDescription = "Delete debit",
-                            tint = IndTextMuted,
+                            tint = IndRed,
                             modifier = Modifier.size(17.dp)
                         )
                     }

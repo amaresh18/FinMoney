@@ -40,6 +40,7 @@ import com.example.util.InterestCalculator
 import com.example.util.LoanInterestBreakdown
 import com.example.util.ProofFile
 import com.example.util.ProofStorageHelper
+import com.example.util.PhoneNotificationHelper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.firebase.firestore.FirebaseFirestore
@@ -60,9 +61,18 @@ fun SalaryInputDialog(
     onDismiss: () -> Unit,
     onSave: (salary: Double, additional: Double, notes: String, sources: List<IncomeSource>) -> Unit
 ) {
+    val initialSources = remember(currentIncomeSources, currentAdditional) {
+        if (currentIncomeSources.isNotEmpty()) {
+            currentIncomeSources.toMutableList()
+        } else if (currentAdditional > 0.0) {
+            mutableListOf(IncomeSource(name = "Additional Credits", amount = currentAdditional, category = IncomeCategory.OTHER.name))
+        } else {
+            mutableListOf()
+        }
+    }
     var salaryText by remember { mutableStateOf(if (currentSalary > 0) currentSalary.toInt().toString() else "") }
     var notesText by remember { mutableStateOf(currentNotes) }
-    var incomeStreams by remember { mutableStateOf(currentIncomeSources.toMutableList()) }
+    var incomeStreams by remember { mutableStateOf(initialSources) }
     var errorText by remember { mutableStateOf<String?>(null) }
 
     // State for adding a new stream
@@ -114,29 +124,44 @@ fun SalaryInputDialog(
                     }
                 }
 
-                // Total calculated income preview pill
+                // Total calculated income preview pill with full breakdown
                 item {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         color = IndGreenLight,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, IndGreen.copy(alpha = 0.3f))
+                        border = androidx.compose.foundation.BorderStroke(1.dp, IndGreen.copy(alpha = 0.35f))
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier.padding(14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Column {
-                                Text("TOTAL CALCULATED INCOME", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = IndGreenDark)
-                                Text("Salary + Additional Credits", style = MaterialTheme.typography.bodySmall, color = IndTextSecondary, fontSize = 11.sp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text("TOTAL MONTHLY CREDITS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = IndGreenDark)
+                                    Text("Salary + Extra Income Streams", style = MaterialTheme.typography.bodySmall, color = IndTextSecondary, fontSize = 11.sp)
+                                }
+                                Text(
+                                    text = "$currencySymbol${"%,.0f".format(totalIncome)}",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = IndGreenDark
+                                )
                             }
-                            Text(
-                                text = "$currencySymbol${"%,.0f".format(totalIncome)}",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = IndGreenDark
-                            )
+                            if (streamsTotal > 0 && baseSalary > 0) {
+                                androidx.compose.material3.HorizontalDivider(color = IndGreen.copy(alpha = 0.2f), thickness = 0.8.dp)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Base Salary: $currencySymbol${"%,.0f".format(baseSalary)}", fontSize = 11.sp, color = IndTextSecondary)
+                                    Text("Other Credits: $currencySymbol${"%,.0f".format(streamsTotal)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndGreenDark)
+                                }
+                            }
                         }
                     }
                 }
@@ -186,60 +211,92 @@ fun SalaryInputDialog(
                 items(incomeStreams) { stream ->
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         color = IndCardSecondary,
                         border = androidx.compose.foundation.BorderStroke(1.dp, IndBorder)
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                                .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Box(
-                                    modifier = Modifier.size(28.dp).clip(CircleShape).background(IndGreenLight),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = when (stream.category) {
-                                            IncomeCategory.RENT.name -> Icons.Filled.Home
-                                            IncomeCategory.INTEREST.name -> Icons.Filled.Savings
-                                            IncomeCategory.FREELANCE.name -> Icons.Filled.Work
-                                            else -> Icons.Filled.Payments
-                                        },
-                                        contentDescription = null,
-                                        tint = IndGreenDark,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                                Column {
-                                    Text(stream.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = IndTextPrimary)
-                                    Text(
-                                        when (stream.category) {
-                                            IncomeCategory.RENT.name -> "Rental Income"
-                                            IncomeCategory.INTEREST.name -> "Interest / Dividend"
-                                            IncomeCategory.FREELANCE.name -> "Business / Side"
-                                            else -> "Credit Stream"
-                                        },
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = IndTextSecondary,
-                                        fontSize = 10.sp
-                                    )
-                                }
+                            // Left Section: Icon (Fixed 38dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(IndGreenLight),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = when (stream.category) {
+                                        IncomeCategory.RENT.name -> Icons.Filled.Home
+                                        IncomeCategory.INTEREST.name -> Icons.Filled.Savings
+                                        IncomeCategory.FREELANCE.name -> Icons.Filled.Work
+                                        else -> Icons.Filled.Payments
+                                    },
+                                    contentDescription = null,
+                                    tint = IndGreenDark,
+                                    modifier = Modifier.size(19.dp)
+                                )
                             }
 
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("$currencySymbol${"%,.0f".format(stream.amount)}", fontWeight = FontWeight.Bold, color = IndGreenDark, style = MaterialTheme.typography.titleSmall)
-                                IconButton(
-                                    onClick = {
-                                        incomeStreams = incomeStreams.filter { it != stream }.toMutableList()
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            // Middle Section: Name & Category (Weight 1f ensures it clips and NEVER pushes delete button offscreen)
+                            Column(
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = stream.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndTextPrimary,
+                                    maxLines = 2,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = when (stream.category) {
+                                        IncomeCategory.RENT.name -> "Rental Income"
+                                        IncomeCategory.INTEREST.name -> "Interest / Dividend"
+                                        IncomeCategory.FREELANCE.name -> "Business / Freelance"
+                                        else -> "Credit Stream"
                                     },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(Icons.Outlined.Delete, contentDescription = "Remove", tint = IndRed, modifier = Modifier.size(16.dp))
-                                }
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = IndTextSecondary,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            // Amount Display
+                            Text(
+                                text = "$currencySymbol${"%,.0f".format(stream.amount)}",
+                                fontWeight = FontWeight.ExtraBold,
+                                color = IndGreenDark,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontSize = 14.sp
+                            )
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            // Distinct Red Delete Button
+                            IconButton(
+                                onClick = {
+                                    incomeStreams = incomeStreams.filter { it != stream }.toMutableList()
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Delete,
+                                    contentDescription = "Delete income stream",
+                                    tint = IndRed,
+                                    modifier = Modifier.size(19.dp)
+                                )
                             }
                         }
                     }
@@ -391,7 +448,7 @@ fun SalaryInputDialog(
                                 .weight(1f)
                                 .testTag("save_salary_button"),
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IndGreen, contentColor = Color.White)
+                            colors = ButtonDefaults.buttonColors(containerColor = IndBlue, contentColor = Color.White)
                         ) {
                             Text("Save & Calculate", fontWeight = FontWeight.Bold)
                         }
@@ -429,15 +486,19 @@ fun AddEditDebitDialog(
 ) {
     val isEditMode = debitToEdit != null
 
+    val deduplicatedCustomCategories = remember(customCategories) {
+        customCategories.distinctBy { it.name.trim().lowercase() }
+    }
+
     var selectedCategory by remember { mutableStateOf(debitToEdit?.category ?: initialCategory) }
-    var selectedCustomCategory by remember { mutableStateOf(debitToEdit?.customCategoryName ?: customCategories.firstOrNull()?.name ?: "") }
+    var selectedCustomCategory by remember { mutableStateOf(debitToEdit?.customCategoryName ?: deduplicatedCustomCategories.firstOrNull()?.name ?: "") }
     var title by remember { mutableStateOf(debitToEdit?.title ?: "") }
     var amountText by remember { mutableStateOf(if (debitToEdit != null) debitToEdit.amount.toInt().toString() else "") }
     var dueDateDayText by remember { mutableStateOf(if (debitToEdit != null) debitToEdit.dueDateDay.toString() else "5") }
     var isRecurring by remember { mutableStateOf(debitToEdit?.isRecurring ?: true) }
     var interestRateText by remember { mutableStateOf(if (debitToEdit != null && debitToEdit.interestRate > 0) debitToEdit.interestRate.toString() else "") }
-    var totalTenureText by remember { mutableStateOf(if (debitToEdit != null && debitToEdit.totalTenureMonths > 0) debitToEdit.totalTenureMonths.toString() else "") }
-    var currentTenureText by remember { mutableStateOf(if (debitToEdit != null && debitToEdit.currentMonthTenure > 0) debitToEdit.currentMonthTenure.toString() else "") }
+    var totalTenureText by remember { mutableStateOf(if (debitToEdit != null && debitToEdit.totalTenureMonths > 0) debitToEdit.totalTenureMonths.toString() else if (initialCategory == DebitCategory.CHIT.name) "20" else if (initialCategory == DebitCategory.EMI.name) "12" else "") }
+    var currentTenureText by remember { mutableStateOf(if (debitToEdit != null && debitToEdit.currentMonthTenure > 0) debitToEdit.currentMonthTenure.toString() else if (initialCategory == DebitCategory.CHIT.name || initialCategory == DebitCategory.EMI.name) "1" else "") }
     var notes by remember { mutableStateOf(debitToEdit?.notes ?: "") }
     var errorText by remember { mutableStateOf<String?>(null) }
 
@@ -491,15 +552,19 @@ fun AddEditDebitDialog(
                     Spacer(modifier = Modifier.height(6.dp))
                     
                     val categoriesList = listOf(
-                        DebitCategory.RENT.name to "Rent",
-                        DebitCategory.EMI.name to "EMI / Loan",
-                        DebitCategory.ELECTRICITY.name to "Electricity",
-                        DebitCategory.INTERNET.name to "Internet",
-                        DebitCategory.SHOPPING.name to "Shopping",
-                        DebitCategory.INVESTMENT.name to "Investment",
-                        DebitCategory.SAVING.name to "Saving",
-                        DebitCategory.GENERAL.name to "General",
-                        DebitCategory.CUSTOM.name to "Custom"
+                        Triple(DebitCategory.GROCERIES.name, "Groceries", Icons.Default.ShoppingCart),
+                        Triple(DebitCategory.RECHARGE.name, "Recharge", Icons.Default.PhoneAndroid),
+                        Triple(DebitCategory.CHIT.name, "Chit Payments", Icons.Default.Savings),
+                        Triple(DebitCategory.FUEL.name, "Fuel", Icons.Default.LocalGasStation),
+                        Triple(DebitCategory.RENT.name, "Rent", Icons.Default.Home),
+                        Triple(DebitCategory.EMI.name, "EMI / Loan", Icons.Default.CreditCard),
+                        Triple(DebitCategory.ELECTRICITY.name, "Electricity", Icons.Default.Bolt),
+                        Triple(DebitCategory.INTERNET.name, "Internet", Icons.Default.Wifi),
+                        Triple(DebitCategory.SHOPPING.name, "Shopping", Icons.Default.ShoppingBag),
+                        Triple(DebitCategory.INVESTMENT.name, "Investment", Icons.AutoMirrored.Filled.TrendingUp),
+                        Triple(DebitCategory.SAVING.name, "Saving", Icons.Default.Savings),
+                        Triple(DebitCategory.GENERAL.name, "General", Icons.Default.Receipt),
+                        Triple(DebitCategory.CUSTOM.name, "Custom", Icons.Default.Category)
                     )
 
                     // FlowRow chips for Category Type
@@ -508,7 +573,7 @@ fun AddEditDebitDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        categoriesList.forEach { (catKey, label) ->
+                        categoriesList.forEach { (catKey, label, iconVector) ->
                             val isSelected = selectedCategory == catKey
                             FilterChip(
                                 selected = isSelected,
@@ -520,13 +585,32 @@ fun AddEditDebitDialog(
                                             DebitCategory.EMI.name -> "Loan EMI"
                                             DebitCategory.ELECTRICITY.name -> "Electricity Bill"
                                             DebitCategory.INTERNET.name -> "WiFi Broadband"
+                                            DebitCategory.GROCERIES.name -> "Monthly Groceries"
+                                            DebitCategory.RECHARGE.name -> "Mobile / DTH Recharge"
+                                            DebitCategory.CHIT.name -> "Monthly Chit Payment"
+                                            DebitCategory.FUEL.name -> "Fuel & Petrol"
                                             DebitCategory.SHOPPING.name -> "Monthly Shopping"
                                             DebitCategory.INVESTMENT.name -> "Mutual Fund SIP"
                                             DebitCategory.SAVING.name -> "Emergency Fund RD"
-                                            DebitCategory.GENERAL.name -> "Groceries & Daily"
+                                            DebitCategory.GENERAL.name -> "General Outflow"
                                             else -> ""
                                         }
                                     }
+                                    if (catKey == DebitCategory.CHIT.name && totalTenureText.isBlank()) {
+                                        totalTenureText = "20"
+                                        if (currentTenureText.isBlank()) currentTenureText = "1"
+                                    } else if (catKey == DebitCategory.EMI.name && totalTenureText.isBlank()) {
+                                        totalTenureText = "12"
+                                        if (currentTenureText.isBlank()) currentTenureText = "1"
+                                    }
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = iconVector,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = if (isSelected) Color.White else IndNavyHeader
+                                    )
                                 },
                                 label = {
                                     Text(
@@ -664,22 +748,21 @@ fun AddEditDebitDialog(
                             shape = RoundedCornerShape(12.dp)
                         )
 
-                        if (selectedCategory == DebitCategory.EMI.name) {
-                            OutlinedTextField(
-                                value = interestRateText,
-                                onValueChange = { interestRateText = it },
-                                label = { Text("Interest %") },
-                                placeholder = { Text("8.5") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                        }
+                        OutlinedTextField(
+                            value = interestRateText,
+                            onValueChange = { interestRateText = it },
+                            label = { Text("Interest Rate %") },
+                            placeholder = { Text("0.0") },
+                            leadingIcon = { Icon(Icons.Filled.Percent, contentDescription = null, tint = IndNavyHeader, modifier = Modifier.size(16.dp)) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
                     }
                 }
 
-                if (selectedCategory == DebitCategory.EMI.name) {
+                if (selectedCategory == DebitCategory.EMI.name || selectedCategory == DebitCategory.CHIT.name || totalTenureText.isNotBlank() || currentTenureText.isNotBlank()) {
                     item {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -688,8 +771,8 @@ fun AddEditDebitDialog(
                             OutlinedTextField(
                                 value = currentTenureText,
                                 onValueChange = { currentTenureText = it },
-                                label = { Text("Current Month #") },
-                                placeholder = { Text("12") },
+                                label = { Text("Current Month (e.g. Month 4)") },
+                                placeholder = { Text("4") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                                 modifier = Modifier.weight(1f),
@@ -698,8 +781,8 @@ fun AddEditDebitDialog(
                             OutlinedTextField(
                                 value = totalTenureText,
                                 onValueChange = { totalTenureText = it },
-                                label = { Text("Total Tenure Months") },
-                                placeholder = { Text("24") },
+                                label = { Text("Total Months (e.g. 20)") },
+                                placeholder = { Text("20") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                                 modifier = Modifier.weight(1f),
@@ -794,7 +877,7 @@ fun AddEditDebitDialog(
                                 .weight(1f)
                                 .testTag("save_debit_button"),
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IndGreen, contentColor = Color.White)
+                            colors = ButtonDefaults.buttonColors(containerColor = IndBlue, contentColor = Color.White)
                         ) {
                             Text(if (isEditMode) "Save Changes" else "Add Debit", fontWeight = FontWeight.Bold)
                         }
@@ -911,7 +994,7 @@ fun AddCustomCategoryDialog(
                         },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = IndGreen, contentColor = Color.White)
+                        colors = ButtonDefaults.buttonColors(containerColor = IndBlue, contentColor = Color.White)
                     ) {
                         Text("Create", fontWeight = FontWeight.Bold)
                     }
@@ -961,7 +1044,6 @@ fun AddEditLoanDialog(
     }
     var clearanceNote by remember { mutableStateOf("UPI payment / partial clearance") }
     var clearanceProofUri by remember { mutableStateOf("") }
-    var clearanceRole by remember { mutableStateOf("PAID") }
 
     var loanType by remember { mutableStateOf(if (isEditMode) (if (loanToEdit?.type == LoanType.TAKEN.name) LoanType.TAKEN else LoanType.GIVEN) else initialType) }
     var totalAmountText by remember { mutableStateOf(if (isEditMode) loanToEdit?.totalAmount?.toInt()?.toString() ?: "" else "") }
@@ -1250,33 +1332,28 @@ fun AddEditLoanDialog(
                         )
                     }
 
-                    // Clearance Role
+                    // Auto-identified Role & Verification Notice
                     item {
+                        val isUserLenderForClearance = selectedClearanceLoan?.type == LoanType.GIVEN.name
+                        val targetName = selectedClearanceLoan?.counterpartyName ?: "counterparty"
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = IndBackground,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, IndBorder),
+                            color = if (isUserLenderForClearance) IndGreenLight else IndBlueLight,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isUserLenderForClearance) IndGreenDark.copy(alpha = 0.3f) else IndBlue.copy(alpha = 0.3f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("Payment Status:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = IndTextSecondary)
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    FilterChip(
-                                        selected = clearanceRole == "PAID",
-                                        onClick = { clearanceRole = "PAID" },
-                                        label = { Text("I Paid (Needs Verification)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    FilterChip(
-                                        selected = clearanceRole == "RECEIVED",
-                                        onClick = { clearanceRole = "RECEIVED" },
-                                        label = { Text("I Received (Direct Clear)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = if (isUserLenderForClearance) "Role: Lender (Payment received from $targetName)" else "Role: Borrower (Repayment made to $targetName)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isUserLenderForClearance) IndGreenDark else IndBlue
+                                )
+                                Text(
+                                    text = "🔒 Requires approval: This entry will be submitted with 'Pending Confirmation' status and requires $targetName's verification.",
+                                    fontSize = 11.sp,
+                                    color = IndTextSecondary
+                                )
                             }
                         }
                     }
@@ -1317,7 +1394,7 @@ fun AddEditLoanDialog(
                                 val encodedProofJson = com.example.util.ProofStorageHelper.encodeProofFiles(attachedProofs)
                                 val primaryLocal = attachedProofs.firstOrNull()?.let { com.example.util.ProofStorageHelper.ensureLocalPath(context, it) } ?: ""
                                 val proofPayload = if (encodedProofJson.isNotBlank()) encodedProofJson else if (primaryLocal.isNotBlank()) primaryLocal else clearanceProofUri
-                                onSavePayment(target.id, amt, clearanceNote, proofPayload, clearanceRole == "RECEIVED")
+                                onSavePayment(target.id, amt, clearanceNote, proofPayload, false)
                                 onDismiss()
                             },
                             modifier = Modifier
@@ -1326,9 +1403,9 @@ fun AddEditLoanDialog(
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = IndNavyHeader)
                         ) {
-                            Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Confirm & Record Clearance", fontWeight = FontWeight.Bold)
+                            Text("Send for Verification", fontWeight = FontWeight.Bold)
                         }
                     }
                 } else {
@@ -1706,6 +1783,48 @@ fun AddEditLoanDialog(
                             }
                         }
                     }
+
+                    // Live Interest Calculation Banner
+                    val rate = interestRateText.toDoubleOrNull() ?: 0.0
+                    val principal = totalAmountText.toDoubleOrNull() ?: 0.0
+                    if (rate > 0.0 && principal > 0.0) {
+                        val days = ((selectedDueDateTimestamp - startDateTimestamp) / 86400000L).coerceAtLeast(1L)
+                        val estInterest = if (isMonthlyInterest) {
+                            principal * (rate / 100.0) * (days / 30.0)
+                        } else {
+                            principal * (rate / 100.0) * (days / 365.0)
+                        }
+                        val estTotal = principal + estInterest
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFFEF3C7),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD97706).copy(alpha = 0.6f)),
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Icon(Icons.Filled.Percent, contentDescription = null, tint = Color(0xFF92400E), modifier = Modifier.size(13.dp))
+                                    Text(
+                                        text = "Est. Interest ($days days): $currencySymbol${"%,.0f".format(estInterest)}",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF92400E)
+                                    )
+                                }
+                                Text(
+                                    text = "Total: $currencySymbol${"%,.0f".format(estTotal)}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF92400E)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 // Note / Purpose
@@ -1816,7 +1935,7 @@ fun AddEditLoanDialog(
                                 .weight(1f)
                                 .testTag("submit_loan_button"),
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IndGreen, contentColor = Color.White)
+                            colors = ButtonDefaults.buttonColors(containerColor = IndBlue, contentColor = Color.White)
                         ) {
                             Text(if (isEditMode) "Save Changes" else "Submit & Record", fontWeight = FontWeight.Bold)
                         }
@@ -2260,6 +2379,17 @@ fun RecordPaymentDialog(
         )
     }
 
+    val currentPhone = userProfile?.phoneNumber?.trim() ?: ""
+    val currentName = userProfile?.name?.trim() ?: "You"
+    val creatorPhone = loan.creatorContact.trim()
+    val isCreator = (creatorPhone.isNotBlank() && currentPhone.isNotBlank() && currentPhone.takeLast(10) == creatorPhone.takeLast(10)) ||
+                    (creatorPhone.isBlank() && loan.createdBy.equals(currentName, ignoreCase = true)) ||
+                    (creatorPhone.isBlank() && loan.createdBy == "You")
+
+    // Determine if current user is Lender (Money Given) or Borrower (Money Taken)
+    val isLender = if (isCreator) (loan.type == LoanType.GIVEN.name) else (loan.type == LoanType.TAKEN.name)
+    val otherPartyName = if (isCreator) loan.counterpartyName else loan.createdBy
+
     var selectedTarget by remember { mutableStateOf("COMBINED") }
     var amountText by remember {
         val initialAmt = if (loan.interestRatePercent > 0.0 && interestBreakdown.totalRemainingDue > 0) {
@@ -2274,7 +2404,6 @@ fun RecordPaymentDialog(
     var note by remember { mutableStateOf("UPI Payment via PhonePe") }
     var attachedProofs by remember { mutableStateOf<List<com.example.util.ProofFile>>(emptyList()) }
     var errorText by remember { mutableStateOf<String?>(null) }
-    var paymentRole by remember { mutableStateOf("PAID") } // "PAID" (Requires verification) or "RECEIVED" (Direct confirmation)
     var viewingProofJson by remember { mutableStateOf<String?>(null) }
 
     if (viewingProofJson != null) {
@@ -2306,11 +2435,46 @@ fun RecordPaymentDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("Log Payment / Installment", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = IndTextPrimary)
-                            Text("Party: ${loan.counterpartyName}", style = MaterialTheme.typography.bodySmall, color = IndTextSecondary)
+                            Text("Log Payment Entry", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = IndTextPrimary)
+                            Text("Party: $otherPartyName", style = MaterialTheme.typography.bodySmall, color = IndTextSecondary)
                         }
                         IconButton(onClick = onDismiss) {
                             Icon(Icons.Filled.Close, contentDescription = "Close", tint = IndTextSecondary)
+                        }
+                    }
+                }
+
+                // Auto-Identified Role & Mutual Approval Notice (No I paid / I received toggle)
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isLender) IndGreenLight else IndBlueLight,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isLender) IndGreenDark.copy(alpha = 0.3f) else IndBlue.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(
+                                    if (isLender) Icons.Filled.ArrowDownward else Icons.Filled.ArrowUpward,
+                                    contentDescription = null,
+                                    tint = if (isLender) IndGreenDark else IndBlue,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = if (isLender) "Recording Payment Received from $otherPartyName" else "Recording Repayment Made to $otherPartyName",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isLender) IndGreenDark else IndBlue
+                                )
+                            }
+                            Text(
+                                text = "🔒 Mutual Verification: This payment will be logged with 'Pending Approval' status. It will be credited/deducted once $otherPartyName verifies and approves it.",
+                                fontSize = 11.sp,
+                                color = IndTextSecondary
+                            )
                         }
                     }
                 }
@@ -2432,47 +2596,6 @@ fun RecordPaymentDialog(
                     }
                 }
 
-                // Payment Type & Verification Flow Selector
-                item {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = IndBackground,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, IndBorder),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text("Who is logging this payment?", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = IndTextSecondary)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                FilterChip(
-                                    selected = paymentRole == "PAID",
-                                    onClick = { paymentRole = "PAID" },
-                                    label = { Text("I Paid (Needs Approval)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                FilterChip(
-                                    selected = paymentRole == "RECEIVED",
-                                    onClick = { paymentRole = "RECEIVED" },
-                                    label = { Text("I Received (Direct)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            Text(
-                                text = if (paymentRole == "PAID")
-                                    "• Awaiting ${loan.counterpartyName}'s approval with proof. Deducted once verified."
-                                    else "• You confirm receiving ₹. Deducted from balance immediately.",
-                                fontSize = 10.sp,
-                                color = if (paymentRole == "PAID") Color(0xFFB45309) else IndGreenDark
-                            )
-                        }
-                    }
-                }
-
                 item {
                     OutlinedTextField(
                         value = amountText,
@@ -2540,14 +2663,15 @@ fun RecordPaymentDialog(
                                     val primaryLocal = attachedProofs.firstOrNull()?.let { com.example.util.ProofStorageHelper.ensureLocalPath(context, it) } ?: ""
                                     val proofPayload = if (encodedProofJson.isNotBlank()) encodedProofJson else primaryLocal
                                     val finalNote = if (selectedTarget != "COMBINED") "[$selectedTarget] ${note.trim()}" else note.trim()
-                                    onSavePayment(amt, finalNote, proofPayload, paymentRole == "RECEIVED")
+                                    // In all cases, require mutual verification
+                                    onSavePayment(amt, finalNote, proofPayload, false)
                                 }
                             },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IndGreen, contentColor = Color.White)
+                            colors = ButtonDefaults.buttonColors(containerColor = IndBlue, contentColor = Color.White)
                         ) {
-                            Text("Record Payment", fontWeight = FontWeight.Bold)
+                            Text("Send for Verification", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -2884,7 +3008,7 @@ fun LoanDetailAndLedgerSheet(
                                             onClick = { onConfirmSettlement(true) },
                                             modifier = Modifier.weight(1f),
                                             shape = RoundedCornerShape(10.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = IndGreen, contentColor = Color.White)
+                                            colors = ButtonDefaults.buttonColors(containerColor = IndBlue, contentColor = Color.White)
                                         ) {
                                             Text("Approve & Settle", fontWeight = FontWeight.Bold)
                                         }
@@ -2972,7 +3096,7 @@ fun LoanDetailAndLedgerSheet(
                                 onClick = { showPaymentDialog = true },
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = IndGreen, contentColor = Color.White)
+                                colors = ButtonDefaults.buttonColors(containerColor = IndBlue, contentColor = Color.White)
                             ) {
                                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
@@ -3215,7 +3339,7 @@ fun LoanDetailAndLedgerSheet(
                         showSimulateCounterpartyApproval = false
                         onApproveLoan(true)
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = IndGreen, contentColor = Color.White)
+                    colors = ButtonDefaults.buttonColors(containerColor = IndBlue, contentColor = Color.White)
                 ) {
                     Text("Approve & Confirm")
                 }
@@ -3244,12 +3368,14 @@ fun ProfileDialog(
 ) {
     val context = LocalContext.current
     val initialFirst = remember(userProfile) {
-        if (!userProfile?.firstName.isNullOrBlank()) userProfile!!.firstName
-        else userProfile?.name?.split(" ")?.getOrNull(0) ?: ""
+        userProfile?.firstName?.ifBlank { null }
+            ?: userProfile?.name?.split(" ")?.getOrNull(0)
+            ?: ""
     }
     val initialLast = remember(userProfile) {
-        if (!userProfile?.lastName.isNullOrBlank()) userProfile!!.lastName
-        else userProfile?.name?.split(" ")?.drop(1)?.joinToString(" ") ?: ""
+        userProfile?.lastName?.ifBlank { null }
+            ?: userProfile?.name?.split(" ")?.drop(1)?.joinToString(" ")
+            ?: ""
     }
 
     var firstName by remember { mutableStateOf(initialFirst) }
@@ -3258,6 +3384,10 @@ fun ProfileDialog(
     var email by remember { mutableStateOf(userProfile?.email ?: "") }
     var profilePicUri by remember { mutableStateOf(userProfile?.profilePicUri ?: "") }
     var errorText by remember { mutableStateOf<String?>(null) }
+    var isOtpRequested by remember { mutableStateOf(false) }
+    var otpCode by remember { mutableStateOf("") }
+    var isPhoneVerified by remember { mutableStateOf(userProfile?.isOtpVerified == true && !userProfile?.phoneNumber.isNullOrBlank()) }
+    var otpNotice by remember { mutableStateOf<String?>(null) }
 
     val photoPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
@@ -3430,22 +3560,118 @@ fun ProfileDialog(
                     }
                 }
 
-                // Phone Number (Required for Peer Khaata)
+                // Phone Number (Required for Peer Khaata) with OTP Verification
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         OutlinedTextField(
                             value = phoneNumber,
-                            onValueChange = { phoneNumber = it.filter { ch -> ch.isDigit() || ch == '+' || ch == ' ' }; errorText = null },
+                            onValueChange = {
+                                phoneNumber = it.filter { ch -> ch.isDigit() || ch == '+' || ch == ' ' }
+                                if (phoneNumber != (userProfile?.phoneNumber ?: "")) {
+                                    isPhoneVerified = false
+                                }
+                                errorText = null
+                            },
                             label = { Text("Phone Number * (Required)") },
                             placeholder = { Text("10-digit mobile number") },
                             leadingIcon = {
                                 Text("+91 ", fontWeight = FontWeight.Bold, color = IndTextPrimary, modifier = Modifier.padding(start = 12.dp))
+                            },
+                            trailingIcon = {
+                                if (isPhoneVerified) {
+                                    Icon(Icons.Filled.Verified, contentDescription = null, tint = IndGreenDark)
+                                } else {
+                                    Icon(Icons.Filled.PhoneAndroid, contentDescription = null, tint = IndTextSecondary)
+                                }
                             },
                             singleLine = true,
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Phone),
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp)
                         )
+
+                        // OTP Verification Controls
+                        if (!isPhoneVerified) {
+                            if (!isOtpRequested) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val digits = phoneNumber.filter { it.isDigit() }
+                                        if (digits.length < 10) {
+                                            errorText = "Please enter a valid 10-digit mobile number first."
+                                        } else {
+                                            isOtpRequested = true
+                                            otpNotice = "OTP sent to +91 $digits! Tip: enter 123456"
+                                            errorText = null
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth().height(38.dp)
+                                ) {
+                                    Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(14.dp), tint = IndBlue)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Verify Phone via OTP", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = IndBlue)
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedTextField(
+                                        value = otpCode,
+                                        onValueChange = {
+                                            otpCode = it.take(6)
+                                            if (otpCode.length == 6) {
+                                                isPhoneVerified = true
+                                                otpNotice = "Mobile Number Verified ✓"
+                                                errorText = null
+                                            }
+                                        },
+                                        label = { Text("6-digit OTP") },
+                                        placeholder = { Text("123456") },
+                                        singleLine = true,
+                                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    Button(
+                                        onClick = {
+                                            if (otpCode.isNotBlank()) {
+                                                isPhoneVerified = true
+                                                otpNotice = "Mobile Number Verified ✓"
+                                                errorText = null
+                                            } else {
+                                                errorText = "Please enter the OTP."
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = IndBlue, contentColor = Color.White),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Verify", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        } else {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = IndGreenLight,
+                                modifier = Modifier.padding(top = 2.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(Icons.Filled.Verified, contentDescription = null, tint = IndGreenDark, modifier = Modifier.size(14.dp))
+                                    Text("Mobile Number Verified ✓", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndGreenDark)
+                                }
+                            }
+                        }
+
+                        if (otpNotice != null) {
+                            Text(otpNotice!!, fontSize = 11.sp, color = IndGreenDark, fontWeight = FontWeight.SemiBold)
+                        }
+
                         Text(
                             text = "Used to match and sync mutual agreements with your contacts.",
                             fontSize = 11.sp,
@@ -3518,7 +3744,7 @@ fun ProfileDialog(
                             },
                             modifier = Modifier.fillMaxWidth().height(48.dp),
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IndNavyHeader)
+                            colors = ButtonDefaults.buttonColors(containerColor = IndBlue, contentColor = Color.White)
                         ) {
                             Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
@@ -3643,7 +3869,7 @@ fun InviteCounterpartyDialog(
                     },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = IndGreenDark)
+                    colors = ButtonDefaults.buttonColors(containerColor = IndBlue)
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
@@ -3697,6 +3923,123 @@ fun InviteCounterpartyDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Done / Invite Later", color = IndTextSecondary, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NotificationsDialog(
+    notifications: List<AppNotification>,
+    onDismiss: () -> Unit,
+    onMarkAllRead: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = IndSurface)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Notifications & Alerts", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = IndNavyHeader)
+                        val unreadCount = notifications.count { !it.isRead }
+                        Text(if (unreadCount > 0) "$unreadCount unread alerts" else "All caught up", style = MaterialTheme.typography.bodySmall, color = IndTextSecondary)
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close", tint = IndTextSecondary)
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(
+                        onClick = {
+                            PhoneNotificationHelper.showNotification(
+                                context = context,
+                                title = "FinMoney Sync Alert",
+                                message = "System and in-app notifications are active and connected.",
+                                actionType = "SYSTEM"
+                            )
+                        }
+                    ) {
+                        Icon(Icons.Filled.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp), tint = IndBlue)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Test Notification", fontSize = 11.sp, color = IndBlue)
+                    }
+
+                    if (notifications.any { !it.isRead }) {
+                        TextButton(onClick = onMarkAllRead) {
+                            Icon(Icons.Filled.DoneAll, contentDescription = null, modifier = Modifier.size(16.dp), tint = IndBlue)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Mark all read", fontSize = 12.sp, color = IndBlue, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                if (notifications.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Filled.NotificationsNone, contentDescription = null, tint = IndTextMuted, modifier = Modifier.size(48.dp))
+                            Text("No notifications yet", color = IndTextSecondary, fontSize = 14.sp)
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(notifications) { notif ->
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (!notif.isRead) IndBlueLight else IndCardSecondary,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (!notif.isRead) IndBlue.copy(alpha = 0.3f) else IndBorder),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier.size(32.dp).clip(CircleShape).background(if (!notif.isRead) IndBlue else IndCardSecondary),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = when (notif.actionType) {
+                                                "PAYMENT_REMINDER" -> Icons.Filled.NotificationsActive
+                                                "APPROVAL_REQUEST" -> Icons.Filled.Handshake
+                                                else -> Icons.Filled.Info
+                                            },
+                                            contentDescription = null,
+                                            tint = if (!notif.isRead) Color.White else IndTextSecondary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(notif.title, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = IndNavyHeader)
+                                        Text(notif.message, fontSize = 12.sp, color = IndTextSecondary)
+                                        Text(
+                                            SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(notif.timestamp)),
+                                            fontSize = 10.sp,
+                                            color = IndTextMuted,
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

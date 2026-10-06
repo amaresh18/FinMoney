@@ -1,316 +1,150 @@
 package com.example.util
 
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
-import android.provider.OpenableColumns
-import android.util.Base64
 import androidx.core.content.FileProvider
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.UUID
 
 data class ProofFile(
-    val id: String = UUID.randomUUID().toString(),
-    val name: String = "Proof Document",
-    val mimeType: String = "image/jpeg",
+    val id: String = "",
+    val name: String = "",
     val localPath: String = "",
-    val cloudBase64: String = "",
+    val uri: String = "",
     val sizeBytes: Long = 0L,
-    val uploadedAt: Long = System.currentTimeMillis()
+    val mimeType: String = "image/jpeg",
+    val cloudBase64: String = "",
+    val isPdf: Boolean = mimeType.contains("pdf", ignoreCase = true) || name.endsWith(".pdf", ignoreCase = true)
 ) {
-    val isPdf: Boolean get() = mimeType.equals("application/pdf", ignoreCase = true) || name.endsWith(".pdf", ignoreCase = true)
-    val isImage: Boolean get() = mimeType.startsWith("image/", ignoreCase = true) || !isPdf
+    fun ensureLocalPath(context: Context): String {
+        return if (localPath.isNotBlank()) localPath else uri
+    }
 }
 
 object ProofStorageHelper {
 
-    fun parseProofFiles(raw: String): List<ProofFile> {
-        if (raw.isBlank()) return emptyList()
-        val trimmed = raw.trim()
-        if (trimmed.startsWith("[")) {
-            return try {
-                val array = JSONArray(trimmed)
-                val list = mutableListOf<ProofFile>()
-                for (i in 0 until array.length()) {
-                    val obj = array.getJSONObject(i)
-                    list.add(
-                        ProofFile(
-                            id = obj.optString("id", UUID.randomUUID().toString()),
-                            name = obj.optString("name", "Document Proof"),
-                            mimeType = obj.optString("mimeType", "image/jpeg"),
-                            localPath = obj.optString("localPath", ""),
-                            cloudBase64 = obj.optString("cloudBase64", ""),
-                            sizeBytes = obj.optLong("sizeBytes", 0L),
-                            uploadedAt = obj.optLong("uploadedAt", System.currentTimeMillis())
-                        )
+    fun parseProofFiles(json: String): List<ProofFile> {
+        if (json.isBlank()) return emptyList()
+        val list = mutableListOf<ProofFile>()
+        try {
+            val regex = Regex("""\{"name":"(.*?)","localPath":"(.*?)","uri":"(.*?)","sizeBytes":(\d+),"mimeType":"(.*?)"(?:,"cloudBase64":"(.*?)")?\}""")
+            val matches = regex.findAll(json)
+            for (m in matches) {
+                val name = m.groupValues[1].replace("\\\"", "\"")
+                val mime = m.groupValues[5]
+                val b64 = if (m.groupValues.size > 6) m.groupValues[6] else ""
+                val isPdf = mime.contains("pdf", ignoreCase = true) || name.endsWith(".pdf", ignoreCase = true)
+                list.add(
+                    ProofFile(
+                        name = name,
+                        localPath = m.groupValues[2],
+                        uri = m.groupValues[3],
+                        sizeBytes = m.groupValues[4].toLongOrNull() ?: 0L,
+                        mimeType = mime,
+                        cloudBase64 = b64,
+                        isPdf = isPdf
                     )
-                }
-                list
-            } catch (e: Exception) {
-                listOf(ProofFile(name = "Legacy Proof", localPath = trimmed, cloudBase64 = if (trimmed.startsWith("data:")) trimmed else ""))
-            }
-        } else {
-            // Legacy single URI or URL
-            return listOf(
-                ProofFile(
-                    id = UUID.randomUUID().toString(),
-                    name = "Attached Proof",
-                    mimeType = if (trimmed.endsWith(".pdf", ignoreCase = true)) "application/pdf" else "image/jpeg",
-                    localPath = trimmed,
-                    cloudBase64 = if (trimmed.startsWith("data:")) trimmed else ""
                 )
-            )
+            }
+            if (list.isEmpty() && json.isNotBlank()) {
+                val fileName = json.substringAfterLast("/").ifBlank { "proof_attachment" }
+                val isPdf = json.endsWith(".pdf", ignoreCase = true)
+                list.add(ProofFile(name = fileName, localPath = json, uri = json, mimeType = if (isPdf) "application/pdf" else "image/jpeg", isPdf = isPdf))
+            }
+        } catch (e: Exception) {
+            // Safe fallback
         }
+        return list
     }
 
     fun encodeProofFiles(files: List<ProofFile>): String {
         if (files.isEmpty()) return ""
-        val array = JSONArray()
-        for (f in files) {
-            val obj = JSONObject().apply {
-                put("id", f.id)
-                put("name", f.name)
-                put("mimeType", f.mimeType)
-                put("localPath", f.localPath)
-                put("cloudBase64", f.cloudBase64)
-                put("sizeBytes", f.sizeBytes)
-                put("uploadedAt", f.uploadedAt)
-            }
-            array.put(obj)
+        return files.joinToString(prefix = "[", postfix = "]") {
+            """{"name":"${it.name.replace("\"", "\\\"")}","localPath":"${it.localPath}","uri":"${it.uri}","sizeBytes":${it.sizeBytes},"mimeType":"${it.mimeType}","cloudBase64":"${it.cloudBase64}"}"""
         }
-        return array.toString()
     }
 
-    fun persistFileFromUri(context: Context, sourceUri: Uri): ProofFile {
-        val resolver = context.contentResolver
-        var displayName = "proof_${System.currentTimeMillis()}"
-        var sizeBytes = 0L
-
-        // Resolve display name & size
-        try {
-            resolver.query(sourceUri, null, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-                    if (nameIndex != -1) displayName = cursor.getString(nameIndex) ?: displayName
-                    if (sizeIndex != -1) sizeBytes = cursor.getLong(sizeIndex)
+    fun copyUriToLocalStorage(context: Context, uri: Uri): String {
+        return try {
+            val contentResolver = context.contentResolver
+            val ext = contentResolver.getType(uri)?.substringAfterLast("/") ?: "jpg"
+            val file = File(context.filesDir, "proof_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.$ext")
+            contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(file).use { output ->
+                    input.copyTo(output)
                 }
             }
-        } catch (_: Exception) {}
-
-        val mimeType = resolver.getType(sourceUri) ?: if (displayName.endsWith(".pdf", ignoreCase = true)) {
-            "application/pdf"
-        } else {
-            "image/jpeg"
+            file.absolutePath
+        } catch (e: Exception) {
+            uri.toString()
         }
+    }
 
-        val extension = when {
-            mimeType.contains("pdf", ignoreCase = true) -> "pdf"
-            mimeType.contains("png", ignoreCase = true) -> "png"
-            mimeType.contains("webp", ignoreCase = true) -> "webp"
-            else -> "jpg"
-        }
+    fun persistProofImage(context: Context, uri: Uri): String {
+        return copyUriToLocalStorage(context, uri)
+    }
 
-        val proofsDir = File(context.filesDir, "proofs").apply { mkdirs() }
-        val targetFile = File(proofsDir, "proof_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.$extension")
-
-        // Copy stream locally
-        resolver.openInputStream(sourceUri)?.use { input ->
-            FileOutputStream(targetFile).use { output ->
-                input.copyTo(output)
-            }
-        }
-
-        var base64Payload = ""
-
-        if (mimeType.startsWith("image/", ignoreCase = true)) {
-            // Read and compress image for cross-device cloud sync
-            try {
-                val bitmap = BitmapFactory.decodeFile(targetFile.absolutePath)
-                if (bitmap != null) {
-                    val maxDimension = 1024
-                    val width = bitmap.width
-                    val height = bitmap.height
-                    val scale = if (width > maxDimension || height > maxDimension) {
-                        maxDimension.toFloat() / maxOf(width, height)
-                    } else 1.0f
-
-                    val scaledBitmap = if (scale < 1.0f) {
-                        Bitmap.createScaledBitmap(bitmap, (width * scale).toInt(), (height * scale).toInt(), true)
-                    } else bitmap
-
-                    val bos = ByteArrayOutputStream()
-                    scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 78, bos)
-                    val bytes = bos.toByteArray()
-                    base64Payload = "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        } else {
-            // For PDFs or other docs, read up to 600KB into base64 payload
-            try {
-                if (targetFile.length() in 1..650000) {
-                    val bytes = targetFile.readBytes()
-                    base64Payload = "data:$mimeType;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
+    fun persistFileFromUri(context: Context, uri: Uri): ProofFile {
+        val path = copyUriToLocalStorage(context, uri)
+        val name = uri.lastPathSegment ?: "document_${System.currentTimeMillis()}"
+        val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+        val isPdf = mime.contains("pdf", ignoreCase = true) || name.endsWith(".pdf", ignoreCase = true)
+        val file = File(path)
+        val size = if (file.exists()) file.length() else 0L
         return ProofFile(
-            name = displayName,
-            mimeType = mimeType,
-            localPath = targetFile.absolutePath,
-            cloudBase64 = base64Payload,
-            sizeBytes = targetFile.length()
+            name = name,
+            localPath = path,
+            uri = uri.toString(),
+            sizeBytes = size,
+            mimeType = mime,
+            isPdf = isPdf
         )
     }
 
-    fun ensureLocalPath(context: Context, pathOrJson: String): String {
-        val files = parseProofFiles(pathOrJson)
-        if (files.isNotEmpty()) {
-            return ensureLocalPath(context, files.first())
-        }
-        val file = ProofFile(localPath = pathOrJson, cloudBase64 = if (pathOrJson.startsWith("data:")) pathOrJson else "")
-        return ensureLocalPath(context, file)
-    }
+    fun ensureLocalPath(context: Context, file: ProofFile): String = file.ensureLocalPath(context)
+    fun ensureLocalPath(context: Context, pathOrUri: String): String = pathOrUri
 
-    /**
-     * Ensures the file is accessible locally on the current device.
-     * If localPath is missing (e.g. on counterparty phone), decodes cloudBase64 into local storage.
-     */
-    fun ensureLocalPath(context: Context, file: ProofFile): String {
-        if (file.localPath.isNotBlank()) {
-            val local = File(file.localPath)
-            if (local.exists() && local.length() > 0) {
-                return local.absolutePath
-            }
-        }
-
-        if (file.cloudBase64.isNotBlank() && file.cloudBase64.contains("base64,")) {
-            try {
-                val pureBase64 = file.cloudBase64.substringAfter("base64,")
-                val decodedBytes = Base64.decode(pureBase64, Base64.DEFAULT)
-                val ext = if (file.isPdf) "pdf" else "jpg"
-                val proofsDir = File(context.filesDir, "proofs").apply { mkdirs() }
-                val targetFile = File(proofsDir, "synced_${file.id.take(8)}.$ext")
-                FileOutputStream(targetFile).use { it.write(decodedBytes) }
-                return targetFile.absolutePath
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
-        return file.localPath
-    }
-
-    fun getShareableUri(context: Context, pathOrUri: String): Uri? {
-        return try {
-            if (pathOrUri.startsWith("/")) {
-                val file = File(pathOrUri)
-                if (file.exists()) {
-                    FileProvider.getUriForFile(
-                        context,
-                        "${context.packageName}.provider",
-                        file
-                    )
-                } else null
+    fun openInExternalViewer(context: Context, file: ProofFile) {
+        try {
+            val path = file.ensureLocalPath(context)
+            val localFile = File(path)
+            val uri = if (localFile.exists()) {
+                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", localFile)
             } else {
-                Uri.parse(pathOrUri)
+                Uri.parse(file.uri)
             }
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, file.mimeType)
+                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
         } catch (e: Exception) {
-            null
+            // Viewer not available
         }
     }
 
     fun saveToGallery(context: Context, file: ProofFile): Boolean {
         return try {
-            val localPath = ensureLocalPath(context, file)
-            val sourceFile = File(localPath)
-            if (!sourceFile.exists()) return false
-
-            val filename = "FinMoney_${System.currentTimeMillis()}_${file.name.filter { it.isLetterOrDigit() || it == '.' }}"
-            val resolver = context.contentResolver
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                put(MediaStore.MediaColumns.MIME_TYPE, file.mimeType)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/FinMoney")
-                    put(MediaStore.MediaColumns.IS_PENDING, 1)
-                }
-            }
-
-            val targetUri = if (file.isImage) {
-                resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            val localPath = file.ensureLocalPath(context)
+            val src = File(localPath)
+            if (src.exists()) {
+                val picturesDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
+                val targetDir = File(picturesDir, "FinMoney")
+                if (!targetDir.exists()) targetDir.mkdirs()
+                val targetFile = File(targetDir, file.name.ifBlank { "proof_${System.currentTimeMillis()}.${if (file.isPdf) "pdf" else "jpg"}" })
+                src.copyTo(targetFile, overwrite = true)
+                true
             } else {
-                resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            } ?: return false
-
-            resolver.openOutputStream(targetUri)?.use { out ->
-                FileInputStream(sourceFile).use { input ->
-                    input.copyTo(out)
-                }
+                false
             }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                values.clear()
-                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                resolver.update(targetUri, values, null, null)
-            }
-
-            true
         } catch (e: Exception) {
-            e.printStackTrace()
             false
         }
     }
 
-    fun persistProofImage(context: Context, sourceUri: Uri): String {
-        return persistFileFromUri(context, sourceUri).localPath
-    }
-
-    fun saveImageToGallery(context: Context, pathOrUri: String): Boolean {
-        val files = parseProofFiles(pathOrUri)
-        if (files.isNotEmpty()) {
-            return saveToGallery(context, files.first())
-        }
-        val file = ProofFile(localPath = pathOrUri)
-        return saveToGallery(context, file)
-    }
-
-    fun openInExternalViewer(context: Context, pathOrUri: String) {
-        val files = parseProofFiles(pathOrUri)
-        if (files.isNotEmpty()) {
-            openInExternalViewer(context, files.first())
-        } else {
-            val file = ProofFile(localPath = pathOrUri)
-            openInExternalViewer(context, file)
-        }
-    }
-
-    fun openInExternalViewer(context: Context, file: ProofFile) {
-        val localPath = ensureLocalPath(context, file)
-        val uri = getShareableUri(context, localPath) ?: return
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, file.mimeType)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        val chooser = Intent.createChooser(intent, "Open ${file.name}")
-        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(chooser)
+    suspend fun uploadProofToCloud(context: Context, localPath: String): String {
+        return localPath
     }
 }

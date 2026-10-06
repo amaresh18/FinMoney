@@ -1,7 +1,6 @@
 <resources>
     <string name="app_name">FinMoney</string>
-    <string name="salary_utility">Salary &amp; Debits</string>
-    <string name="lent_borrowed">Lent &amp; Borrowed</string>
-    <string name="analytics_history">History &amp; Trends</string>
-    <string name="notifications_title">Approvals &amp; Alerts</string>
+    <string name="salary_utility_tab">Salary Utility</string>
+    <string name="chit_funds_tab">Chits</string>
+    <string name="lent_borrowed_tab">Lent &amp; Borrowed</string>
 </resources>

@@ -11,18 +11,16 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 private val IndMoneyColorScheme = lightColorScheme(
-    primary = IndGreen,
+    primary = IndBlue,
     onPrimary = Color.White,
-    primaryContainer = IndGreenLight,
-    onPrimaryContainer = IndGreenDark,
-    secondary = IndBlue,
+    primaryContainer = IndBlueLight,
+    onPrimaryContainer = IndBlueDark,
+    secondary = IndNavyHeader,
     onSecondary = Color.White,
-    secondaryContainer = IndBlueLight,
-    onSecondaryContainer = IndBlueDark,
-    tertiary = IndNavyHeader,
+    secondaryContainer = IndCardSecondary,
+    onSecondaryContainer = IndNavyHeader,
+    tertiary = IndBlueDark,
     onTertiary = Color.White,
-    tertiaryContainer = IndCyanLight,
-    onTertiaryContainer = IndCyan,
     background = IndBackground,
     onBackground = IndTextPrimary,
     surface = IndSurface,
@@ -39,26 +37,27 @@ private val IndMoneyColorScheme = lightColorScheme(
 
 @Composable
 fun FinMoneyTheme(
-    darkTheme: Boolean = false,
     content: @Composable () -> Unit
 ) {
+    val colorScheme = IndMoneyColorScheme
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as? Activity)?.window
             if (window != null) {
-                window.statusBarColor = IndNavyHeader.toArgb()
-                window.navigationBarColor = Color.White.toArgb()
-                val controller = WindowCompat.getInsetsController(window, view)
-                controller.isAppearanceLightStatusBars = false
-                controller.isAppearanceLightNavigationBars = true
+                window.statusBarColor = IndSurface.toArgb()
+                window.navigationBarColor = IndSurface.toArgb()
+                val insetsController = WindowCompat.getInsetsController(window, view)
+                insetsController.isAppearanceLightStatusBars = true
+                insetsController.isAppearanceLightNavigationBars = true
             }
         }
     }
 
     MaterialTheme(
-        colorScheme = IndMoneyColorScheme,
+        colorScheme = colorScheme,
         typography = Typography,
         content = content
     )
 }
+

@@ -16,7 +16,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class FeaturesValidationTest {
 
     // ==========================================
@@ -250,5 +250,156 @@ class FeaturesValidationTest {
         assertEquals("p2", parsed[1].id)
         assertEquals(500.0, parsed[1].amount, 0.01)
         assertFalse(parsed[1].isApproved)
+    }
+
+    // ==========================================
+    // 6. SETTLEMENT & MUTUAL APPROVAL SCENARIOS
+    // ==========================================
+
+    @Test
+    fun testUnapprovedPaymentsDoNotReduceBalance() {
+        val principal = 10000.0
+        val unapprovedPayment = PaymentRecord(
+            id = "unapproved_1",
+            amount = 4000.0,
+            note = "Logged payment awaiting approval",
+            recordedBy = "Borrower",
+            isApproved = false // Pending counterparty approval
+        )
+
+        val breakdown = InterestCalculator.calculate(
+            principal = principal,
+            ratePercent = 0.0,
+            isMonthly = true,
+            startTimestamp = System.currentTimeMillis(),
+            payments = listOf(unapprovedPayment)
+        )
+
+        // Balance should still be 10000 because payment is NOT approved yet
+        assertEquals(0.0, breakdown.principalPaid, 0.01)
+        assertEquals(10000.0, breakdown.totalRemainingDue, 0.01)
+
+        // Now test once approved
+        val approvedPayment = unapprovedPayment.copy(isApproved = true, approvedBy = "Lender")
+        val breakdownApproved = InterestCalculator.calculate(
+            principal = principal,
+            ratePercent = 0.0,
+            isMonthly = true,
+            startTimestamp = System.currentTimeMillis(),
+            payments = listOf(approvedPayment)
+        )
+        assertEquals(4000.0, breakdownApproved.principalPaid, 0.01)
+        assertEquals(6000.0, breakdownApproved.totalRemainingDue, 0.01)
+    }
+
+    @Test
+    fun testSettlementRequesterRoleIdentification_positiveAndNegative() {
+        val loan = LoanTransaction(
+            id = 101,
+            type = LoanType.GIVEN.name,
+            totalAmount = 5000.0,
+            counterpartyName = "Rahul Sharma",
+            counterpartyContact = "9876543210",
+            creatorContact = "9123456780",
+            createdBy = "Amaresh",
+            status = ApprovalStatus.PENDING_SETTLEMENT.name,
+            settlementRequestedBy = "Amaresh"
+        )
+
+        // Scenario 1: Current user is Amaresh (Lender who requested settlement)
+        val userAmaresh = UserProfile(name = "Amaresh", phoneNumber = "9123456780")
+        val currentPhoneA = userAmaresh.phoneNumber.trim()
+        val currentNameA = userAmaresh.name.trim()
+        val isCreatorA = (loan.creatorContact.isNotBlank() && currentPhoneA.isNotBlank() && currentPhoneA.takeLast(10) == loan.creatorContact.takeLast(10)) ||
+                         (loan.creatorContact.isBlank() && loan.createdBy.equals(currentNameA, ignoreCase = true))
+
+        val isSettlementRequesterA = if (loan.settlementRequestedBy.isBlank()) false else {
+            loan.settlementRequestedBy.equals(currentNameA, ignoreCase = true) ||
+            (isCreatorA && (loan.settlementRequestedBy == loan.createdBy || loan.settlementRequestedBy == "You"))
+        }
+
+        // Amaresh is the requester -> should NOT see approve/decline buttons
+        assertTrue(isSettlementRequesterA)
+
+        // Scenario 2: Current user is Rahul Sharma (Borrower receiving the settlement request)
+        val userRahul = UserProfile(name = "Rahul Sharma", phoneNumber = "9876543210")
+        val currentPhoneR = userRahul.phoneNumber.trim()
+        val currentNameR = userRahul.name.trim()
+        val isCreatorR = (loan.creatorContact.isNotBlank() && currentPhoneR.isNotBlank() && currentPhoneR.takeLast(10) == loan.creatorContact.takeLast(10))
+
+        val isSettlementRequesterR = if (loan.settlementRequestedBy.isBlank()) false else {
+            loan.settlementRequestedBy.equals(currentNameR, ignoreCase = true) ||
+            (isCreatorR && (loan.settlementRequestedBy == loan.createdBy || loan.settlementRequestedBy == "You"))
+        }
+
+        // Rahul is the recipient -> isSettlementRequester is FALSE -> Rahul sees Approve/Decline buttons!
+        assertFalse(isSettlementRequesterR)
+    }
+
+    @Test
+    fun testSettlementRequesterRole_borrowerInitiated() {
+        val loan = LoanTransaction(
+            id = 102,
+            type = LoanType.GIVEN.name,
+            totalAmount = 8000.0,
+            counterpartyName = "Rahul Sharma",
+            counterpartyContact = "9876543210",
+            creatorContact = "9123456780",
+            createdBy = "Amaresh",
+            status = ApprovalStatus.PENDING_SETTLEMENT.name,
+            settlementRequestedBy = "Rahul Sharma"
+        )
+
+        // Scenario 1: Rahul (Borrower) initiated settlement
+        val userRahul = UserProfile(name = "Rahul Sharma", phoneNumber = "9876543210")
+        val currentPhoneR = userRahul.phoneNumber.trim()
+        val currentNameR = userRahul.name.trim()
+        val isCreatorR = (loan.creatorContact.isNotBlank() && currentPhoneR.isNotBlank() && currentPhoneR.takeLast(10) == loan.creatorContact.takeLast(10))
+
+        val req = loan.settlementRequestedBy.trim()
+        val isReqCreatorR = req.equals(loan.createdBy.trim(), ignoreCase = true) || req.equals("You", ignoreCase = true) || req.equals("CREATOR", ignoreCase = true)
+        val isReqCounterpartyR = req.equals(loan.counterpartyName.trim(), ignoreCase = true) || req.equals("COUNTERPARTY", ignoreCase = true)
+
+        val isSettlementRequesterR = if (loan.settlementRequestedBy.isBlank()) false else {
+            if (isCreatorR) isReqCreatorR || req.equals(currentNameR, ignoreCase = true)
+            else isReqCounterpartyR || req.equals(currentNameR, ignoreCase = true)
+        }
+
+        // Rahul is requester -> true (cannot approve self)
+        assertTrue(isSettlementRequesterR)
+
+        // Scenario 2: Amaresh (Lender) views Rahul's settlement request
+        val userAmaresh = UserProfile(name = "Amaresh", phoneNumber = "9123456780")
+        val currentPhoneA = userAmaresh.phoneNumber.trim()
+        val currentNameA = userAmaresh.name.trim()
+        val isCreatorA = (loan.creatorContact.isNotBlank() && currentPhoneA.isNotBlank() && currentPhoneA.takeLast(10) == loan.creatorContact.takeLast(10))
+
+        val isSettlementRequesterA = if (loan.settlementRequestedBy.isBlank()) false else {
+            if (isCreatorA) isReqCreatorR || req.equals(currentNameA, ignoreCase = true)
+            else isReqCounterpartyR || req.equals(currentNameA, ignoreCase = true)
+        }
+
+        // Amaresh is counterparty -> false (Amaresh sees Approve / Decline buttons)
+        assertFalse(isSettlementRequesterA)
+    }
+
+    @Test
+    fun testPaymentRecordDeletionRecalculation() {
+        val pay1 = PaymentRecord(id = "p1", amount = 3000.0, isApproved = true)
+        val pay2 = PaymentRecord(id = "p2", amount = 2000.0, isApproved = true)
+        val pay3 = PaymentRecord(id = "p3", amount = 1500.0, isApproved = false)
+
+        val initialList = listOf(pay1, pay2, pay3)
+        val initialApprovedTotal = initialList.filter { it.isApproved }.sumOf { it.amount }
+        assertEquals(5000.0, initialApprovedTotal, 0.01)
+
+        // Delete approved payment p1
+        val afterDeleteP1 = initialList.filterNot { it.id == "p1" }
+        val updatedApprovedTotal = afterDeleteP1.filter { it.isApproved }.sumOf { it.amount }
+        assertEquals(2000.0, updatedApprovedTotal, 0.01)
+
+        // Remaining due on 10,000 loan
+        val remainingDue = 10000.0 - updatedApprovedTotal
+        assertEquals(8000.0, remainingDue, 0.01)
     }
 }

@@ -71,6 +71,9 @@ interface FinMoneyDao {
     @Query("SELECT * FROM custom_categories ORDER BY id ASC")
     fun getAllCustomCategories(): Flow<List<CustomCategory>>
 
+    @Query("SELECT * FROM custom_categories WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
+    suspend fun getCustomCategoryByName(name: String): CustomCategory?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCustomCategory(category: CustomCategory): Long
 
