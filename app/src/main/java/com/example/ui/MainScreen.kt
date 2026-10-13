@@ -1,5 +1,7 @@
 package com.example.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -7,334 +9,402 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
-import kotlinx.coroutines.launch
-import com.example.data.model.DebitCategory
-import com.example.data.model.LoanType
-import com.example.ui.components.*
-import com.example.ui.screens.AuthScreen
-import com.example.ui.screens.HistoryAnalyticsScreen
-import com.example.ui.screens.LentBorrowedScreen
-import com.example.ui.screens.SalaryUtilityScreen
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.components.BrandLogo
+import com.example.ui.components.BrandType
+import com.example.ui.components.QuickMultiAddSheet
+import com.example.ui.screens.*
 import com.example.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FinMoneyApp(
-    viewModel: FinMoneyViewModel
+fun MainScreen(
+    initialOpenPending: Boolean = false,
+    onPendingConsumed: () -> Unit = {}
 ) {
+    val viewModel: FinMoneyViewModel = viewModel()
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var showPendingTransactions by remember { mutableStateOf(initialOpenPending) }
+
+    LaunchedEffect(initialOpenPending) {
+        if (initialOpenPending) {
+            showPendingTransactions = true
+            onPendingConsumed()
+        }
+    }
+
+    val notifications by viewModel.notifications.collectAsStateWithLifecycle()
+    val pendingTransactions by viewModel.pendingBankTransactions.collectAsStateWithLifecycle()
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
-    val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
+    val currencySymbol by viewModel.currencySymbol.collectAsStateWithLifecycle()
     val currentMonth by viewModel.currentMonth.collectAsStateWithLifecycle()
     val currentYear by viewModel.currentYear.collectAsStateWithLifecycle()
-    val currencySymbol by viewModel.currencySymbol.collectAsStateWithLifecycle()
-    val customCategories by viewModel.customCategories.collectAsStateWithLifecycle()
-    val allLoans by viewModel.allLoans.collectAsStateWithLifecycle()
-    val notifications by viewModel.notifications.collectAsStateWithLifecycle()
-    val unreadNotifs by viewModel.unreadNotificationCount.collectAsStateWithLifecycle()
+    val allDebits by viewModel.allDebits.collectAsStateWithLifecycle()
 
-    var showAddDebitDialog by remember { mutableStateOf(false) }
-    var debitInitialCategory by remember { mutableStateOf(DebitCategory.EMI.name) }
-    var showAddCustomCategoryDialog by remember { mutableStateOf(false) }
-    var showAddLoanDialog by remember { mutableStateOf(false) }
-    var showProfileDialog by remember { mutableStateOf(false) }
-    var showNotificationsDialog by remember { mutableStateOf(false) }
-    var loanInitialType by remember { mutableStateOf(LoanType.GIVEN) }
+    var showQuickMultiAddSheet by remember { mutableStateOf(false) }
+    var showAnalytics by remember { mutableStateOf(false) }
+    var showUserProfile by remember { mutableStateOf(false) }
+    var showSignOutDialog by remember { mutableStateOf(false) }
 
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-
-    // Check if user is signed in (requires at least phone or email)
-    val isAuthenticated = remember(userProfile) {
-        userProfile != null && (userProfile?.phoneNumber?.isNotBlank() == true || userProfile?.email?.isNotBlank() == true)
-    }
-
-    if (!isAuthenticated) {
-        AuthScreen(
-            viewModel = viewModel,
-            onContinue = {
-                // Auth state will update automatically via StateFlow
+    // Intercept back button on secondary views or tabs to navigate back safely
+    if (showUserProfile) {
+        BackHandler {
+            showUserProfile = false
+        }
+    } else if (showPendingTransactions) {
+        BackHandler {
+            showPendingTransactions = false
+        }
+    } else if (selectedTab != 0 || showAnalytics) {
+        BackHandler {
+            if (showAnalytics) {
+                showAnalytics = false
+            } else {
+                selectedTab = 0
             }
-        )
-        return
+        }
     }
 
-    val monthName = FinMoneyViewModel.getMonthName(currentMonth)
+    val unreadNotifications = remember(notifications) {
+        notifications.count { !it.isRead }
+    }
+    val pendingAlertsCount = pendingTransactions.size
 
     Scaffold(
         containerColor = IndBackground,
         topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(IndBlue),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("₹", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
-                        }
-                        Text("FinMoney", fontWeight = FontWeight.Bold, color = IndNavyHeader)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = IndSurface),
-                actions = {
+            Surface(
+                color = IndSurface,
+                shadowElevation = 2.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, IndBorderSubtle)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Left: Brand Logo & Title
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(end = 12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // Notifications Icon with unread badge
+                        BrandLogo(
+                            name = "FinMoney",
+                            badgeSize = 32.dp
+                        )
+                        Column {
+                            Text(
+                                text = "FinMoney",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = IndNavyHeader
+                            )
+                            Text(
+                                text = FinMoneyViewModel.getMonthName(currentMonth) + " " + currentYear,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = IndTextSecondary
+                            )
+                        }
+                    }
+
+                    // Right: Actions
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Quick Add Multi-Debit FAB icon
                         IconButton(
-                            onClick = { showNotificationsDialog = true },
-                            modifier = Modifier.size(36.dp)
+                            onClick = { showQuickMultiAddSheet = true },
+                            modifier = Modifier
+                                .testTag("top_quick_add_button")
+                                .clip(CircleShape)
+                                .background(IndBlueLight)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Add Debits",
+                                tint = IndBlue
+                            )
+                        }
+
+                        // Notifications / Approvals
+                        IconButton(
+                            onClick = { showPendingTransactions = true },
+                            modifier = Modifier
+                                .testTag("notifications_button")
+                                .clip(CircleShape)
+                                .background(if (pendingAlertsCount > 0 || unreadNotifications > 0) Color(0xFFFEF3C7) else IndBlueLight)
                         ) {
                             BadgedBox(
                                 badge = {
-                                    if (unreadNotifs > 0) {
+                                    val count = unreadNotifications + pendingAlertsCount
+                                    if (count > 0) {
                                         Badge(
-                                            containerColor = IndBlue,
+                                            containerColor = IndRed,
                                             contentColor = Color.White
                                         ) {
-                                            Text(if (unreadNotifs > 9) "9+" else "$unreadNotifs", fontSize = 10.sp)
+                                            Text(if (count > 99) "99+" else "$count")
                                         }
                                     }
                                 }
                             ) {
                                 Icon(
-                                    imageVector = if (unreadNotifs > 0) Icons.Filled.NotificationsActive else Icons.Filled.Notifications,
-                                    contentDescription = "Notifications",
-                                    tint = if (unreadNotifs > 0) IndBlue else IndTextSecondary,
-                                    modifier = Modifier.size(22.dp)
+                                    imageVector = if (pendingAlertsCount > 0) Icons.Filled.NotificationsActive else if (showPendingTransactions) Icons.Filled.Notifications else Icons.Outlined.Notifications,
+                                    contentDescription = "Notifications & Approvals",
+                                    tint = if (pendingAlertsCount > 0) Color(0xFFD97706) else IndNavyHeader
                                 )
                             }
                         }
 
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = IndCardSecondary
-                        ) {
-                            Text(
-                                text = "$monthName $currentYear",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = IndNavyHeader,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                            )
-                        }
-
-                        // User Profile / Sign In button
+                        // Profile Avatar
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
+                                .size(36.dp)
                                 .clip(CircleShape)
-                                .background(if (userProfile?.phoneNumber?.isNotBlank() == true) IndBlue else IndCardSecondary)
-                                .border(1.dp, if (userProfile?.phoneNumber?.isNotBlank() == true) IndBlue else IndBorder, CircleShape)
-                                .clickable { showProfileDialog = true },
+                                .background(IndGreenLight)
+                                .border(1.dp, IndGreen, CircleShape)
+                                .clickable {
+                                    showUserProfile = true
+                                },
                             contentAlignment = Alignment.Center
                         ) {
-                            val pic = userProfile?.profilePicUri
-                            if (!pic.isNullOrBlank()) {
-                                AsyncImage(
-                                    model = pic,
-                                    contentDescription = "Profile",
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else if (userProfile?.phoneNumber?.isNotBlank() == true) {
-                                val initial = userProfile?.name?.take(1)?.uppercase()?.ifBlank { "U" } ?: "U"
-                                Text(initial, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            } else {
-                                Icon(Icons.Filled.Person, contentDescription = "Profile / Sign In", tint = IndTextSecondary, modifier = Modifier.size(18.dp))
-                            }
+                            Text(
+                                text = (userProfile?.name?.take(1) ?: "Y").uppercase(),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = IndGreenDark
+                            )
                         }
                     }
                 }
-            )
+            }
         },
         bottomBar = {
             NavigationBar(
                 containerColor = IndSurface,
-                tonalElevation = 8.dp
+                tonalElevation = 8.dp,
+                modifier = Modifier.border(1.dp, IndBorderSubtle, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
             ) {
                 NavigationBarItem(
+                    icon = {
+                        Icon(
+                            imageVector = if (selectedTab == 0) Icons.Filled.AccountBalanceWallet else Icons.Outlined.AccountBalanceWallet,
+                            contentDescription = "Dashboard"
+                        )
+                    },
+                    label = { Text("Dashboard", style = MaterialTheme.typography.labelSmall) },
                     selected = selectedTab == 0,
-                    onClick = { viewModel.setTab(0) },
-                    icon = { Icon(Icons.Filled.AccountBalanceWallet, contentDescription = "Salary") },
-                    label = { Text("Salary Utility", fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal) },
+                    onClick = { selectedTab = 0 },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = IndBlue,
                         selectedTextColor = IndBlue,
                         indicatorColor = IndBlueLight
                     )
                 )
+
                 NavigationBarItem(
+                    icon = {
+                        Icon(
+                            imageVector = if (selectedTab == 1) Icons.Filled.SwapHoriz else Icons.Outlined.SwapHoriz,
+                            contentDescription = "Lent & Borrowed"
+                        )
+                    },
+                    label = { Text("Lent/Borrowed", style = MaterialTheme.typography.labelSmall) },
                     selected = selectedTab == 1,
-                    onClick = { viewModel.setTab(1) },
-                    icon = { Icon(Icons.Filled.Handshake, contentDescription = "Lent & Borrowed") },
-                    label = { Text("Lent / Borrowed", fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal) },
+                    onClick = { selectedTab = 1 },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = IndBlue,
                         selectedTextColor = IndBlue,
                         indicatorColor = IndBlueLight
                     )
                 )
+
                 NavigationBarItem(
+                    icon = {
+                        Icon(
+                            imageVector = if (selectedTab == 2) Icons.Filled.BarChart else Icons.Outlined.BarChart,
+                            contentDescription = "Analytics"
+                        )
+                    },
+                    label = { Text("Analytics", style = MaterialTheme.typography.labelSmall) },
                     selected = selectedTab == 2,
-                    onClick = { viewModel.setTab(2) },
-                    icon = { Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = "Analytics") },
-                    label = { Text("Analytics", fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Normal) },
+                    onClick = { selectedTab = 2 },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = IndBlue,
                         selectedTextColor = IndBlue,
                         indicatorColor = IndBlueLight
+                    )
+                )
+
+                NavigationBarItem(
+                    icon = {
+                        Icon(
+                            imageVector = if (selectedTab == 3) Icons.Filled.AccountBalance else Icons.Outlined.AccountBalance,
+                            contentDescription = "Reconcile"
+                        )
+                    },
+                    label = { Text("Reconcile", style = MaterialTheme.typography.labelSmall) },
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = IndBlue,
+                        selectedTextColor = IndBlue,
+                        indicatorColor = IndBlueLight
+                    )
+                )
+
+                NavigationBarItem(
+                    icon = {
+                        Icon(
+                            imageVector = if (selectedTab == 4) Icons.Filled.AutoAwesome else Icons.Outlined.AutoAwesome,
+                            contentDescription = "Kubera AI"
+                        )
+                    },
+                    label = { Text("Kubera AI", style = MaterialTheme.typography.labelSmall) },
+                    selected = selectedTab == 4,
+                    onClick = { selectedTab = 4 },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = Color(0xFFD97706),
+                        selectedTextColor = Color(0xFFD97706),
+                        indicatorColor = Color(0xFFFEF3C7)
                     )
                 )
             }
+        },
+        floatingActionButton = {
+            if (selectedTab == 0 || selectedTab == 1) {
+                ExtendedFloatingActionButton(
+                    onClick = { showQuickMultiAddSheet = true },
+                    containerColor = IndBlue,
+                    contentColor = Color.White,
+                    elevation = FloatingActionButtonDefaults.elevation(6.dp),
+                    modifier = Modifier.testTag("quick_add_fab")
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Entry")
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Add Entry", fontWeight = FontWeight.Bold)
+                }
+            }
         }
-    ) { innerPadding ->
+    ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(padding)
+                .background(IndBackground)
         ) {
-            when (selectedTab) {
-                0 -> SalaryUtilityScreen(
+            if (showUserProfile) {
+                UserProfileScreen(
                     viewModel = viewModel,
-                    onOpenAddDebit = { categoryKey ->
-                        debitInitialCategory = categoryKey
-                        showAddDebitDialog = true
-                    },
-                    onOpenAddCustomCategory = { showAddCustomCategoryDialog = true }
+                    onBack = { showUserProfile = false }
                 )
-                1 -> LentBorrowedScreen(
+            } else if (showPendingTransactions) {
+                PendingTransactionsScreen(
                     viewModel = viewModel,
-                    onOpenAddLoan = { type ->
-                        loanInitialType = type
-                        showAddLoanDialog = true
-                    }
+                    onBack = { showPendingTransactions = false }
                 )
-                2 -> HistoryAnalyticsScreen(
-                    viewModel = viewModel
-                )
+            } else {
+                Crossfade(
+                    targetState = selectedTab,
+                    label = "MainScreenNavigation"
+                ) { tab ->
+                    when (tab) {
+                        0 -> {
+                            if (showAnalytics) {
+                                AnalyticsScreen(
+                                    viewModel = viewModel,
+                                    onBackToDashboard = { showAnalytics = false }
+                                )
+                            } else {
+                                DashboardScreen(
+                                    viewModel = viewModel,
+                                    onOpenAnalytics = { showAnalytics = true },
+                                    onOpenPending = { showPendingTransactions = true },
+                                    onOpenAddDebit = { showQuickMultiAddSheet = true }
+                                )
+                            }
+                        }
+                    1 -> LentBorrowedScreen(
+                        viewModel = viewModel,
+                        onBack = { selectedTab = 0 }
+                    )
+                    2 -> AnalyticsScreen(
+                        viewModel = viewModel,
+                        onBackToDashboard = { selectedTab = 0 }
+                    )
+                    3 -> BankReconciliationScreen(
+                        viewModel = viewModel,
+                        onBack = { selectedTab = 0 }
+                    )
+                    4 -> KuberaAiScreen(viewModel = viewModel)
+                }
             }
         }
     }
+}
 
-    // Add Debit Dialog
-    if (showAddDebitDialog) {
-        AddEditDebitDialog(
-            debitToEdit = null,
-            customCategories = customCategories,
-            monthName = monthName,
+    if (showQuickMultiAddSheet) {
+        QuickMultiAddSheet(
+            currencySymbol = currencySymbol,
+            todayDay = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_MONTH),
+            month = currentMonth,
             year = currentYear,
-            currencySymbol = currencySymbol,
-            initialCategory = debitInitialCategory,
-            onDismiss = { showAddDebitDialog = false },
-            onAddCustomCategoryClick = { showAddCustomCategoryDialog = true },
-            onSave = { debitId, category, customCatName, title, amount, dueDateDay, isRecurring, interestRate, totalTenure, currentTenure, notes ->
-                viewModel.addDebit(
-                    category = category,
-                    customCategoryName = customCatName,
-                    title = title,
-                    amount = amount,
-                    dueDateDay = dueDateDay,
-                    isRecurring = isRecurring,
-                    interestRate = interestRate,
-                    totalTenureMonths = totalTenure,
-                    currentMonthTenure = currentTenure,
-                    notes = notes
-                )
-                showAddDebitDialog = false
-            }
-        )
-    }
-
-    // Add Custom Category Dialog
-    if (showAddCustomCategoryDialog) {
-        AddCustomCategoryDialog(
-            onDismiss = { showAddCustomCategoryDialog = false },
-            onSave = { name, colorHex ->
-                viewModel.addCustomCategory(name, "category", colorHex)
-                showAddCustomCategoryDialog = false
-            }
-        )
-    }
-
-    // Add Loan Dialog
-    if (showAddLoanDialog) {
-        AddEditLoanDialog(
-            currencySymbol = currencySymbol,
-            initialType = loanInitialType,
-            existingLoans = allLoans,
-            onDismiss = { showAddLoanDialog = false },
-            onSave = { _, type, amount, name, contact, rate, isMonthly, startDate, dueDate, note, proofUri ->
-                viewModel.createLoan(
-                    type = type,
-                    amount = amount,
-                    counterpartyName = name,
-                    counterpartyContact = contact,
-                    interestRatePercent = rate,
-                    isMonthlyInterest = isMonthly,
-                    startDateTimestamp = startDate,
-                    dueDateTimestamp = dueDate,
-                    note = note,
-                    proofUri = proofUri
-                )
-                showAddLoanDialog = false
-            }
-        )
-    }
-
-    // User Profile & Sign-In Dialog
-    if (showProfileDialog) {
-        ProfileDialog(
-            userProfile = userProfile,
-            onDismiss = { showProfileDialog = false },
-            onSaveProfile = { first, last, phone, email, pic ->
-                viewModel.saveUserProfile(
-                    firstName = first,
-                    lastName = last,
-                    phoneNumber = phone,
-                    email = email,
-                    profilePicUri = pic
-                )
-                showProfileDialog = false
+            customCategories = emptyList(),
+            allHistoricalDebits = allDebits,
+            onDismiss = { showQuickMultiAddSheet = false },
+            onSaveBatch = { batch ->
+                viewModel.insertDebits(batch)
+                showQuickMultiAddSheet = false
             },
-            onSignOut = {
-                val credentialManager = androidx.credentials.CredentialManager.create(context)
-                coroutineScope.launch {
-                    try {
-                        credentialManager.clearCredentialState(androidx.credentials.ClearCredentialStateRequest())
-                    } catch (_: Exception) {}
-                }
-                viewModel.clearUserProfile()
-                showProfileDialog = false
-            }
+            onOpenAddCustomCategory = {}
         )
     }
 
-    // Notifications Dialog
-    if (showNotificationsDialog) {
-        NotificationsDialog(
-            notifications = notifications,
-            onDismiss = { showNotificationsDialog = false },
-            onMarkAllRead = { viewModel.markAllNotificationsRead() }
+    if (showSignOutDialog) {
+        AlertDialog(
+            onDismissRequest = { showSignOutDialog = false },
+            title = { Text("Account Profile", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Name: ${userProfile?.name ?: "You"}")
+                    Text("Phone: ${userProfile?.phoneNumber.takeIf { !it.isNullOrBlank() } ?: "Not linked"}")
+                    Text("Email: ${userProfile?.email.takeIf { !it.isNullOrBlank() } ?: "Not linked"}")
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Do you want to sign out of FinMoney?", color = IndTextSecondary, fontSize = 12.sp)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showSignOutDialog = false
+                        viewModel.signOut()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = IndRed)
+                ) {
+                    Text("Sign Out", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSignOutDialog = false }) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 }

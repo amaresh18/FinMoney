@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -19,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -30,39 +32,37 @@ import com.example.ui.theme.*
 fun IndCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
-    backgroundColor: Color = IndCard,
+    backgroundColor: Color = IndSurface,
     borderColor: Color = IndBorder,
     shape: RoundedCornerShape = RoundedCornerShape(16.dp),
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val cardShape = RoundedCornerShape(AppTheme.dimensions.cardCornerRadius)
+    val actualShape = if (shape.topStart == androidx.compose.foundation.shape.CornerSize(16.dp)) cardShape else shape
+
     val clickableModifier = if (onClick != null) {
         modifier
-            .clip(shape)
+            .clip(actualShape)
             .clickable(onClick = onClick)
     } else {
-        modifier.clip(shape)
+        modifier.clip(actualShape)
     }
 
     Surface(
-        modifier = clickableModifier.border(1.dp, borderColor, shape),
-        shape = shape,
+        modifier = clickableModifier.border(1.dp, borderColor, actualShape),
+        shape = actualShape,
         color = backgroundColor,
         shadowElevation = 1.dp
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(AppTheme.dimensions.cardPadding),
             content = content
         )
     }
 }
 
-@Composable
-fun CategoryIconBadge(
-    categoryKey: String,
-    modifier: Modifier = Modifier,
-    customColor: Color? = null
-) {
-    val (icon, bgColor, tintColor) = when (categoryKey.lowercase()) {
+fun getCategoryStyling(categoryKey: String, customColor: Color? = null): Triple<ImageVector, Color, Color> {
+    return when (categoryKey.lowercase()) {
         "rent", DebitCategory.RENT.name.lowercase(), "home", "house rent" -> Triple(Icons.Filled.Home, IndBlueLight, IndBlue)
         "emi", DebitCategory.EMI.name.lowercase(), "loan" -> Triple(Icons.Filled.CreditCard, IndRedLight, IndRed)
         "electricity", DebitCategory.ELECTRICITY.name.lowercase(), "flash", "utilities" -> Triple(Icons.Filled.Bolt, IndAmberLight, Color(0xFFD97706))
@@ -74,16 +74,45 @@ fun CategoryIconBadge(
         "shopping", DebitCategory.SHOPPING.name.lowercase() -> Triple(Icons.Filled.ShoppingBag, Color(0xFFFCE7F3), Color(0xFFDB2777))
         "investment", DebitCategory.INVESTMENT.name.lowercase(), "sip" -> Triple(Icons.AutoMirrored.Filled.TrendingUp, IndGreenLight, IndGreenDark)
         "saving", DebitCategory.SAVING.name.lowercase(), "rd", "fd" -> Triple(Icons.Filled.Savings, Color(0xFFCCFBF1), Color(0xFF0F766E))
+        "maid", DebitCategory.MAID.name.lowercase(), "cook", "maid & cook" -> Triple(Icons.Filled.CleaningServices, Color(0xFFF0FDF4), Color(0xFF16A34A))
+        "milk", DebitCategory.MILK.name.lowercase(), "dairy", "milk & dairy" -> Triple(Icons.Filled.WaterDrop, Color(0xFFEFF6FF), Color(0xFF2563EB))
+        "newspaper", DebitCategory.NEWSPAPER.name.lowercase(), "paper", "magazines" -> Triple(Icons.AutoMirrored.Filled.MenuBook, Color(0xFFF8FAFC), Color(0xFF475569))
+        "ott", DebitCategory.OTT.name.lowercase(), "subscriptions", "subscription", "netflix", "prime" -> Triple(Icons.Filled.Tv, Color(0xFFEEF2FF), Color(0xFF4F46E5))
+        "debt_repay", DebitCategory.DEBT_REPAY.name.lowercase(), "clearing borrowed money" -> Triple(Icons.Filled.CheckCircleOutline, Color(0xFFECFDF5), Color(0xFF059669))
+        "lending", DebitCategory.LENDING.name.lowercase(), "lending to someone" -> Triple(Icons.Filled.Handshake, Color(0xFFEFF6FF), Color(0xFF3B82F6))
+        "donation", DebitCategory.DONATION.name.lowercase(), "charity" -> Triple(Icons.Filled.VolunteerActivism, Color(0xFFFFF1F2), Color(0xFFE11D48))
+        "insurance", DebitCategory.INSURANCE.name.lowercase(), "mediclaim", "policy" -> Triple(Icons.Filled.Shield, Color(0xFFFDF2F8), Color(0xFFBE185D))
+        "pharmacy", DebitCategory.PHARMACY.name.lowercase(), "medicine", "medicines", "hospital" -> Triple(Icons.Filled.LocalHospital, Color(0xFFFEF2F2), Color(0xFFDC2626))
+        "travel", DebitCategory.TRAVEL.name.lowercase(), "commute", "cab", "metro", "bus" -> Triple(Icons.Filled.DirectionsCar, Color(0xFFF0FDFA), Color(0xFF0D9488))
+        "tours", DebitCategory.TOURS.name.lowercase(), "vacation", "trip", "flight" -> Triple(Icons.Filled.Flight, Color(0xFFFAF5FF), Color(0xFFA855F7))
+        "dining", "outside_food", DebitCategory.OUTSIDE_FOOD.name.lowercase(), "food", "restaurant", "swiggy", "zomato" -> Triple(Icons.Filled.Restaurant, Color(0xFFFFF7ED), Color(0xFFEA580C))
+        "school", "school_fees", DebitCategory.SCHOOL_FEES.name.lowercase(), "education", "tuition" -> Triple(Icons.Filled.School, IndPurpleLight, IndPurple)
+        "hostel", "hostel_fees", DebitCategory.HOSTEL_FEES.name.lowercase(), "pg", "accommodation" -> Triple(Icons.Filled.Hotel, Color(0xFFF5F3FF), Color(0xFF8B5CF6))
+        "maintenance", DebitCategory.MAINTENANCE.name.lowercase(), "apartment maintenance", "repair" -> Triple(Icons.Filled.HomeRepairService, Color(0xFFFEF3C7), Color(0xFFD97706))
         "general", DebitCategory.GENERAL.name.lowercase() -> Triple(Icons.Filled.Receipt, Color(0xFFF1F5F9), Color(0xFF475569))
-        "shield", "insurance" -> Triple(Icons.Filled.Shield, Color(0xFFFCE7F3), Color(0xFFDB2777))
-        "school", "education" -> Triple(Icons.Filled.School, IndPurpleLight, IndPurple)
-        "tv", "subscription", "subscriptions" -> Triple(Icons.Filled.Tv, Color(0xFFEEF2FF), Color(0xFF4F46E5))
+        "all" -> Triple(Icons.Filled.AllInclusive, IndBlueLight, IndNavyHeader)
+        "paid" -> Triple(Icons.Filled.CheckCircle, IndGreenLight, IndGreenDark)
+        "unpaid" -> Triple(Icons.Filled.HourglassTop, IndAmberLight, Color(0xFFD97706))
+        "recurring" -> Triple(Icons.Filled.Repeat, Color(0xFFE0F2FE), Color(0xFF0284C7))
         else -> Triple(Icons.Filled.Category, IndAmberLight, customColor ?: IndAmber)
     }
+}
+
+fun getCategoryIcon(categoryKey: String): ImageVector = getCategoryStyling(categoryKey).first
+
+@Composable
+fun CategoryIconBadge(
+    categoryKey: String,
+    modifier: Modifier = Modifier,
+    badgeSize: androidx.compose.ui.unit.Dp = 40.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 22.dp,
+    customColor: Color? = null
+) {
+    val (icon, bgColor, tintColor) = getCategoryStyling(categoryKey, customColor)
 
     Box(
         modifier = modifier
-            .size(42.dp)
+            .size(badgeSize)
             .clip(RoundedCornerShape(12.dp))
             .background(bgColor)
             .border(1.dp, tintColor.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
@@ -93,7 +122,7 @@ fun CategoryIconBadge(
             imageVector = icon,
             contentDescription = categoryKey,
             tint = tintColor,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(iconSize)
         )
     }
 }
@@ -163,7 +192,7 @@ private data class Quad<A, B, C, D>(val first: A, val second: B, val third: C, v
 @Composable
 fun CategorySpendProgressBar(
     totalIncome: Double,
-    breakdown: List<com.example.ui.CategorySummary>,
+    breakdown: List<CategorySummary>,
     modifier: Modifier = Modifier
 ) {
     if (totalIncome <= 0 || breakdown.isEmpty()) {

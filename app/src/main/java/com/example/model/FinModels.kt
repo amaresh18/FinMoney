@@ -1,30 +1,22 @@
 package com.example.model
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.ui.graphics.vector.ImageVector
 
-data class IncomeSource(
-    val id: String,
-    val title: String,
-    val amount: Double
-)
-
-data class DebitItem(
-    val id: String,
-    val title: String,
-    val amount: Double,
-    val category: String,
-    val dueDateDay: Int,
-    val currentMonth: Int = 1,
-    val totalMonths: Int = 1,
-    val isPaid: Boolean = false,
-    val paidDate: Long? = null,
-    val interestRatePercent: Double = 0.0,
-    val monthYear: String, // format "YYYY-MM"
-    val notes: String = ""
-)
+typealias BankBalanceItem = com.example.data.model.BankBalanceItem
+typealias IncomeCategory = com.example.data.model.IncomeCategory
+typealias CategorySummary = com.example.data.model.CategorySummary
+typealias IncomeSource = com.example.data.model.IncomeSource
+typealias DebitItem = com.example.data.model.DebitItem
+typealias SalaryRecord = com.example.data.model.SalaryRecord
+typealias LoanType = com.example.data.model.LoanType
+typealias LoanApprovalStatus = com.example.data.model.LoanApprovalStatus
+typealias ApprovalStatus = com.example.data.model.LoanApprovalStatus
+typealias LoanTransaction = com.example.data.model.LoanTransaction
+typealias PaymentRecord = com.example.util.PaymentRecord
 
 data class CategoryAggregate(
     val category: String,
@@ -34,14 +26,6 @@ data class CategoryAggregate(
     val yetToPayAmount: Double,
     val totalCount: Int,
     val paidCount: Int
-)
-
-data class SalaryRecord(
-    val monthYear: String,
-    val baseSalary: Double,
-    val additionalIncome: Double = 0.0,
-    val incomeSources: List<IncomeSource> = emptyList(),
-    val notes: String = ""
 )
 
 data class MonthlySalarySummary(
@@ -84,47 +68,15 @@ data class ChitAuction(
     val month: Int,
     val winnerUid: String,
     val winnerName: String,
-    val bidAmount: Double, // Discount bid
+    val bidAmount: Double,
     val dividendPerMember: Double,
     val netPayablePerMember: Double,
     val dateTimestamp: Long
 )
 
-enum class LoanType {
-    LENT, // I gave money
-    BORROWED // I took money
-}
-
-enum class LoanApprovalStatus {
-    PENDING,
-    MUTUAL_APPROVED,
-    SETTLED
-}
-
-data class PaymentRecord(
-    val id: String,
-    val amount: Double,
-    val dateTimestamp: Long,
-    val notes: String = ""
-)
-
-data class LoanTransaction(
-    val id: String,
-    val personName: String,
-    val personContact: String = "",
-    val type: LoanType,
-    val totalAmount: Double,
-    val paidAmount: Double = 0.0,
-    val interestRatePercent: Double = 0.0,
-    val status: LoanApprovalStatus = LoanApprovalStatus.PENDING,
-    val dateTimestamp: Long,
-    val dueDateTimestamp: Long? = null,
-    val notes: String = "",
-    val payments: List<PaymentRecord> = emptyList()
-)
-
 object DefaultDebitCategories {
     val CHIT_PAYMENTS = "Chit Payments"
+    val CHIT = "Chit Payments"
     val EMI = "EMI"
     val SIP = "SIP"
     val RENT = "Rent"
@@ -135,6 +87,24 @@ object DefaultDebitCategories {
     val RD_FD = "RD / FD"
     val BILLS = "Bills & Utilities"
     val OTHER = "Other"
+    val SCHOOL_FEES = "School Fees"
+    val HOSTEL_FEES = "Hostel Fees"
+    val MAID = "Maid"
+    val MAINTENANCE = "Maintenance"
+    val ELECTRICITY = "Electricity"
+    val INTERNET = "Internet"
+    val OUTSIDE_FOOD = "Outside Food"
+    val MILK = "Milk"
+    val NEWSPAPER = "Newspaper"
+    val OTT = "OTT"
+    val PHARMACY = "Pharmacy"
+    val TRAVEL = "Travel"
+    val TOURS = "Tours"
+    val SAVING = "Saving"
+    val DEBT_REPAY = "Debt Repayment"
+    val LENDING = "Lending"
+    val DONATION = "Donation"
+    val CUSTOM = "Custom"
 
     val list = listOf(
         CHIT_PAYMENTS,
@@ -156,12 +126,28 @@ object DefaultDebitCategories {
             "emi", "loan emi", "loan" -> Icons.Default.CreditCard
             "sip", "investment", "mutual fund" -> Icons.AutoMirrored.Filled.TrendingUp
             "rent", "house rent" -> Icons.Default.Home
-            "groceries", "grocery", "food" -> Icons.Default.ShoppingCart
-            "recharge", "mobile recharge", "phone" -> Icons.Default.PhoneAndroid
+            "maid", "cook", "domestic help" -> Icons.Default.CleaningServices
+            "milk", "dairy", "daily milk" -> Icons.Default.LocalDrink
+            "newspaper", "paper", "magazines" -> Icons.Default.Newspaper
+            "ott", "ott subscription", "netflix", "prime", "hotstar" -> Icons.Default.Tv
+            "clearing borrowed money", "debt repayment", "debt_repay" -> Icons.Default.Paid
+            "lending to someone", "lending" -> Icons.AutoMirrored.Filled.CallMade
+            "donation", "charity", "temple" -> Icons.Default.VolunteerActivism
+            "insurance", "life insurance", "health insurance", "mediclaim" -> Icons.Default.HealthAndSafety
+            "pharmacy", "medical", "medicines" -> Icons.Default.LocalPharmacy
+            "travel", "commute", "cab", "metro", "bus" -> Icons.Default.DirectionsBus
+            "tours", "vacation", "trip", "holiday" -> Icons.Default.Flight
+            "outside food", "dining", "restaurant", "swiggy", "zomato" -> Icons.Default.Restaurant
+            "school fees", "tuition fees", "college fees" -> Icons.Default.School
+            "hostel fees", "accommodation", "pg" -> Icons.Default.Apartment
+            "apartment maintenance", "society maintenance", "maintenance" -> Icons.Default.HomeRepairService
+            "groceries", "grocery", "food", "supermarket" -> Icons.Default.ShoppingCart
+            "recharge", "mobile recharge", "phone", "dth" -> Icons.Default.PhoneAndroid
             "fuel", "petrol", "diesel", "gas" -> Icons.Default.LocalGasStation
-            "insurance", "life insurance", "health insurance" -> Icons.Default.Shield
-            "rd / fd", "rd", "fd", "fixed deposit" -> Icons.Default.Savings
-            "bills & utilities", "bills", "electricity", "water", "wifi" -> Icons.Default.ReceiptLong
+            "rd / fd", "rd", "fd", "fixed deposit", "saving" -> Icons.Default.Savings
+            "bills & utilities", "bills", "electricity", "water", "flash" -> Icons.Default.Bolt
+            "internet", "wifi", "broadband" -> Icons.Default.Wifi
+            "shopping", "clothes", "lifestyle" -> Icons.Default.ShoppingBag
             else -> Icons.Default.Category
         }
     }

@@ -1,0 +1,78 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+
+    <!-- Outer Divine Glow Halo -->
+    <path
+        android:fillColor="#30FFD700"
+        android:pathData="M48,4A44,44 0,1 0,48 92A44,44 0,1 0,48 4Z" />
+
+    <!-- Outer Gold Ring -->
+    <path
+        android:fillColor="#FFB300"
+        android:pathData="M48,8A40,40 0,1 0,48 88A40,40 0,1 0,48 8Z" />
+
+    <!-- Inner Deep Navy Disk -->
+    <path
+        android:fillColor="#0B132B"
+        android:pathData="M48,12A36,36 0,1 0,48 84A36,36 0,1 0,48 12Z" />
+
+    <!-- Divine Radiant Sunburst Rays -->
+    <path
+        android:fillColor="#40FFD700"
+        android:pathData="M48,14L50,22L48,20L46,22Z M48,76L50,82L48,80L46,82Z M14,48L22,50L20,48L22,46Z M76,48L82,50L80,48L82,46Z" />
+
+    <!-- Lord Kubera's Majestic Crown (Mukut) Base & Spikes -->
+    <path
+        android:fillColor="#FFD700"
+        android:pathData="M30,38 L34,22 L42,30 L48,16 L54,30 L62,22 L66,38 Z" />
+
+    <!-- Crown Ruby Jewels -->
+    <path
+        android:fillColor="#D50000"
+        android:pathData="M48,20 A3,3 0,1 0,48 26 A3,3 0,1 0,48 20Z M34,25 A2,2 0,1 0,34 29 A2,2 0,1 0,34 25Z M62,25 A2,2 0,1 0,62 29 A2,2 0,1 0,62 25Z" />
+
+    <!-- Crown Gold Band -->
+    <path
+        android:fillColor="#FFA000"
+        android:pathData="M28,36 H68 V42 H28 Z" />
+
+    <!-- Emerald Jewel on Band -->
+    <path
+        android:fillColor="#00E676"
+        android:pathData="M45,37 H51 V41 H45 Z" />
+
+    <!-- Face Silhouette / Aura Body -->
+    <path
+        android:fillColor="#FFE082"
+        android:pathData="M34,42 Q48,46 62,42 Q64,56 48,60 Q32,56 34,42 Z" />
+
+    <!-- Royal Tilak on Forehead -->
+    <path
+        android:fillColor="#D50000"
+        android:pathData="M46,43 H50 V48 H46 Z" />
+    <path
+        android:fillColor="#FFD700"
+        android:pathData="M48,49 A1.5,1.5 0,1 0,48 52 A1.5,1.5 0,1 0,48 49Z" />
+
+    <!-- Golden Necklace / Haran -->
+    <path
+        android:fillColor="#FFC107"
+        android:pathData="M32,58 Q48,68 64,58 Q60,72 48,74 Q36,72 32,58 Z" />
+
+    <!-- Kalasha / Purna-Kumbha Pot of Gold (Bottom Right) -->
+    <path
+        android:fillColor="#FFB300"
+        android:pathData="M60,68 Q68,64 76,68 Q80,78 72,82 Q64,82 60,68 Z" />
+    <!-- Overflowing Gold Coins -->
+    <path
+        android:fillColor="#FFD700"
+        android:pathData="M64,65 A3,3 0,1 0,64 71 A3,3 0,1 0,64 65Z M72,64 A3,3 0,1 0,72 70 A3,3 0,1 0,72 64Z M68,60 A3,3 0,1 0,68 66 A3,3 0,1 0,68 60Z" />
+
+    <!-- Sparkle Stars -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,24 L25,27 L28,28 L25,29 L24,32 L23,29 L20,28 L23,27 Z M72,32 L73,34 L75,35 L73,36 L72,38 L71,36 L69,35 L71,34 Z" />
+</vector>

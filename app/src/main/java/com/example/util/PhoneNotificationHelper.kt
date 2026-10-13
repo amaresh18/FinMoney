@@ -27,9 +27,9 @@ object PhoneNotificationHelper {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 CHANNEL_NAME,
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Due date and payment reminders for FinMoney"
+                description = "Due date, mutual agreements, and payment alerts for FinMoney"
                 enableLights(true)
                 lightColor = Color.GREEN
                 enableVibration(true)
@@ -52,7 +52,7 @@ object PhoneNotificationHelper {
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .build()
@@ -60,14 +60,41 @@ object PhoneNotificationHelper {
         notificationManager.notify(notificationId, notification)
     }
 
+    fun cancelNotification(context: Context, notificationId: Int) {
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        notificationManager?.cancel(notificationId)
+    }
+
+    fun cancelForLoan(context: Context, loanId: Long? = null, cloudId: String = "") {
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        if (loanId != null && loanId > 0) {
+            notificationManager.cancel(Math.abs((loanId % 10000).toInt()))
+        }
+        if (cloudId.isNotBlank()) {
+            notificationManager.cancel(Math.abs((cloudId.hashCode() % 10000)))
+        }
+    }
+
+    fun cancelAll(context: Context) {
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        notificationManager?.cancelAll()
+    }
+
+    fun getNotificationId(loanId: Long? = null, cloudId: String = "", title: String = ""): Int {
+        if (loanId != null && loanId > 0) return Math.abs((loanId % 10000).toInt())
+        if (cloudId.isNotBlank()) return Math.abs((cloudId.hashCode() % 10000))
+        return Math.abs((title.hashCode() % 10000))
+    }
+
     fun showNotification(
         context: Context,
         title: String,
         message: String,
         loanId: Long? = null,
-        actionType: String = ""
+        actionType: String = "",
+        cloudId: String = ""
     ) {
-        val id = Math.abs(((loanId ?: System.currentTimeMillis()) % 10000).toInt())
+        val id = getNotificationId(loanId = loanId, cloudId = cloudId, title = title)
         showReminderNotification(context, id, title, message)
     }
 }

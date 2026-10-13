@@ -1,587 +1,60 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.Context
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ai.GroqApiClient
+import com.example.ai.KuberaMessage
+import com.example.ai.KuberaPersona
+import com.example.ai.KuberaSender
 import com.example.data.local.AppDatabase
+import com.example.data.local.DatabaseHealthGuard
 import com.example.data.model.*
 import com.example.data.repository.FinMoneyRepository
-import com.example.data.sms.DetectedCategory
-import com.example.data.sms.ParsedSmsTransaction
-import com.example.data.sms.SmartSmsParser
-import com.example.data.sms.SmsTransactionType
+import com.example.domain.usecase.CalculateBudgetHealthUseCase
+import com.example.domain.usecase.ReconcileTransactionUseCase
+import com.example.domain.usecase.ValidateLoanLifecycleUseCase
+import com.example.service.BankSyncManager
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.util.Calendar
+import java.text.DateFormatSymbols
 
-data class CategorySummary(
-    val categoryName: String,
-    val categoryKey: String = "",
-    val totalAmount: Double = 0.0,
-    val paidAmount: Double = 0.0,
-    val yetToPayAmount: Double = 0.0,
-    val itemCount: Int = 0,
-    val paidCount: Int = 0,
-    val colorHex: String = "#00D09C",
-    val iconKey: String = "general"
-)
+class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
+    val repository: FinMoneyRepository = FinMoneyRepository(AppDatabase.getDatabase(app).finMoneyDao())
+    private val dao = AppDatabase.getDatabase(app).finMoneyDao()
+    private val groqApiClient = GroqApiClient(app)
 
-data class PeerThread(
-    val counterpartyName: String,
-    val counterpartyContact: String = "",
-    val counterpartyProfilePicUri: String = "",
-    val userProfilePicUri: String = "",
-    val transactions: List<LoanTransaction> = emptyList(),
-    val netBalance: Double = 0.0, // Positive means they owe user, negative means user owes
-    val totalGiven: Double = 0.0,
-    val totalTaken: Double = 0.0,
-    val pendingActionCount: Int = 0,
-    val lastActivityTimestamp: Long = 0L
-)
+    // Domain Use Cases
+    val calculateBudgetHealthUseCase = CalculateBudgetHealthUseCase()
+    val validateLoanLifecycleUseCase = ValidateLoanLifecycleUseCase()
+    val reconcileTransactionUseCase = ReconcileTransactionUseCase()
 
-data class MonthlyFinanceSummary(
-    val totalSalary: Double = 0.0,
-    val additionalIncome: Double = 0.0,
-    val customIncomeTotal: Double = 0.0,
-    val incomeSources: List<IncomeSource> = emptyList(),
-    val totalIncome: Double = 0.0,
-    val totalDebits: Double = 0.0,
-    val paidDebits: Double = 0.0,
-    val unpaidDebits: Double = 0.0,
-    val netFlexibleSpending: Double = 0.0,
-    val savingsRatePercent: Double = 0.0,
-    val dailySafeSpend: Double = 0.0,
-    val categoryBreakdown: List<CategorySummary> = emptyList()
-)
-
-data class LentBorrowedSummary(
-    val totalLent: Double = 0.0,
-    val totalBorrowed: Double = 0.0,
-    val netBalance: Double = 0.0, // Positive means others owe you, negative means you owe
-    val pendingApprovalCount: Int = 0,
-    val settledCount: Int = 0
-)
-
-@OptIn(ExperimentalCoroutinesApi::class)
-class FinMoneyViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val database = AppDatabase.getDatabase(application, viewModelScope)
-    private val repository = FinMoneyRepository(database.finMoneyDao(), application)
-
-    private val cal = Calendar.getInstance()
-    private val _currentMonth = MutableStateFlow(cal.get(Calendar.MONTH) + 1)
-    val currentMonth: StateFlow<Int> = _currentMonth.asStateFlow()
-
-    private val _currentYear = MutableStateFlow(cal.get(Calendar.YEAR))
-    val currentYear: StateFlow<Int> = _currentYear.asStateFlow()
-
-    private val _selectedTab = MutableStateFlow(0)
-    val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
-
-    private val _currencySymbol = MutableStateFlow("₹")
-    val currencySymbol: StateFlow<String> = _currencySymbol.asStateFlow()
-
-    private val _toastMessage = MutableSharedFlow<String>()
-    val toastMessage: SharedFlow<String> = _toastMessage.asSharedFlow()
-
-    // User Profile
-    val userProfile: StateFlow<UserProfile?> = repository.getUserProfile()
+    val userProfile: StateFlow<UserProfile?> = dao.getUserProfile()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    init {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.getUserProfile().collect { profile ->
-                if (profile != null && profile.phoneNumber.isNotBlank()) {
-                    repository.startRealtimeSync(profile.phoneNumber)
-                }
-            }
-        }
-    }
+    private val _currentMonth = MutableStateFlow(10)
+    val currentMonth: StateFlow<Int> = _currentMonth.asStateFlow()
 
-    // Monthly Salary Flow
-    val currentSalaryRecord: StateFlow<SalaryRecord?> = combine(_currentMonth, _currentYear) { month, year ->
-        month to year
-    }.flatMapLatest { (m, y) ->
-        repository.getSalaryRecord(m, y)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    private val _currentYear = MutableStateFlow(2026)
+    val currentYear: StateFlow<Int> = _currentYear.asStateFlow()
 
-    // Monthly Debits Flow
-    val currentDebits: StateFlow<List<DebitItem>> = combine(_currentMonth, _currentYear) { month, year ->
-        month to year
-    }.flatMapLatest { (m, y) ->
-        repository.getDebitsForMonth(m, y)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _selectedSpecificDay = MutableStateFlow<Int?>(null)
+    val selectedSpecificDay: StateFlow<Int?> = _selectedSpecificDay.asStateFlow()
 
-    // All Historical Salary Records
-    val allSalaryRecords: StateFlow<List<SalaryRecord>> = repository.getAllSalaryRecords()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val currencySymbol: StateFlow<String> = userProfile.map { it?.currencySymbol ?: "₹" }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "₹")
 
-    // All Debits
-    val allDebits: StateFlow<List<DebitItem>> = repository.getAllDebits()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _isFinancialSafetyVisible = MutableStateFlow(true)
+    val isFinancialSafetyVisible: StateFlow<Boolean> = _isFinancialSafetyVisible.asStateFlow()
 
-    // Custom Categories
-    val customCategories: StateFlow<List<CustomCategory>> = repository.getAllCustomCategories()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    // Loans
-    val allLoans: StateFlow<List<LoanTransaction>> = repository.getAllLoans()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    // Notifications synthesized from active loan states and stored notifications for current user/phone
-    val notifications: StateFlow<List<AppNotification>> = combine(
-        repository.getAllNotifications(),
-        allLoans,
-        userProfile
-    ) { dbNotifs, loans, profile ->
-        val currentPhone = profile?.phoneNumber?.trim() ?: ""
-        val currentName = profile?.name?.trim() ?: "You"
-
-        val dynamicActionNotifs = mutableListOf<AppNotification>()
-
-        for (loan in loans) {
-            val cPhone = loan.creatorContact.trim()
-            val targetPhone = loan.counterpartyContact.trim()
-
-            val isCreator = (cPhone.isNotBlank() && currentPhone.isNotBlank() && currentPhone.takeLast(10) == cPhone.takeLast(10)) ||
-                            (cPhone.isBlank() && loan.createdBy.equals(currentName, ignoreCase = true)) ||
-                            (cPhone.isBlank() && loan.createdBy == "You")
-
-            val isCounterparty = (targetPhone.isNotBlank() && currentPhone.isNotBlank() && currentPhone.takeLast(10) == targetPhone.takeLast(10)) ||
-                                 (!isCreator && (targetPhone.isBlank() || loan.counterpartyName.equals(currentName, ignoreCase = true)))
-
-            // 1. Pending Agreement Digital Signature for Counterparty
-            if (isCounterparty && !loan.counterpartySigned && loan.status != ApprovalStatus.SETTLED.name && loan.status != ApprovalStatus.REJECTED.name) {
-                val actionDirection = if (loan.type == LoanType.GIVEN.name) "lent you" else "borrowed from you"
-                dynamicActionNotifs.add(
-                    AppNotification(
-                        id = - (loan.id * 100 + 1),
-                        title = "✍️ Action Required: ₹${"%,.0f".format(loan.totalAmount)} Agreement",
-                        message = "${loan.createdBy} (${if (loan.creatorContact.isNotBlank()) "+91 ${loan.creatorContact}" else "Creator"}) $actionDirection ₹${"%,.0f".format(loan.totalAmount)}. Please review and digitally sign.",
-                        relatedLoanId = loan.id,
-                        actionType = "APPROVAL_REQUEST",
-                        timestamp = loan.createdAt,
-                        isRead = false
-                    )
-                )
-            }
-
-            // 2. Pending Settlement Confirmation
-            if (loan.status == ApprovalStatus.PENDING_SETTLEMENT.name && loan.settlementRequestedBy.isNotBlank()) {
-                val isRequester = loan.settlementRequestedBy.equals(currentName, ignoreCase = true) || loan.settlementRequestedBy == "You"
-                if (!isRequester && (isCounterparty || isCreator)) {
-                    dynamicActionNotifs.add(
-                        AppNotification(
-                            id = - (loan.id * 100 + 2),
-                            title = "🤝 Settlement Confirmation Required",
-                            message = "${loan.settlementRequestedBy} requested to settle the remaining balance of ₹${"%,.0f".format(loan.totalAmount - loan.settledAmount)}. Tap to confirm.",
-                            relatedLoanId = loan.id,
-                            actionType = "APPROVAL_REQUEST",
-                            timestamp = loan.updatedAt,
-                            isRead = false
-                        )
-                    )
-                }
-            }
-
-            // 3. Pending Mutual Loan Deletion Request
-            if (loan.deletionRequestedBy.isNotBlank()) {
-                val isRequester = loan.deletionRequestedBy.equals(currentName, ignoreCase = true) || loan.deletionRequestedBy == "You"
-                if (!isRequester && (isCounterparty || isCreator)) {
-                    dynamicActionNotifs.add(
-                        AppNotification(
-                            id = - (loan.id * 100 + 3),
-                            title = "⚠️ Agreement Deletion Request",
-                            message = "${loan.deletionRequestedBy} requested mutual deletion of ₹${"%,.0f".format(loan.totalAmount)} agreement.",
-                            relatedLoanId = loan.id,
-                            actionType = "APPROVAL_REQUEST",
-                            timestamp = loan.updatedAt,
-                            isRead = false
-                        )
-                    )
-                }
-            }
-
-            // 4. Payment logs confirmation & deletion requests
-            val payments = FinMoneyRepository.parsePaymentHistory(loan.paymentHistoryJson)
-            payments.forEach { pay ->
-                val isPayRecorder = pay.recordedBy.equals(currentName, ignoreCase = true) || (pay.recordedBy == "You" && currentName == "You")
-                if (!pay.isApproved && !isPayRecorder && (isCounterparty || isCreator)) {
-                    dynamicActionNotifs.add(
-                        AppNotification(
-                            id = - Math.abs((loan.id.toString() + "_" + pay.id).hashCode().toLong()),
-                            title = "💰 Payment Verification: ₹${"%,.0f".format(pay.amount)}",
-                            message = "${pay.recordedBy} logged a payment of ₹${"%,.0f".format(pay.amount)}. Tap to confirm received.",
-                            relatedLoanId = loan.id,
-                            actionType = "APPROVAL_REQUEST",
-                            timestamp = pay.paymentDateTimestamp,
-                            isRead = false
-                        )
-                    )
-                }
-
-                if (pay.deletionRequestedBy.isNotBlank()) {
-                    val isDelRequester = pay.deletionRequestedBy.equals(currentName, ignoreCase = true) || (pay.deletionRequestedBy == "You" && currentName == "You")
-                    if (!isDelRequester && (isCounterparty || isCreator)) {
-                        dynamicActionNotifs.add(
-                            AppNotification(
-                                id = - Math.abs((loan.id.toString() + "_" + pay.id + "_del").hashCode().toLong()),
-                                title = "⚠️ Payment Deletion Request: ₹${"%,.0f".format(pay.amount)}",
-                                message = "${pay.deletionRequestedBy} requested mutual deletion of ₹${"%,.0f".format(pay.amount)} payment.",
-                                relatedLoanId = loan.id,
-                                actionType = "APPROVAL_REQUEST",
-                                timestamp = loan.updatedAt,
-                                isRead = false
-                            )
-                        )
-                    }
-                }
-            }
-        }
-
-        // Combine with dbNotifs (deduplicating by relatedLoanId if action is already active)
-        val combined = (dynamicActionNotifs + dbNotifs)
-            .distinctBy { if (it.relatedLoanId != null && it.actionType == "APPROVAL_REQUEST") "${it.relatedLoanId}_${it.actionType}" else it.id.toString() }
-            .sortedByDescending { it.timestamp }
-
-        combined
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val unreadNotificationCount: StateFlow<Int> = notifications.map { list ->
-        list.count { !it.isRead }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
-
-    // --- Smart SMS Scanner & Auto-Categorization Flow ---
-    private val _detectedSmsTransactions = MutableStateFlow<List<ParsedSmsTransaction>>(emptyList())
-    val detectedSmsTransactions: StateFlow<List<ParsedSmsTransaction>> = _detectedSmsTransactions.asStateFlow()
-
-    // Financial calculations for current selected month
-    val monthlySummary: StateFlow<MonthlyFinanceSummary> = combine(
-        currentSalaryRecord,
-        currentDebits,
-        _currentMonth,
-        _currentYear
-    ) { salary, debits, month, year ->
-        val salAmount = salary?.salaryAmount ?: 0.0
-        val customSources = parseIncomeSources(salary?.incomeSourcesJson ?: "")
-        val customIncomeTotal = customSources.sumOf { it.amount }
-        // When custom sources are present, they are the source of truth for extra credits.
-        val extraIncome = if (customSources.isNotEmpty()) customIncomeTotal else (salary?.additionalIncome ?: 0.0)
-        val totalInc = salAmount + extraIncome
-
-        val totalDeb = debits.sumOf { it.amount }
-        val paidDeb = debits.filter { it.isPaid }.sumOf { it.amount }
-        val unpaidDeb = debits.filter { !it.isPaid }.sumOf { it.amount }
-        val netFlex = totalInc - totalDeb
-
-        // Savings & Investments share
-        val wealthBuilding = debits.filter {
-            it.category == DebitCategory.INVESTMENT.name ||
-            it.category == DebitCategory.SAVING.name
-        }.sumOf { it.amount }
-        val savingsRate = if (totalInc > 0) (wealthBuilding / totalInc) * 100 else 0.0
-
-        // Remaining days in selected month
-        val daysInMonth = getDaysInMonth(month, year)
-        val today = Calendar.getInstance()
-        val remainingDays = if (today.get(Calendar.MONTH) + 1 == month && today.get(Calendar.YEAR) == year) {
-            (daysInMonth - today.get(Calendar.DAY_OF_MONTH) + 1).coerceAtLeast(1)
-        } else {
-            daysInMonth
-        }
-        val dailySpend = if (netFlex > 0 && remainingDays > 0) netFlex / remainingDays else 0.0
-
-        // Group breakdown
-        val breakdown = groupDebitsByCategory(debits)
-
-        MonthlyFinanceSummary(
-            totalSalary = salAmount,
-            additionalIncome = extraIncome,
-            customIncomeTotal = customIncomeTotal,
-            incomeSources = customSources,
-            totalIncome = totalInc,
-            totalDebits = totalDeb,
-            paidDebits = paidDeb,
-            unpaidDebits = unpaidDeb,
-            netFlexibleSpending = netFlex,
-            savingsRatePercent = savingsRate,
-            dailySafeSpend = dailySpend,
-            categoryBreakdown = breakdown
-        )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MonthlyFinanceSummary())
-
-    // Lent & Borrowed summary calculation
-    val lentBorrowedSummary: StateFlow<LentBorrowedSummary> = combine(allLoans, userProfile) { loans, profile ->
-        val currentPhone = profile?.phoneNumber?.trim() ?: ""
-        val currentName = profile?.name?.trim() ?: "You"
-
-        var lent = 0.0
-        var borrowed = 0.0
-        var pending = 0
-        var settled = 0
-
-        for (loan in loans) {
-            val creatorPhone = loan.creatorContact.trim()
-            val isCreator = (creatorPhone.isNotBlank() && currentPhone.isNotBlank() && currentPhone.takeLast(10) == creatorPhone.takeLast(10)) ||
-                            (creatorPhone.isBlank() && loan.createdBy.equals(currentName, ignoreCase = true)) ||
-                            (creatorPhone.isBlank() && loan.createdBy == "You") ||
-                            (currentPhone.isBlank() && (loan.createdBy.equals(currentName, ignoreCase = true) || loan.createdBy == "You" || currentName.isBlank()))
-
-            // Effective direction for the current user
-            val isGivenForUser = if (!isCreator) {
-                loan.type == LoanType.TAKEN.name
-            } else {
-                loan.type == LoanType.GIVEN.name
-            }
-
-            if (loan.status == ApprovalStatus.SETTLED.name) {
-                settled++
-                continue
-            }
-            if (loan.status == ApprovalStatus.PENDING_APPROVAL.name || 
-                loan.status == ApprovalStatus.PENDING_SETTLEMENT.name || 
-                loan.deletionRequestedBy.isNotBlank() ||
-                !loan.counterpartySigned || !loan.userSigned) {
-                pending++
-            }
-
-            val payments = FinMoneyRepository.parsePaymentHistory(loan.paymentHistoryJson)
-            val remaining = if (loan.interestRatePercent > 0.0) {
-                com.example.util.InterestCalculator.calculate(
-                    principal = loan.totalAmount,
-                    ratePercent = loan.interestRatePercent,
-                    isMonthly = loan.isMonthlyInterest,
-                    startTimestamp = loan.startDateTimestamp,
-                    payments = payments
-                ).totalRemainingDue
-            } else {
-                (loan.totalAmount - loan.settledAmount).coerceAtLeast(0.0)
-            }
-            if (isGivenForUser) {
-                lent += remaining
-            } else {
-                borrowed += remaining
-            }
-        }
-
-        LentBorrowedSummary(
-            totalLent = lent,
-            totalBorrowed = borrowed,
-            netBalance = lent - borrowed,
-            pendingApprovalCount = pending,
-            settledCount = settled
-        )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LentBorrowedSummary())
-
-    // Single thread transaction history per counterparty (PhonePe style)
-    val peerThreads: StateFlow<List<PeerThread>> = combine(allLoans, userProfile) { loans, profile ->
-        val currentPhone = profile?.phoneNumber?.trim() ?: ""
-        val currentName = profile?.name?.trim() ?: "You"
-
-        val groups = loans.groupBy { loan ->
-            val creatorPhone = loan.creatorContact.trim()
-            val targetPhone = loan.counterpartyContact.trim()
-
-            val isCreator = (creatorPhone.isNotBlank() && currentPhone.isNotBlank() && currentPhone.takeLast(10) == creatorPhone.takeLast(10)) ||
-                            (creatorPhone.isBlank() && loan.createdBy.equals(currentName, ignoreCase = true)) ||
-                            (creatorPhone.isBlank() && loan.createdBy == "You") ||
-                            (currentPhone.isBlank() && (loan.createdBy.equals(currentName, ignoreCase = true) || loan.createdBy == "You" || currentName.isBlank()))
-
-            val otherPhone = if (isCreator) targetPhone else creatorPhone
-            val otherName = if (isCreator) loan.counterpartyName.trim() else loan.createdBy.trim()
-
-            if (otherPhone.isNotBlank()) otherPhone.takeLast(10) else otherName.lowercase().ifBlank { "counterparty" }
-        }
-
-        groups.mapNotNull { (_, loanList) ->
-            val first = loanList.firstOrNull() ?: return@mapNotNull null
-            val creatorPhone = first.creatorContact.trim()
-            val isFirstCreator = (creatorPhone.isNotBlank() && currentPhone.isNotBlank() && currentPhone.takeLast(10) == creatorPhone.takeLast(10)) ||
-                                 (creatorPhone.isBlank() && first.createdBy.equals(currentName, ignoreCase = true)) ||
-                                 (creatorPhone.isBlank() && first.createdBy == "You") ||
-                                 (currentPhone.isBlank() && (first.createdBy.equals(currentName, ignoreCase = true) || first.createdBy == "You" || currentName.isBlank()))
-
-            val displayCounterpartyName = if (isFirstCreator) first.counterpartyName else first.createdBy.ifBlank { "Counterparty" }
-            val displayCounterpartyContact = if (isFirstCreator) first.counterpartyContact else first.creatorContact
-            val displayCounterpartyPic = if (isFirstCreator) first.counterpartyProfilePicUri else first.userProfilePicUri
-
-            var given = 0.0
-            var taken = 0.0
-            var pending = 0
-            var lastTime = 0L
-
-            for (loan in loanList) {
-                if (loan.updatedAt > lastTime) lastTime = loan.updatedAt
-                if (loan.status == ApprovalStatus.PENDING_APPROVAL.name || 
-                    loan.status == ApprovalStatus.PENDING_SETTLEMENT.name || 
-                    loan.deletionRequestedBy.isNotBlank() ||
-                    !loan.counterpartySigned || !loan.userSigned) {
-                    pending++
-                }
-
-                val cPhone = loan.creatorContact.trim()
-                val isCreator = (cPhone.isNotBlank() && currentPhone.isNotBlank() && currentPhone.takeLast(10) == cPhone.takeLast(10)) ||
-                                (cPhone.isBlank() && loan.createdBy.equals(currentName, ignoreCase = true)) ||
-                                (cPhone.isBlank() && loan.createdBy == "You")
-
-                val isGivenForUser = if (!isCreator) {
-                    loan.type == LoanType.TAKEN.name
-                } else {
-                    loan.type == LoanType.GIVEN.name
-                }
-
-                if (loan.status != ApprovalStatus.SETTLED.name) {
-                    val payments = FinMoneyRepository.parsePaymentHistory(loan.paymentHistoryJson)
-                    val rem = if (loan.interestRatePercent > 0.0) {
-                        com.example.util.InterestCalculator.calculate(
-                            principal = loan.totalAmount,
-                            ratePercent = loan.interestRatePercent,
-                            isMonthly = loan.isMonthlyInterest,
-                            startTimestamp = loan.startDateTimestamp,
-                            payments = payments
-                        ).totalRemainingDue
-                    } else {
-                        (loan.totalAmount - loan.settledAmount).coerceAtLeast(0.0)
-                    }
-                    if (isGivenForUser) {
-                        given += rem
-                    } else {
-                        taken += rem
-                    }
-                }
-            }
-
-            PeerThread(
-                counterpartyName = displayCounterpartyName,
-                counterpartyContact = displayCounterpartyContact,
-                counterpartyProfilePicUri = displayCounterpartyPic,
-                userProfilePicUri = profile?.profilePicUri ?: "",
-                transactions = loanList.sortedBy { it.startDateTimestamp },
-                netBalance = given - taken,
-                totalGiven = given,
-                totalTaken = taken,
-                pendingActionCount = pending,
-                lastActivityTimestamp = if (lastTime > 0) lastTime else first.createdAt
-            )
-        }.sortedByDescending { it.lastActivityTimestamp }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    // --- User Profile & Registration Operations ---
-
-    fun saveUserProfile(
-        name: String = "",
-        firstName: String = "",
-        lastName: String = "",
-        email: String = "",
-        phoneNumber: String = "",
-        profilePicUri: String = "",
-        isOtpVerified: Boolean = true,
-        isEmailVerified: Boolean = true
-    ) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val cleanFirst = firstName.trim()
-                val cleanLast = lastName.trim()
-                val combinedName = if (name.isNotBlank()) name.trim() else "$cleanFirst $cleanLast".trim().ifBlank { "You" }
-                val cleanEmail = email.trim()
-                val cleanPhone = phoneNumber.trim()
-                val cleanPic = profilePicUri.trim()
-
-                android.util.Log.i("FinMoneyVM", "[Save Profile Request] name='$combinedName', phone='$cleanPhone', email='$cleanEmail'")
-
-                val profile = UserProfile(
-                    id = 1,
-                    name = combinedName,
-                    firstName = cleanFirst,
-                    lastName = cleanLast,
-                    email = cleanEmail,
-                    phoneNumber = cleanPhone,
-                    profilePicUri = cleanPic,
-                    isOtpVerified = isOtpVerified,
-                    isEmailVerified = isEmailVerified,
-                    createdAt = System.currentTimeMillis()
-                )
-                val rowId = repository.saveUserProfile(profile)
-                android.util.Log.i("FinMoneyVM", "[Save Profile Success] Room rowId=$rowId")
-                _toastMessage.emit("Profile saved successfully!")
-            } catch (e: Exception) {
-                android.util.Log.e("FinMoneyVM", "[Save Profile Error] ${e.message}", e)
-                _toastMessage.emit("Failed to save profile: ${e.message}")
-            }
-        }
-    }
-
-    fun loginWithPhoneOtp(
-        phoneNumber: String,
-        fallbackName: String = "",
-        onComplete: () -> Unit
-    ) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val clean = FinMoneyRepository.normalizePhone(phoneNumber)
-            val cloudProfile = repository.fetchUserProfileFromCloud(phoneNumber)
-            if (cloudProfile != null) {
-                repository.startRealtimeSync(cloudProfile.phoneNumber)
-                _toastMessage.emit("Welcome back, ${cloudProfile.name}! 👋")
-            } else {
-                val initial = UserProfile(
-                    id = 1,
-                    name = fallbackName.ifBlank { "User ${clean.takeLast(4)}" },
-                    phoneNumber = phoneNumber.trim(),
-                    isOtpVerified = true,
-                    isEmailVerified = true,
-                    createdAt = System.currentTimeMillis()
-                )
-                repository.saveUserProfile(initial)
-                _toastMessage.emit("Verified & Signed in successfully!")
-            }
-            onComplete()
-        }
-    }
-
-    fun clearUserProfile() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                repository.signOut()
-            } catch (_: Exception) {
-            }
-            val emptyProfile = UserProfile(
-                id = 1,
-                name = "",
-                firstName = "",
-                lastName = "",
-                email = "",
-                phoneNumber = "",
-                profilePicUri = "",
-                isOtpVerified = false,
-                isEmailVerified = false,
-                createdAt = 0L
-            )
-            repository.saveUserProfile(emptyProfile)
-            _toastMessage.emit("Signed out successfully 👋")
-        }
-    }
-
-    // --- Navigation & State Mutators ---
-
-    fun setTab(index: Int) {
-        _selectedTab.value = index
-    }
-
-    fun setMonthAndYear(month: Int, year: Int) {
-        _currentMonth.value = month
-        _currentYear.value = year
-    }
-
-    fun nextMonth() {
-        if (_currentMonth.value == 12) {
-            _currentMonth.value = 1
-            _currentYear.value += 1
-        } else {
-            _currentMonth.value += 1
-        }
+    fun toggleFinancialSafetyVisible() {
+        _isFinancialSafetyVisible.value = !_isFinancialSafetyVisible.value
     }
 
     fun previousMonth() {
@@ -593,604 +66,814 @@ class FinMoneyViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun setCurrency(symbol: String) {
-        _currencySymbol.value = symbol
+    fun nextMonth() {
+        if (_currentMonth.value == 12) {
+            _currentMonth.value = 1
+            _currentYear.value += 1
+        } else {
+            _currentMonth.value += 1
+        }
     }
 
-    // --- Salary Operations ---
+    fun setMonthYear(month: Int, year: Int, day: Int? = null) {
+        _currentMonth.value = month.coerceIn(1, 12)
+        _currentYear.value = year
+        _selectedSpecificDay.value = day
+    }
 
-    fun saveSalary(
-        salaryAmount: Double,
-        additionalIncome: Double,
-        notes: String,
-        incomeSources: List<IncomeSource> = emptyList()
-    ) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val record = SalaryRecord(
-                month = _currentMonth.value,
-                year = _currentYear.value,
-                salaryAmount = salaryAmount,
-                additionalIncome = additionalIncome,
-                currencySymbol = _currencySymbol.value,
-                notes = notes,
-                incomeSourcesJson = encodeIncomeSources(incomeSources),
-                updatedAt = System.currentTimeMillis()
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val currentSalaryRecord: StateFlow<SalaryRecord?> = combine(_currentMonth, _currentYear) { m, y -> m to y }
+        .flatMapLatest { (m, y) -> dao.getSalaryRecord(m, y) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val currentDebits: StateFlow<List<DebitItem>> = combine(_currentMonth, _currentYear) { m, y -> m to y }
+        .flatMapLatest { (m, y) -> dao.getDebitsForMonth(m, y) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val currentReconciliation: StateFlow<MonthlyReconciliation?> = combine(_currentMonth, _currentYear) { m, y -> m to y }
+        .flatMapLatest { (m, y) -> dao.getReconciliationForMonth(m, y) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val allLoans: StateFlow<List<LoanTransaction>> = repository.allLoans.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+    val allDebits: StateFlow<List<DebitItem>> = repository.allDebits.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+    val notifications: StateFlow<List<AppNotification>> = repository.allNotifications.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+    val bankTransactions: StateFlow<List<BankTransactionRecord>> = repository.allBankTransactions.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+
+    val monthlySummary: StateFlow<MonthlyFinanceSummary?> = combine(
+        currentSalaryRecord,
+        currentDebits,
+        currentReconciliation,
+        _currentMonth,
+        _currentYear
+    ) { salary, debits, recon, m, y ->
+        val incomeSources = if (salary != null && salary.incomeSourcesJson.isNotBlank() && salary.incomeSourcesJson != "[]") {
+            FinMoneyRepository.parseIncomeSources(salary.incomeSourcesJson)
+        } else {
+            val base = salary?.baseSalary ?: 85000.0
+            val extra = salary?.additionalIncome ?: 15000.0
+            listOf(
+                IncomeSource("1", "Primary Salary", "Employer Transfer", base, "SALARY", true),
+                IncomeSource("2", "Freelance / Extra", "Secondary Earnings", extra, "FREELANCE", true)
             )
-            repository.saveSalary(record)
         }
-    }
 
-    // --- Debit Operations ---
+        val totalIncome = incomeSources.sumOf { it.amount }
+        val totalDebits = debits.sumOf { it.amount }
+        val totalPaid = debits.filter { it.isPaid }.sumOf { it.amount }
 
-    fun addDebit(
-        category: String,
-        customCategoryName: String = "",
-        title: String,
-        amount: Double,
-        dueDateDay: Int = 1,
-        isRecurring: Boolean = true,
-        interestRate: Double = 0.0,
-        totalTenureMonths: Int = 0,
-        currentMonthTenure: Int = 0,
-        notes: String = ""
-    ) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val item = DebitItem(
-                month = _currentMonth.value,
-                year = _currentYear.value,
-                category = category,
-                customCategoryName = customCategoryName,
-                title = title,
-                amount = amount,
-                dueDateDay = dueDateDay,
-                isRecurring = isRecurring,
-                isPaid = false,
-                interestRate = interestRate,
-                totalTenureMonths = totalTenureMonths,
-                currentMonthTenure = currentMonthTenure,
-                notes = notes
+        val budgetMetrics = calculateBudgetHealthUseCase(
+            income = totalIncome,
+            debits = totalDebits,
+            paidDebits = totalPaid
+        )
+
+        val bankBalances = if (recon != null && recon.bankBalancesJson.isNotBlank() && recon.bankBalancesJson != "[]") {
+            FinMoneyRepository.parseBankBalances(recon.bankBalancesJson)
+        } else {
+            emptyList()
+        }
+
+        val currentBankBalance = bankBalances.sumOf { it.endingBalance }
+        val netFlexibleSpending = totalIncome - totalDebits
+        val daysRemaining = 30
+
+        val categoryGroups = debits.groupBy { it.category }
+        val categorySummaries = categoryGroups.map { (cat, items) ->
+            val catTotal = items.sumOf { it.amount }
+            val catPaid = items.filter { it.isPaid }.sumOf { it.amount }
+            val pct = if (totalDebits > 0) (catTotal / totalDebits).toFloat() else 0f
+            CategorySummary(
+                categoryName = cat,
+                categoryKey = cat.uppercase(),
+                totalAmount = catTotal,
+                paidAmount = catPaid,
+                yetToPayAmount = catTotal - catPaid,
+                itemCount = items.size,
+                paidCount = items.count { it.isPaid },
+                percentage = pct
             )
-            repository.addDebit(item)
-        }
-    }
+        }.sortedByDescending { it.totalAmount }
 
-    fun updateDebit(debit: DebitItem) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.updateDebit(debit)
-        }
-    }
+        val bankDebits = debits.filter { !it.isPaidViaCreditCard }
+        val ccDebits = debits.filter { it.isPaidViaCreditCard }
+        val paidBankDebits = bankDebits.filter { it.isPaid }
+        val paidCcDebits = ccDebits.filter { it.isPaid }
 
-    fun deleteDebit(id: Long) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.deleteDebit(id)
-        }
-    }
+        MonthlyFinanceSummary(
+            monthYear = "$y-${if (m < 10) "0$m" else "$m"}",
+            totalIncome = budgetMetrics.totalIncome,
+            totalDebits = budgetMetrics.totalDebits,
+            totalPaid = budgetMetrics.totalPaid,
+            totalYetToPay = budgetMetrics.totalYetToPay,
+            flexibleCash = budgetMetrics.flexibleCash,
+            netFlexibleSpending = budgetMetrics.flexibleCash,
+            dailySafeSpend = budgetMetrics.dailySafeSpend,
+            currentBankBalance = currentBankBalance,
+            daysRemainingInMonth = budgetMetrics.daysRemainingInMonth,
+            incomeSources = incomeSources,
+            creditCardDebits = ccDebits,
+            categoryBreakdown = categorySummaries,
+            totalBankDebits = bankDebits.sumOf { it.amount },
+            totalCcDebits = ccDebits.sumOf { it.amount },
+            totalPaidBankDebits = paidBankDebits.sumOf { it.amount },
+            totalPaidCcDebits = paidCcDebits.sumOf { it.amount }
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MonthlyFinanceSummary())
 
-    fun toggleDebitPaid(id: Long, currentStatus: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.toggleDebitPaid(id, !currentStatus)
-        }
-    }
+    val reconciliationSummary: StateFlow<ReconciliationSummary> = combine(
+        monthlySummary,
+        currentDebits
+    ) { summary, debits ->
+        val s = summary ?: MonthlyFinanceSummary()
+        val bankDebits = debits.filter { !it.isPaidViaCreditCard }
+        val ccDebits = debits.filter { it.isPaidViaCreditCard }
+        val paidBankDebits = bankDebits.filter { it.isPaid }
+        val paidCcDebits = ccDebits.filter { it.isPaid }
 
-    fun prefillDebitsFromPreviousMonth() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val m = _currentMonth.value
-            val y = _currentYear.value
-            val prevMonth = if (m == 1) 12 else m - 1
-            val prevYear = if (m == 1) y - 1 else y
-            val prevMonthName = getMonthName(prevMonth)
+        ReconciliationSummary(
+            totalInflows = s.totalIncome,
+            totalOutflows = s.totalDebits,
+            totalPaidOutflows = s.totalPaid,
+            totalYetToPayOutflows = s.totalYetToPay,
+            totalBankDebits = s.totalBankDebits,
+            totalCcDebits = s.totalCcDebits,
+            totalPaidBankDebits = s.totalPaidBankDebits,
+            totalPaidCcDebits = s.totalPaidCcDebits,
+            netBalance = s.totalIncome - s.totalDebits,
+            incomeSourcesCount = s.incomeSources.size,
+            bankDebitsCount = bankDebits.size,
+            ccDebitsCount = ccDebits.size,
+            paidBankDebitsCount = paidBankDebits.size,
+            paidCcDebitsCount = paidCcDebits.size
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ReconciliationSummary())
 
-            // Strictly fetch previous month's expenses directly from database
-            val prevExpenses = repository.getDebitsForMonthDirect(prevMonth, prevYear)
-            if (prevExpenses.isEmpty()) {
-                _toastMessage.emit("No expenses in previous month ($prevMonthName $prevYear).")
-                return@launch
-            }
+    private val _isNotificationAccessGranted = MutableStateFlow(true)
+    val isNotificationAccessGranted: StateFlow<Boolean> = _isNotificationAccessGranted.asStateFlow()
 
-            val currentMonthDebits = repository.getDebitsForMonthDirect(m, y)
-            val itemsToInsert = prevExpenses.filterNot { prevItem ->
-                currentMonthDebits.any { it.title.equals(prevItem.title, ignoreCase = true) && it.category == prevItem.category }
-            }
+    fun checkNotificationAccess(context: Context) {}
 
-            if (itemsToInsert.isEmpty()) {
-                _toastMessage.emit("All expenses from $prevMonthName $prevYear are already added.")
-            } else {
-                repository.copyDebitsFromMonth(prevMonth, prevYear, m, y, itemsToInsert)
-                _toastMessage.emit("Prefilled ${itemsToInsert.size} expense(s) from $prevMonthName $prevYear.")
-            }
-        }
-    }
-
-    // --- Custom Category Operations ---
-
-    fun addCustomCategory(name: String, iconName: String = "category", colorHex: String = "#00D09C") {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.addCustomCategory(
-                CustomCategory(
-                    name = name.trim(),
-                    iconName = iconName,
-                    colorHex = colorHex
+    fun saveReconciliation(
+        month: Int = 10,
+        year: Int = 2026,
+        bankBalances: List<BankBalanceItem> = emptyList(),
+        manualAdjustment: Any = 0.0,
+        adjustmentNote: String = "",
+        isReconciled: Boolean = true
+    ) {
+        viewModelScope.launch {
+            val json = FinMoneyRepository.encodeBankBalances(bankBalances)
+            val adj = manualAdjustment.toString().toDoubleOrNull() ?: 0.0
+            dao.insertOrUpdateReconciliation(
+                MonthlyReconciliation(
+                    month = month,
+                    year = year,
+                    bankBalancesJson = json,
+                    manualAdjustment = adj,
+                    adjustmentNote = adjustmentNote,
+                    notes = if (isReconciled) "RECONCILED" else "PENDING"
                 )
             )
         }
     }
 
-    fun deleteCustomCategory(category: CustomCategory) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.deleteCustomCategory(category)
+    fun simulateBankAlert(index: Int = 0, context: Context? = null) {}
+
+    fun deleteBankTransaction(id: Long) {
+        viewModelScope.launch {
+            dao.deleteBankTransaction(id)
         }
     }
 
-    // --- Loan / Borrow Operations (1-on-1 Peer Records) ---
+    fun deleteBankTransaction(tx: BankTransactionRecord) {
+        viewModelScope.launch {
+            dao.deleteBankTransaction(tx.id)
+        }
+    }
 
-    fun createLoan(
-        type: LoanType,
-        amount: Double,
-        counterpartyName: String,
-        counterpartyContact: String = "",
-        interestRatePercent: Double = 0.0,
-        isMonthlyInterest: Boolean = true,
-        startDateTimestamp: Long = System.currentTimeMillis(),
-        dueDateTimestamp: Long? = null,
-        note: String = "",
-        proofUri: String = "",
-        userProfilePicUri: String = "",
-        counterpartyProfilePicUri: String = "",
-        proofFilesJson: String = ""
-    ) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.createLoan(
-                type = type,
-                amount = amount,
-                counterpartyName = counterpartyName,
-                counterpartyContact = counterpartyContact,
-                interestRatePercent = interestRatePercent,
-                isMonthlyInterest = isMonthlyInterest,
-                startDateTimestamp = startDateTimestamp,
-                dueDateTimestamp = dueDateTimestamp,
-                note = note,
-                proofUri = proofUri,
-                userProfilePicUri = userProfilePicUri,
-                counterpartyProfilePicUri = counterpartyProfilePicUri,
-                proofFilesJson = proofFilesJson
+    fun updateBankTransaction(tx: BankTransactionRecord) {
+        viewModelScope.launch {
+            dao.insertBankTransaction(tx)
+        }
+    }
+
+    fun clearAllBankTransactions() {
+        viewModelScope.launch {
+            dao.clearAllBankTransactions()
+        }
+    }
+
+    fun scanDeviceSms(context: Context) {}
+    fun parseAndProcessCustomAlert(text: String, title: String = "", context: Context? = null) {}
+
+    val pendingBankTransactions: StateFlow<List<BankTransactionRecord>> = bankTransactions.map { list ->
+        list.filter { !it.isConfirmed }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun approveAllPendingTransactions() {
+        viewModelScope.launch {
+            val pending = dao.getPendingBankTransactionsDirect()
+            pending.forEach { tx ->
+                BankSyncManager.approveTransactionAndCreateExpense(
+                    context = app,
+                    txId = tx.id,
+                    customCategory = tx.category
+                )
+            }
+        }
+    }
+
+    fun approvePendingTransaction(id: Long, category: String = "GENERAL") {
+        viewModelScope.launch {
+            BankSyncManager.approveTransactionAndCreateExpense(
+                context = app,
+                txId = id,
+                customCategory = category
             )
-            _toastMessage.emit("Agreement created & signed by you. Awaiting counterparty.")
         }
     }
 
-    suspend fun isUserRegistered(phone: String): Boolean {
-        return repository.isUserRegistered(phone)
+    fun approvePendingTransaction(tx: BankTransactionRecord) {
+        approvePendingTransaction(tx.id, tx.category)
     }
 
-    fun checkUserRegistered(phone: String, onResult: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val registered = repository.isUserRegistered(phone)
-            withContext(Dispatchers.Main) {
-                onResult(registered)
-            }
-        }
-    }
-
-    fun signAgreement(loanId: Long, isUser: Boolean, signerName: String = "You") {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.signAgreement(loanId, signerName, isUser)
-            _toastMessage.emit("Agreement signed successfully! ✍️")
-        }
-    }
-
-    fun updateLoan(loan: LoanTransaction) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.updateLoan(loan)
-            _toastMessage.emit("Transaction details updated.")
-        }
-    }
-
-    fun approveLoanByCounterparty(loanId: Long, approve: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.approveLoanByCounterparty(loanId, approve)
-            if (approve) {
-                _toastMessage.emit("Transaction approved and active!")
-            } else {
-                _toastMessage.emit("Transaction marked as declined / disputed.")
-            }
-        }
-    }
-
-    fun requestSettlement(loanId: Long, requestedBy: String = "You", proofUri: String = "", proofFilesJson: String = "") {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.requestSettlement(loanId, requestedBy, proofUri, proofFilesJson)
-            _toastMessage.emit("Settlement requested. Waiting for counterparty confirmation.")
-        }
-    }
-
-    fun confirmSettlement(loanId: Long, confirmed: Boolean, confirmedBy: String = "You") {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.confirmSettlement(loanId, confirmed, confirmedBy)
-            if (confirmed) {
-                _toastMessage.emit("Full settlement mutually approved! 🎉")
-            } else {
-                _toastMessage.emit("Settlement request was declined.")
-            }
-        }
-    }
-
-    fun recordPartialPayment(
-        loanId: Long,
-        amount: Double,
-        note: String,
-        proofUri: String = "",
-        recordedBy: String = "You",
-        isDirectApproval: Boolean = false,
-        paymentTarget: String = "COMBINED",
-        proofFilesJson: String = ""
-    ) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.recordPartialPayment(
-                loanId = loanId,
-                amount = amount,
-                note = note,
-                proofUri = proofUri,
-                recordedBy = recordedBy,
-                isDirectApproval = isDirectApproval,
-                paymentTarget = paymentTarget,
-                proofFilesJson = proofFilesJson
+    fun rejectPendingTransaction(id: Long) {
+        viewModelScope.launch {
+            BankSyncManager.rejectTransaction(
+                context = app,
+                txId = id
             )
-            if (isDirectApproval) {
-                _toastMessage.emit("Payment of ₹${"%,.0f".format(amount)} recorded & confirmed.")
-            } else {
-                _toastMessage.emit("Payment of ₹${"%,.0f".format(amount)} logged. Awaiting confirmation.")
+        }
+    }
+
+    fun rejectPendingTransaction(tx: BankTransactionRecord) {
+        rejectPendingTransaction(tx.id)
+    }
+
+    // Kubera AI Chat State
+    private val _kuberaMessages = MutableStateFlow(
+        listOf(
+            KuberaMessage(
+                sender = KuberaSender.KUBERA,
+                text = "Greetings! I am Lord Kubera, Guardian of Celestial Wealth. How may I guide your financial prosperity today?"
+            )
+        )
+    )
+    val kuberaMessages: StateFlow<List<KuberaMessage>> = _kuberaMessages.asStateFlow()
+
+    private val _isKuberaThinking = MutableStateFlow(false)
+    val isKuberaThinking: StateFlow<Boolean> = _isKuberaThinking.asStateFlow()
+
+    private val _isKuberaSpeaking = MutableStateFlow(false)
+    val isKuberaSpeaking: StateFlow<Boolean> = _isKuberaSpeaking.asStateFlow()
+
+    private val _groqApiKey = MutableStateFlow("")
+    val groqApiKey: StateFlow<String> = _groqApiKey.asStateFlow()
+
+    private val _selectedGroqModel = MutableStateFlow("llama-3.3-70b-versatile")
+    val selectedGroqModel: StateFlow<String> = _selectedGroqModel.asStateFlow()
+
+    fun clearKuberaChat() {
+        _kuberaMessages.value = listOf(
+            KuberaMessage(
+                sender = KuberaSender.KUBERA,
+                text = "Greetings! I am Lord Kubera, Guardian of Celestial Wealth. How may I guide your financial prosperity today?"
+            )
+        )
+    }
+
+    fun saveGroqApiKey(key: String) {
+        _groqApiKey.value = key
+    }
+
+    fun setSelectedGroqModel(model: String) {
+        _selectedGroqModel.value = model
+    }
+
+    fun sendKuberaUserMessage(text: String) {
+        if (text.isBlank()) return
+        val userMsg = KuberaMessage(sender = KuberaSender.USER, text = text)
+        _kuberaMessages.value = _kuberaMessages.value + userMsg
+        _isKuberaThinking.value = true
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val key = _groqApiKey.value
+            val summary = monthlySummary.value
+            val responseText = generateOfflineKuberaAdvice(text, summary)
+            _isKuberaThinking.value = false
+            _kuberaMessages.value = _kuberaMessages.value + KuberaMessage(sender = KuberaSender.KUBERA, text = responseText)
+        }
+    }
+
+    fun runKuberaAudit(auditMode: Any? = null) {
+        sendKuberaUserMessage("Perform a full Kubera financial audit of my current monthly budget, loans, and bank balances.")
+    }
+
+    fun chantKuberaMantra() {
+        sendKuberaUserMessage("Bless me with the sacred Kubera Dhan Vridhi Mantra and financial wisdom.")
+    }
+
+    fun speakKuberaMessage(text: String) {}
+
+    fun getLiveFinancialContextJson(): String {
+        val s = monthlySummary.value ?: return "{}"
+        return "{\"totalIncome\": ${s.totalIncome}, \"totalDebits\": ${s.totalDebits}, \"netSavings\": ${s.netFlexibleSpending}, \"bankBalance\": ${s.currentBankBalance}}"
+    }
+
+    private fun generateOfflineKuberaAdvice(query: String, summary: MonthlyFinanceSummary?): String {
+        val q = query.lowercase()
+        val inc = summary?.totalIncome ?: 100000.0
+        val deb = summary?.totalDebits ?: 65000.0
+        val net = inc - deb
+
+        return when {
+            q.contains("audit") || q.contains("budget") || q.contains("summary") -> {
+                "🏛️ *Kubera Financial Audit*\n\n" +
+                        "• Total Monthly Income: ₹${"%,.0f".format(inc)}\n" +
+                        "• Total Monthly Outflow: ₹${"%,.0f".format(deb)}\n" +
+                        "• Net Monthly Savings: ₹${"%,.0f".format(net)}\n\n" +
+                        "*Kubera's Decree:* " +
+                        if (net > 0) "Your treasury is growing steadily! Channel at least 30% of your net savings into high-yield mutual funds or sovereign gold bonds."
+                        else "Caution: Your expenditure exceeds or closely matches your income. Review your EMI and dining categories to preserve liquidity."
+            }
+            q.contains("mantra") || q.contains("bless") -> {
+                "✨ *Om Yakshaya Kuberaya Vaishravanaya Dhanadhipataye Dhanadhanya Samriddhim Me Dehi Dapaya Swaha!* ✨\n\n" +
+                        "May celestial abundance flow into your accounts, and may wisdom govern every coin you spend."
+            }
+            q.contains("loan") || q.contains("lent") || q.contains("borrow") -> {
+                "⚖️ *Ledger Wisdom:* Always verify counterparties and maintain written records for lent funds. Prioritize settling high-interest obligations first."
+            }
+            else -> {
+                "By the order of Kubera: Your net balance stands at ₹${"%,.0f".format(net)}. " +
+                        "Maintain an emergency buffer equivalent to 6 months of essential outflow (₹${"%,.0f".format(deb * 6)})."
             }
         }
     }
 
-    fun approvePartialPayment(loanId: Long, paymentId: String, approvedBy: String = "You") {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.approvePartialPayment(loanId, paymentId, approvedBy)
-            _toastMessage.emit("Payment confirmed and deducted from balance! ✓")
+    fun addDebit(
+        title: String,
+        amount: Double,
+        category: String,
+        dueDateDay: Int,
+        month: Int = 10,
+        year: Int = 2026,
+        notes: String = "",
+        principalAmount: Double = 0.0,
+        interestRate: Double = 0.0,
+        totalTenureMonths: Int = 0,
+        currentMonthTenure: Int = 1,
+        isPaidViaCreditCard: Boolean = false,
+        isRecurring: Boolean = false
+    ) {
+        viewModelScope.launch {
+            repository.insertDebit(
+                DebitItem(
+                    title = title,
+                    amount = amount,
+                    category = category.uppercase(),
+                    dueDateDay = dueDateDay,
+                    month = month,
+                    year = year,
+                    notes = notes,
+                    principalAmount = principalAmount,
+                    interestRate = interestRate,
+                    totalTenureMonths = totalTenureMonths,
+                    currentMonthTenure = currentMonthTenure,
+                    isPaidViaCreditCard = isPaidViaCreditCard,
+                    isRecurring = isRecurring
+                )
+            )
         }
     }
 
-    fun rejectPartialPayment(loanId: Long, paymentId: String, declinedBy: String = "You") {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.rejectPartialPayment(loanId, paymentId, declinedBy)
-            _toastMessage.emit("Payment record declined.")
-        }
-    }
+    /**
+     * Prefills recurring debit obligations from recurring templates or previous months into target month.
+     * Automatically increments currentMonthTenure for Chit and Loan EMIs.
+     */
+    fun prefillRecurringDebitsForMonth(targetMonth: Int = _currentMonth.value, targetYear: Int = _currentYear.value) {
+        viewModelScope.launch {
+            try {
+                val recurringDebits = dao.getRecurringDebitsDirect()
+                val currentMonthItems = dao.getDebitsForMonthDirect(targetMonth, targetYear)
+                val newDebitsToInsert = mutableListOf<DebitItem>()
 
-    fun deletePaymentRecord(loanId: Long, paymentId: String, deletedBy: String = "You") {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.deletePaymentRecord(loanId, paymentId, deletedBy)
-            _toastMessage.emit("Payment record deleted.")
-        }
-    }
+                for (template in recurringDebits) {
+                    val alreadyPresent = currentMonthItems.any { item ->
+                        item.title.equals(template.title, ignoreCase = true) &&
+                        item.category.equals(template.category, ignoreCase = true) &&
+                        kotlin.math.abs(item.amount - template.amount) < 0.01
+                    }
+                    if (!alreadyPresent) {
+                        val nextTenure = if (template.totalTenureMonths > 0) template.currentMonthTenure + 1 else template.currentMonthTenure
+                        if (template.totalTenureMonths == 0 || nextTenure <= template.totalTenureMonths) {
+                            newDebitsToInsert.add(
+                                template.copy(
+                                    id = 0L,
+                                    cloudId = "",
+                                    month = targetMonth,
+                                    year = targetYear,
+                                    monthYear = "$targetYear-${if (targetMonth < 10) "0$targetMonth" else "$targetMonth"}",
+                                    currentMonthTenure = nextTenure,
+                                    isPaid = false,
+                                    paidDateTimestamp = null,
+                                    paidDate = null,
+                                    createdAt = System.currentTimeMillis()
+                                )
+                            )
+                        }
+                    }
+                }
 
-    fun requestPaymentDeletion(loanId: Long, paymentId: String, requesterName: String = "You") {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.requestPaymentDeletion(loanId, paymentId, requesterName)
-            _toastMessage.emit("Payment deletion requested.")
-        }
-    }
+                if (newDebitsToInsert.isNotEmpty()) {
+                    dao.insertDebits(newDebitsToInsert)
+                    Log.i("FinMoneyViewModel", "Prefilled ${newDebitsToInsert.size} recurring debits into $targetMonth/$targetYear")
+                }
 
-    fun confirmPaymentDeletion(loanId: Long, paymentId: String, approve: Boolean, confirmedBy: String = "You") {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.confirmPaymentDeletion(loanId, paymentId, approve, confirmedBy)
-            if (approve) {
-                _toastMessage.emit("Payment record mutually removed.")
-            } else {
-                _toastMessage.emit("Payment deletion request declined.")
+            } catch (e: Exception) {
+                Log.e("FinMoneyViewModel", "Failed to prefill recurring debits: ${e.message}", e)
             }
         }
     }
 
-    fun sendReminder(loanId: Long) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.sendReminder(loanId)
-            _toastMessage.emit("Payment reminder notification sent!")
+    fun toggleDebitRecurring(item: DebitItem) {
+        viewModelScope.launch {
+            val updated = item.copy(isRecurring = !item.isRecurring)
+            repository.updateDebit(updated)
+        }
+    }
+
+    fun insertDebit(item: DebitItem) {
+
+        viewModelScope.launch {
+            repository.insertDebit(item)
+        }
+    }
+
+    fun insertDebits(items: List<DebitItem>) {
+        viewModelScope.launch {
+            repository.insertDebits(items)
+        }
+    }
+
+    fun deleteDebit(item: DebitItem) {
+        viewModelScope.launch {
+            repository.deleteDebit(item)
+        }
+    }
+
+    fun updateDebit(item: DebitItem) {
+        viewModelScope.launch {
+            repository.updateDebit(item)
+        }
+    }
+
+    fun toggleDebitCreditCardStatus(item: DebitItem) {
+        viewModelScope.launch {
+            repository.updateDebit(item.copy(isPaidViaCreditCard = !item.isPaidViaCreditCard))
+        }
+    }
+
+    fun toggleDebitPaid(item: DebitItem) {
+        viewModelScope.launch {
+            dao.setDebitPaidStatus(item.id, !item.isPaid)
+        }
+    }
+
+    private fun getOrCreateIncomeSources(existing: SalaryRecord?): MutableList<IncomeSource> {
+        return if (existing != null && !existing.incomeSourcesJson.isNullOrBlank() && existing.incomeSourcesJson != "[]") {
+            FinMoneyRepository.parseIncomeSources(existing.incomeSourcesJson).toMutableList()
+        } else {
+            val base = existing?.baseSalary?.takeIf { it > 0 } ?: 85000.0
+            val extra = existing?.additionalIncome?.takeIf { it > 0 } ?: 15000.0
+            mutableListOf(
+                IncomeSource("1", "Primary Salary", "Employer Transfer", base, "SALARY", true),
+                IncomeSource("2", "Freelance / Extra", "Secondary Earnings", extra, "FREELANCE", true)
+            )
+        }
+    }
+
+    private suspend fun saveUpdatedIncomeSources(
+        existing: SalaryRecord?,
+        sources: List<IncomeSource>,
+        month: Int,
+        year: Int,
+        overrideBaseSalary: Double? = null
+    ) {
+        val newJson = FinMoneyRepository.encodeIncomeSources(sources)
+        val salaryItem = sources.find { it.category == "SALARY" || it.id == "1" }
+        val newBase = overrideBaseSalary ?: salaryItem?.amount ?: (existing?.baseSalary ?: 85000.0)
+        val newAdditional = sources.filter { it.category != "SALARY" && it.id != "1" }.sumOf { it.amount }
+
+        val updatedRecord = if (existing != null) {
+            existing.copy(
+                baseSalary = newBase,
+                salaryAmount = newBase,
+                additionalIncome = newAdditional,
+                incomeSourcesJson = newJson,
+                updatedAt = System.currentTimeMillis()
+            )
+        } else {
+            SalaryRecord(
+                month = month,
+                year = year,
+                monthYear = "$year-${if (month < 10) "0$month" else month}",
+                baseSalary = newBase,
+                salaryAmount = newBase,
+                additionalIncome = newAdditional,
+                incomeSourcesJson = newJson,
+                updatedAt = System.currentTimeMillis()
+            )
+        }
+        repository.insertOrUpdateSalary(updatedRecord)
+    }
+
+    fun addIncomeCredit(
+        title: String,
+        amount: Double,
+        category: String = "OTHER",
+        dateString: String? = null,
+        month: Int? = null,
+        year: Int? = null
+    ) {
+        val parsedTimestamp = if (!dateString.isNullOrBlank()) {
+            try {
+                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).parse(dateString)?.time
+            } catch (e: Exception) {
+                null
+            }
+        } else null
+
+        val timestamp = parsedTimestamp ?: System.currentTimeMillis()
+        val m = month ?: _currentMonth.value
+        val y = year ?: _currentYear.value
+
+        viewModelScope.launch {
+            val existing = dao.getSalaryRecordDirect(m, y)
+            val currentSources = getOrCreateIncomeSources(existing)
+            val newSource = IncomeSource(
+                id = java.util.UUID.randomUUID().toString(),
+                title = title,
+                name = title,
+                amount = amount,
+                category = category,
+                isReceived = true,
+                receivedDateTimestamp = timestamp
+            )
+            currentSources.add(newSource)
+            saveUpdatedIncomeSources(existing, currentSources, m, y)
+        }
+    }
+
+    fun updateIncomeSource(
+        id: String,
+        newTitle: String,
+        newAmount: Double,
+        newCategory: String = "OTHER",
+        dateString: String? = null,
+        month: Int? = null,
+        year: Int? = null
+    ) {
+        val parsedTimestamp = if (!dateString.isNullOrBlank()) {
+            try {
+                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).parse(dateString)?.time
+            } catch (e: Exception) {
+                null
+            }
+        } else null
+
+        val timestamp = parsedTimestamp ?: System.currentTimeMillis()
+        val m = month ?: _currentMonth.value
+        val y = year ?: _currentYear.value
+
+        viewModelScope.launch {
+            val existing = dao.getSalaryRecordDirect(m, y)
+            val currentSources = getOrCreateIncomeSources(existing)
+            val index = currentSources.indexOfFirst { it.id == id }
+            if (index != -1) {
+                val old = currentSources[index]
+                currentSources[index] = old.copy(
+                    title = newTitle,
+                    name = newTitle,
+                    amount = newAmount,
+                    category = newCategory,
+                    receivedDateTimestamp = timestamp
+                )
+                saveUpdatedIncomeSources(existing, currentSources, m, y)
+            }
+        }
+    }
+
+    fun deleteIncomeSource(
+        id: String,
+        month: Int? = null,
+        year: Int? = null
+    ) {
+        val m = month ?: _currentMonth.value
+        val y = year ?: _currentYear.value
+
+        viewModelScope.launch {
+            val existing = dao.getSalaryRecordDirect(m, y)
+            val currentSources = getOrCreateIncomeSources(existing)
+            val removed = currentSources.removeAll { it.id == id }
+            if (removed) {
+                saveUpdatedIncomeSources(existing, currentSources, m, y)
+            }
+        }
+    }
+
+    fun updateBaseSalary(
+        newAmount: Double,
+        month: Int? = null,
+        year: Int? = null
+    ) {
+        val m = month ?: _currentMonth.value
+        val y = year ?: _currentYear.value
+
+        viewModelScope.launch {
+            val existing = dao.getSalaryRecordDirect(m, y)
+            val currentSources = getOrCreateIncomeSources(existing)
+
+            val salaryIndex = currentSources.indexOfFirst { it.id == "1" || it.category == "SALARY" }
+            if (salaryIndex != -1) {
+                currentSources[salaryIndex] = currentSources[salaryIndex].copy(
+                    amount = newAmount,
+                    title = "Primary Salary",
+                    name = "Primary Salary"
+                )
+            } else {
+                currentSources.add(
+                    0,
+                    IncomeSource(
+                        id = "1",
+                        title = "Primary Salary",
+                        name = "Primary Salary",
+                        amount = newAmount,
+                        category = "SALARY",
+                        isReceived = true,
+                        receivedDateTimestamp = System.currentTimeMillis()
+                    )
+                )
+            }
+
+            saveUpdatedIncomeSources(existing, currentSources, m, y, overrideBaseSalary = newAmount)
+        }
+    }
+
+    fun addLoan(
+        personName: String,
+        amount: Double,
+        type: String,
+        notes: String = ""
+    ) {
+        val loanType = try {
+            LoanType.valueOf(type.uppercase())
+        } catch (e: Exception) {
+            if (type.equals("BORROWED", true) || type.equals("TAKEN", true)) LoanType.BORROWED else LoanType.LENT
+        }
+        viewModelScope.launch {
+            repository.insertLoan(
+                LoanTransaction(
+                    personName = personName,
+                    totalAmount = amount,
+                    type = loanType,
+                    status = LoanApprovalStatus.APPROVED,
+                    notes = notes
+                )
+            )
+        }
+    }
+
+    fun approveLoan(loanId: Long) {
+        viewModelScope.launch {
+            dao.updateLoanApproval(loanId, LoanApprovalStatus.APPROVED.name, true)
+        }
+    }
+
+    fun rejectLoan(loanId: Long) {
+        viewModelScope.launch {
+            dao.updateLoanApproval(loanId, LoanApprovalStatus.REJECTED.name, false)
+        }
+    }
+
+    fun settleLoan(loanId: Long) {
+        viewModelScope.launch {
+            dao.settleLoan(loanId)
+        }
+    }
+
+    fun requestEditApproval(loanId: Long, newAmount: Double, newNotes: String) {
+        viewModelScope.launch {
+            val loan = dao.getLoanById(loanId)
+            if (loan != null) {
+                val updated = loan.copy(
+                    totalAmount = newAmount,
+                    notes = newNotes,
+                    status = LoanApprovalStatus.PENDING_APPROVAL,
+                    updatedAt = System.currentTimeMillis()
+                )
+                repository.updateLoan(updated)
+            }
+        }
+    }
+
+    fun requestDeleteApproval(loanId: Long) {
+        viewModelScope.launch {
+            val loan = dao.getLoanById(loanId)
+            if (loan != null) {
+                val updated = loan.copy(
+                    status = LoanApprovalStatus.PENDING_SETTLEMENT,
+                    updatedAt = System.currentTimeMillis()
+                )
+                repository.updateLoan(updated)
+            }
         }
     }
 
     fun deleteLoan(id: Long) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.deleteLoan(id)
-            _toastMessage.emit("Record deleted.")
+        viewModelScope.launch {
+            repository.deleteLoanById(id)
         }
     }
 
-    fun requestLoanDeletion(id: Long, requesterName: String = "You") {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.requestLoanDeletion(id, requesterName)
-            _toastMessage.emit("Deletion requested. Awaiting counterparty confirmation.")
-        }
-    }
-
-    fun confirmLoanDeletion(id: Long, approve: Boolean, confirmedBy: String = "You") {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.confirmLoanDeletion(id, approve, confirmedBy)
-            if (approve) {
-                _toastMessage.emit("Record mutually deleted.")
-            } else {
-                _toastMessage.emit("Deletion request declined. Record retained.")
-            }
-        }
-    }
-
-    // --- Smart SMS Scanner & Auto-Categorization Operations ---
-
-    fun scanDeviceSms(context: android.content.Context) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val debits = currentDebits.value
-            val list = SmartSmsParser.readDeviceSms(context, limit = 50, plannedDebits = debits)
-            if (list.isEmpty()) {
-                _toastMessage.emit("No new bank or financial SMS found in inbox.")
-            } else {
-                val current = _detectedSmsTransactions.value.toMutableList()
-                val newItems = list.filterNot { parsed -> current.any { it.originalSms == parsed.originalSms } }
-                _detectedSmsTransactions.value = newItems + current
-                _toastMessage.emit("Found ${newItems.size} new bank transaction SMS.")
-            }
-        }
-    }
-
-    fun loadSampleSmsTransactions() {
-        viewModelScope.launch(Dispatchers.Default) {
-            val debits = currentDebits.value
-            val samples = SmartSmsParser.getSampleBankSmsList().mapNotNull { (sender, text) ->
-                SmartSmsParser.parseMessage(text, sender, System.currentTimeMillis(), debits)
-            }
-            val current = _detectedSmsTransactions.value.toMutableList()
-            val newItems = samples.filterNot { parsed -> current.any { it.originalSms == parsed.originalSms } }
-            _detectedSmsTransactions.value = newItems + current
-            _toastMessage.emit("Loaded ${newItems.size} sample bank SMS for smart categorization!")
-        }
-    }
-
-    fun parseAndAddCustomSms(smsText: String, sender: String = "Bank SMS") {
-        viewModelScope.launch(Dispatchers.Default) {
-            val debits = currentDebits.value
-            val parsed = SmartSmsParser.parseMessage(smsText, sender, System.currentTimeMillis(), debits)
-            if (parsed != null) {
-                _detectedSmsTransactions.value = listOf(parsed) + _detectedSmsTransactions.value
-                _toastMessage.emit("Parsed ${parsed.detectedCategory.displayName}: ₹${"%,.0f".format(parsed.amount)}")
-            } else {
-                _toastMessage.emit("Could not identify valid bank transaction in entered text.")
-            }
-        }
-    }
-
-    fun confirmSmsTransaction(
-        tx: ParsedSmsTransaction,
-        asPaidPlannedDebit: Boolean = false,
-        overrideCategory: String? = null,
-        overridePeerType: LoanType? = null
+    fun saveUserProfile(
+        name: String = "You",
+        email: String = "",
+        phoneNumber: String = "",
+        profilePicUri: String? = null,
+        isOtpVerified: Boolean = true,
+        isEmailVerified: Boolean = true
     ) {
-        viewModelScope.launch(Dispatchers.IO) {
-            // Case 1: Match planned commitment -> Mark as paid
-            if ((tx.matchedPlannedDebitId != null || asPaidPlannedDebit) && tx.matchedPlannedDebitId != null) {
-                repository.toggleDebitPaid(tx.matchedPlannedDebitId, true)
-                _toastMessage.emit("Marked '${tx.matchedPlannedDebitTitle ?: "Planned Item"}' as PAID ✓")
-            }
-            // Case 2: Peer Transfer -> Add to Lent / Borrowed (Phone number / contact level)
-            else if (tx.detectedCategory == DetectedCategory.PEER_TRANSFER) {
-                val loanType = overridePeerType ?: if (tx.type == SmsTransactionType.CREDIT) LoanType.TAKEN else LoanType.GIVEN
-                repository.createLoan(
-                    type = loanType,
-                    amount = tx.amount,
-                    counterpartyName = tx.merchantOrParty.ifBlank { "Contact" },
-                    counterpartyContact = tx.phoneNumber,
-                    interestRatePercent = 0.0,
-                    isMonthlyInterest = true,
-                    startDateTimestamp = tx.timestamp,
-                    dueDateTimestamp = tx.timestamp + (30L * 86400000L),
-                    note = "Auto-detected from bank SMS: ${tx.sender}",
-                    proofUri = ""
+        viewModelScope.launch {
+            dao.insertOrUpdateUserProfile(
+                UserProfile(
+                    id = 1,
+                    name = name,
+                    email = email,
+                    phoneNumber = phoneNumber,
+                    profilePicUri = profilePicUri,
+                    isOtpVerified = isOtpVerified,
+                    isEmailVerified = isEmailVerified
                 )
-                _toastMessage.emit("Added ${if (loanType == LoanType.GIVEN) "Given" else "Taken"} ₹${"%,.0f".format(tx.amount)} with ${tx.merchantOrParty} 🤝")
-            }
-            // Case 3: Salary Credit -> Update monthly income
-            else if (tx.detectedCategory == DetectedCategory.SALARY_CREDIT || (tx.type == SmsTransactionType.CREDIT && tx.amount > 5000)) {
-                val currentSal = currentSalaryRecord.value
-                val newSal = (currentSal?.salaryAmount ?: 0.0).coerceAtLeast(tx.amount)
-                val record = SalaryRecord(
-                    month = _currentMonth.value,
-                    year = _currentYear.value,
-                    salaryAmount = newSal,
-                    additionalIncome = currentSal?.additionalIncome ?: 0.0,
-                    notes = currentSal?.notes ?: "Auto-synced from SMS",
-                    incomeSourcesJson = currentSal?.incomeSourcesJson ?: "",
-                    updatedAt = System.currentTimeMillis()
-                )
-                repository.saveSalary(record)
-                _toastMessage.emit("Updated salary income to ₹${"%,.0f".format(newSal)} 💰")
-            }
-            // Case 4: Self Transfer -> Ignored or noted
-            else if (tx.detectedCategory == DetectedCategory.SELF_TRANSFER) {
-                _toastMessage.emit("Self-transfer of ₹${"%,.0f".format(tx.amount)} confirmed.")
-            }
-            // Case 5: Regular Outflow / Shopping / Bills -> Add as paid Debit item
-            else {
-                val catName = overrideCategory ?: when (tx.detectedCategory) {
-                    DetectedCategory.SHOPPING -> DebitCategory.SHOPPING.name
-                    DetectedCategory.INTERNET_RECHARGE -> DebitCategory.INTERNET.name
-                    DetectedCategory.ELECTRICITY -> DebitCategory.ELECTRICITY.name
-                    DetectedCategory.RENT -> DebitCategory.RENT.name
-                    DetectedCategory.LOAN_EMI -> DebitCategory.EMI.name
-                    DetectedCategory.INVESTMENT_SIP -> DebitCategory.INVESTMENT.name
-                    else -> DebitCategory.GENERAL.name
-                }
-
-                val debit = DebitItem(
-                    month = _currentMonth.value,
-                    year = _currentYear.value,
-                    category = catName,
-                    customCategoryName = if (catName == DebitCategory.CUSTOM.name) tx.detectedCategory.displayName else "",
-                    title = tx.merchantOrParty.ifBlank { tx.detectedCategory.displayName },
-                    amount = tx.amount,
-                    dueDateDay = 1,
-                    isRecurring = false,
-                    isPaid = true, // Already debited via SMS
-                    interestRate = 0.0,
-                    totalTenureMonths = 0,
-                    currentMonthTenure = 0,
-                    notes = "SMS Auto-Logged (${tx.sender})"
-                )
-                repository.addDebit(debit)
-                _toastMessage.emit("Logged ₹${"%,.0f".format(tx.amount)} under ${tx.detectedCategory.displayName} ✓")
-            }
-
-            // Remove from pending list
-            _detectedSmsTransactions.value = _detectedSmsTransactions.value.filterNot { it.id == tx.id }
-        }
-    }
-
-    fun rejectSmsTransaction(txId: String) {
-        viewModelScope.launch(Dispatchers.Default) {
-            _detectedSmsTransactions.value = _detectedSmsTransactions.value.filterNot { it.id == txId }
-            _toastMessage.emit("Transaction rejected & removed ✕")
-        }
-    }
-
-    // --- Notifications ---
-
-    fun markNotificationRead(id: Long) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.markNotificationRead(id)
-        }
-    }
-
-    fun markAllNotificationsRead() {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.markAllNotificationsRead()
-        }
-    }
-
-    private fun groupDebitsByCategory(debits: List<DebitItem>): List<CategorySummary> {
-        val map = debits.groupBy {
-            if (it.category == DebitCategory.CUSTOM.name) {
-                if (it.customCategoryName.isNotBlank()) it.customCategoryName.trim() else "Custom"
-            } else {
-                it.category
-            }
-        }
-
-        return map.map { (catKey, items) ->
-            val total = items.sumOf { it.amount }
-            val paid = items.filter { it.isPaid }.sumOf { it.amount }
-            val unpaid = items.filter { !it.isPaid }.sumOf { it.amount }
-            val paidCount = items.count { it.isPaid }
-            val (colorHex, iconKey) = when (catKey.trim().lowercase()) {
-                "rent", DebitCategory.RENT.name.lowercase() -> "#0066FF" to "home"
-                "emi", DebitCategory.EMI.name.lowercase() -> "#F43F5E" to "emi"
-                "electricity", DebitCategory.ELECTRICITY.name.lowercase() -> "#F59E0B" to "flash"
-                "internet", DebitCategory.INTERNET.name.lowercase() -> "#0284C7" to "internet"
-                "groceries", DebitCategory.GROCERIES.name.lowercase() -> "#059669" to "groceries"
-                "recharge", DebitCategory.RECHARGE.name.lowercase() -> "#0284C7" to "recharge"
-                "chit", "chit payments", DebitCategory.CHIT.name.lowercase() -> "#6D28D9" to "chit"
-                "fuel", DebitCategory.FUEL.name.lowercase() -> "#EA580C" to "fuel"
-                "shopping", DebitCategory.SHOPPING.name.lowercase() -> "#DB2777" to "shopping"
-                "investment", DebitCategory.INVESTMENT.name.lowercase() -> "#00B377" to "investment"
-                "saving", DebitCategory.SAVING.name.lowercase() -> "#0F766E" to "saving"
-                "general", DebitCategory.GENERAL.name.lowercase() -> "#64748B" to "general"
-                else -> "#7C3AED" to "custom"
-            }
-            val displayName = when (catKey.trim().uppercase()) {
-                DebitCategory.RENT.name -> "Rent / Housing"
-                DebitCategory.EMI.name -> "Loan / EMI"
-                DebitCategory.ELECTRICITY.name -> "Electricity"
-                DebitCategory.INTERNET.name -> "Internet & WiFi"
-                DebitCategory.GROCERIES.name -> "Groceries"
-                DebitCategory.RECHARGE.name -> "Recharge & Mobile"
-                DebitCategory.CHIT.name -> "Chit Payments"
-                DebitCategory.FUEL.name -> "Fuel / Petrol"
-                DebitCategory.SHOPPING.name -> "Shopping"
-                DebitCategory.INVESTMENT.name -> "Investments / SIP"
-                DebitCategory.SAVING.name -> "Savings & RD"
-                DebitCategory.GENERAL.name -> "General Expenses"
-                else -> catKey
-            }
-            CategorySummary(
-                categoryName = displayName,
-                categoryKey = catKey,
-                totalAmount = total,
-                paidAmount = paid,
-                yetToPayAmount = unpaid,
-                itemCount = items.size,
-                paidCount = paidCount,
-                colorHex = colorHex,
-                iconKey = iconKey
             )
-        }.sortedByDescending { it.totalAmount }
+        }
+    }
+
+    fun signOut() {
+        viewModelScope.launch {
+            try {
+                dao.insertOrUpdateUserProfile(
+                    UserProfile(
+                        id = 1,
+                        name = "Signed Out",
+                        email = "",
+                        phoneNumber = "",
+                        isOtpVerified = false,
+                        isEmailVerified = false
+                    )
+                )
+                try {
+                    com.google.firebase.Firebase.auth.signOut()
+                } catch (e: Exception) {}
+            } catch (e: Exception) {
+                Log.e("FinMoneyViewModel", "Error signing out", e)
+            }
+        }
+    }
+
+    fun restoreSampleLedger() {
+        viewModelScope.launch {
+            DatabaseHealthGuard.verifyAndRepairDatabase(dao, forceReset = true)
+        }
+    }
+
+    init {
+        viewModelScope.launch {
+            DatabaseHealthGuard.verifyAndRepairDatabase(dao, forceReset = false)
+        }
     }
 
     companion object {
-        fun parseIncomeSources(json: String): List<IncomeSource> {
-            if (json.isBlank()) return emptyList()
-            return try {
-                val list = mutableListOf<IncomeSource>()
-                val regex = Regex("""\{"name":"(.*?)","amount":([0-9.]+)(?:,"category":"(.*?)")?\}""")
-                val matches = regex.findAll(json)
-                for (m in matches) {
-                    val name = m.groupValues[1].replace("\\\"", "\"")
-                    val amt = m.groupValues[2].toDoubleOrNull() ?: 0.0
-                    val cat = if (m.groupValues.size > 3 && m.groupValues[3].isNotBlank()) m.groupValues[3] else IncomeCategory.OTHER.name
-                    if (name.isNotBlank() && amt > 0) {
-                        list.add(IncomeSource(name, amt, cat))
-                    }
-                }
-                list
-            } catch (e: Exception) {
-                emptyList()
-            }
-        }
-
-        fun encodeIncomeSources(sources: List<IncomeSource>): String {
-            if (sources.isEmpty()) return ""
-            return sources.joinToString(prefix = "[", postfix = "]") {
-                """{"name":"${it.name.replace("\"", "\\\"")}","amount":${it.amount},"category":"${it.category}"}"""
-            }
-        }
-
         fun getMonthName(month: Int): String {
-            return when (month) {
-                1 -> "January"
-                2 -> "February"
-                3 -> "March"
-                4 -> "April"
-                5 -> "May"
-                6 -> "June"
-                7 -> "July"
-                8 -> "August"
-                9 -> "September"
-                10 -> "October"
-                11 -> "November"
-                12 -> "December"
-                else -> "Month $month"
-            }
+            val months = DateFormatSymbols().months
+            return if (month in 1..12) months[month - 1] else "Month $month"
         }
 
-        fun getMonthShortName(month: Int): String {
-            return when (month) {
-                1 -> "Jan"
-                2 -> "Feb"
-                3 -> "Mar"
-                4 -> "Apr"
-                5 -> "May"
-                6 -> "Jun"
-                7 -> "Jul"
-                8 -> "Aug"
-                9 -> "Sep"
-                10 -> "Oct"
-                11 -> "Nov"
-                12 -> "Dec"
-                else -> "M$month"
-            }
+        fun parseIncomeSources(json: String): List<IncomeSource> {
+            return FinMoneyRepository.parseIncomeSources(json)
         }
 
-        fun getDaysInMonth(month: Int, year: Int): Int {
-            return when (month) {
-                2 -> if (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) 29 else 28
-                4, 6, 9, 11 -> 30
-                else -> 31
-            }
+        fun parseBankBalances(json: String): List<BankBalanceItem> {
+            return FinMoneyRepository.parseBankBalances(json)
         }
     }
 }

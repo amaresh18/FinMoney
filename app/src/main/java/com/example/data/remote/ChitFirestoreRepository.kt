@@ -13,7 +13,11 @@ import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
 class ChitFirestoreRepository(
-    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
+    private val firestore: FirebaseFirestore = try {
+        FirebaseFirestore.getInstance("ai-studio-android-e20fef11-4f95-4b1d-be45-fa8c63567bfb")
+    } catch (e: Exception) {
+        FirebaseFirestore.getInstance()
+    }
 ) {
     private val chitsCollection = firestore.collection("chits")
 

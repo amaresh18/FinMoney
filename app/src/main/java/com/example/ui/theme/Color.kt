@@ -2,64 +2,55 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// INDmoney Brand Palette
-val IndBackground = Color(0xFFF8FAFC)
-val IndSurface = Color(0xFFFFFFFF)
-val IndCard = Color(0xFFFFFFFF)
-val IndCardSecondary = Color(0xFFF1F5F9)
-val IndCardHighlight = Color(0xFFEFF6FF)
-val IndBorder = Color(0xFFE2E8F0)
-val IndBorderSubtle = Color(0xFFF1F5F9)
-val IndNavyHeader = Color(0xFF0F172A)
-val IndNavyHeaderLight = Color(0xFF1E293B)
+val PrimaryGreen = Color(0xFF00B386)
+val SecondaryGreen = Color(0xFF008060)
+val BackgroundDark = Color(0xFF121212)
+val SurfaceDark = Color(0xFF1E1E1E)
+val PrimaryLight = Color(0xFF00A878)
+val BackgroundLight = Color(0xFFF8F9FA)
+val SurfaceLight = Color(0xFFFFFFFF)
+
+// INDmoney styling theme colors
+val IndBlue = Color(0xFF1A56DB)
+val IndBlueDark = Color(0xFF1E40AF)
+val IndBlueLight = Color(0xFFEBF5FF)
+val IndNavyHeader = Color(0xFF1E293B)
 val IndTextPrimary = Color(0xFF0F172A)
 val IndTextSecondary = Color(0xFF64748B)
 val IndTextMuted = Color(0xFF94A3B8)
-
-val IndBlue = Color(0xFF0066FF)
-val IndBlueLight = Color(0xFFEFF6FF)
-val IndBlueDark = Color(0xFF0052CC)
-
-val IndRed = Color(0xFFEF4444)
-val IndRedLight = Color(0xFFFEE2E2)
-val IndRedDark = Color(0xFFB91C1C)
-
-val IndGreen = Color(0xFF00D09C)
+val IndBackground = Color(0xFFF8FAFC)
+val IndGreen = Color(0xFF10B981)
+val IndGreenDark = Color(0xFF047857)
 val IndGreenLight = Color(0xFFD1FAE5)
-val IndGreenDark = Color(0xFF059669)
-
+val IndRed = Color(0xFFEF4444)
+val IndRedDark = Color(0xFFB91C1C)
+val IndRedLight = Color(0xFFFEE2E2)
 val IndAmber = Color(0xFFF59E0B)
 val IndAmberLight = Color(0xFFFEF3C7)
-val IndAmberDark = Color(0xFFB45309)
-
 val IndCyan = Color(0xFF06B6D4)
+val IndCyanDark = Color(0xFF0891B2)
 val IndCyanLight = Color(0xFFCFFAFE)
-
 val IndPurple = Color(0xFF8B5CF6)
 val IndPurpleLight = Color(0xFFEDE9FE)
+val IndSurface = Color(0xFFFFFFFF)
+val IndCardSecondary = Color(0xFFF1F5F9)
+val IndCardHighlight = Color(0xFFE2E8F0)
+val IndBorder = Color(0xFFE2E8F0)
+val IndBorderSubtle = Color(0xFFF1F5F9)
 
+// Auth theme colors
+val FinAuthDarkBg = Color(0xFF0F172A)
+val FinAuthCardBg = Color(0xFF1E293B)
+val FinAuthCardBorder = Color(0xFF334155)
+val FinAuthTextPrimary = Color(0xFFF8FAFC)
+val FinAuthTextSecondary = Color(0xFF94A3B8)
+
+// Status Colors
 val StatusApprovedBg = Color(0xFFD1FAE5)
-val StatusApprovedText = Color(0xFF059669)
+val StatusApprovedText = Color(0xFF047857)
 val StatusPendingBg = Color(0xFFFEF3C7)
 val StatusPendingText = Color(0xFFB45309)
-val StatusSettledBg = Color(0xFFF1F5F9)
-val StatusSettledText = Color(0xFF475569)
+val StatusSettledBg = Color(0xFFE0E7FF)
+val StatusSettledText = Color(0xFF3730A3)
 val StatusRejectedBg = Color(0xFFFEE2E2)
 val StatusRejectedText = Color(0xFFB91C1C)
-
-// Legacy alias compatibility
-val EmeraldPrimary = IndGreen
-val EmeraldLight = IndGreenLight
-val EmeraldDark = IndGreenDark
-val NavyDarkBackground = IndNavyHeader
-val NavyDarkSurface = Color(0xFF1E293B)
-val NavyCardBackground = IndCard
-val NavyCardBorder = IndBorder
-val PureWhite = Color(0xFFFFFFFF)
-val TextMuted = IndTextSecondary
-val TextSubtle = Color(0xFF94A3B8)
-val AccentCyan = IndCyan
-val AccentPurple = IndPurple
-val AccentAmber = IndAmber
-val AccentRed = IndRed
-val AccentBlue = IndBlue

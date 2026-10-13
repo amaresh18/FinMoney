@@ -35,6 +35,7 @@
         "category": { "type": "string" },
         "customCategoryName": { "type": "string" },
         "title": { "type": "string" },
+        "merchant": { "type": "string" },
         "amount": { "type": "number" },
         "dueDateDay": { "type": "number" },
         "isRecurring": { "type": "boolean" },
@@ -43,7 +44,66 @@
         "totalTenureMonths": { "type": "number" },
         "currentMonthTenure": { "type": "number" },
         "notes": { "type": "string" },
-        "createdAt": { "type": "timestamp" }
+        "createdAt": { "type": "timestamp" },
+        "timestamp": { "type": "timestamp" }
+      }
+    },
+    "ExpenseItem": {
+      "collection": "expenses",
+      "fields": {
+        "cloudId": { "type": "string" },
+        "userPhone": { "type": "string" },
+        "merchant": { "type": "string" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "month": { "type": "number" },
+        "year": { "type": "number" },
+        "timestamp": { "type": "timestamp" },
+        "createdAt": { "type": "timestamp" },
+        "transactionType": { "type": "string" },
+        "bankTxCloudId": { "type": "string" },
+        "sourceBank": { "type": "string" },
+        "referenceNumber": { "type": "string" },
+        "approvalSource": { "type": "string" },
+        "approvedAtTimestamp": { "type": "number" }
+      }
+    },
+    "IncomeRecordItem": {
+      "collection": "income_records",
+      "fields": {
+        "cloudId": { "type": "string" },
+        "userPhone": { "type": "string" },
+        "merchant": { "type": "string" },
+        "sourceName": { "type": "string" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "month": { "type": "number" },
+        "year": { "type": "number" },
+        "timestamp": { "type": "timestamp" },
+        "receivedDateTimestamp": { "type": "timestamp" },
+        "transactionType": { "type": "string" }
+      }
+    },
+    "IncomeItem": {
+      "collection": "incomes",
+      "fields": {
+        "cloudId": { "type": "string" },
+        "userPhone": { "type": "string" },
+        "merchant": { "type": "string" },
+        "sourceName": { "type": "string" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "month": { "type": "number" },
+        "year": { "type": "number" },
+        "timestamp": { "type": "timestamp" },
+        "receivedDateTimestamp": { "type": "timestamp" },
+        "transactionType": { "type": "string" },
+        "bankTxCloudId": { "type": "string" },
+        "sourceBank": { "type": "string" },
+        "referenceNumber": { "type": "string" },
+        "approvalSource": { "type": "string" },
+        "approvedAtTimestamp": { "type": "number" }
       }
     },
     "CustomCategory": {
@@ -104,6 +164,28 @@
         "status": { "type": "string" },
         "createdAt": { "type": "timestamp" },
         "updatedAt": { "type": "timestamp" }
+      }
+    },
+    "BankTransaction": {
+      "collection": "bank_transactions",
+      "fields": {
+        "cloudId": { "type": "string" },
+        "userPhone": { "type": "string" },
+        "bankName": { "type": "string" },
+        "accountNumberLast4": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string" },
+        "classification": { "type": "string" },
+        "category": { "type": "string" },
+        "merchant": { "type": "string" },
+        "referenceNumber": { "type": "string" },
+        "availableBalance": { "type": "number" },
+        "originalText": { "type": "string" },
+        "source": { "type": "string" },
+        "timestamp": { "type": "timestamp" },
+        "isConfirmed": { "type": "boolean" },
+        "matchedDebitId": { "type": "number" },
+        "matchedDebitTitle": { "type": "string" }
       }
     }
   }

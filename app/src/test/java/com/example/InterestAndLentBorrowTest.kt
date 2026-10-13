@@ -1,6 +1,6 @@
 package com.example
 
-import com.example.data.model.PaymentRecord
+import com.example.util.PaymentRecord
 import com.example.util.InterestCalculator
 import com.example.util.ProofFile
 import com.example.util.ProofStorageHelper
@@ -43,7 +43,6 @@ class InterestAndLentBorrowTest {
 
         val interestPayment = PaymentRecord(
             amount = 400.0,
-            note = "Cleared 2 months interest",
             paymentTarget = "INTEREST",
             isApproved = true
         )
@@ -70,7 +69,6 @@ class InterestAndLentBorrowTest {
 
         val principalPayment = PaymentRecord(
             amount = 5000.0,
-            note = "Half principal repayment",
             paymentTarget = "PRINCIPAL",
             isApproved = true
         )

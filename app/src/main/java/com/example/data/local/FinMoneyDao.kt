@@ -33,11 +33,18 @@ interface FinMoneyDao {
     @Query("DELETE FROM salary_records WHERE month = :month AND year = :year")
     suspend fun deleteSalary(month: Int, year: Int)
 
+    @Query("DELETE FROM salary_records")
+    suspend fun clearAllSalaryRecords()
+
+    @Query("SELECT COUNT(*) FROM debit_items")
+    suspend fun getDebitsCount(): Int
+
+
     // --- Debit Items ---
-    @Query("SELECT * FROM debit_items WHERE month = :month AND year = :year ORDER BY dueDateDay ASC, id ASC")
+    @Query("SELECT * FROM debit_items WHERE month = :month AND year = :year ORDER BY dueDateDay DESC, createdAt DESC, id DESC")
     fun getDebitsForMonth(month: Int, year: Int): Flow<List<DebitItem>>
 
-    @Query("SELECT * FROM debit_items WHERE month = :month AND year = :year ORDER BY dueDateDay ASC, id ASC")
+    @Query("SELECT * FROM debit_items WHERE month = :month AND year = :year ORDER BY dueDateDay DESC, createdAt DESC, id DESC")
     suspend fun getDebitsForMonthDirect(month: Int, year: Int): List<DebitItem>
 
     @Query("SELECT * FROM debit_items WHERE id = :id LIMIT 1")
@@ -55,6 +62,12 @@ interface FinMoneyDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDebits(items: List<DebitItem>)
 
+    @Query("SELECT * FROM debit_items WHERE isRecurring = 1")
+    suspend fun getRecurringDebitsDirect(): List<DebitItem>
+
+    @Query("SELECT * FROM debit_items WHERE isRecurring = 1")
+    fun getRecurringDebitsFlow(): Flow<List<DebitItem>>
+
     @Update
     suspend fun updateDebit(item: DebitItem)
 
@@ -63,6 +76,9 @@ interface FinMoneyDao {
 
     @Query("DELETE FROM debit_items WHERE id = :id")
     suspend fun deleteDebitById(id: Long)
+
+    @Query("DELETE FROM debit_items")
+    suspend fun clearAllDebits()
 
     @Query("UPDATE debit_items SET isPaid = :isPaid WHERE id = :id")
     suspend fun setDebitPaidStatus(id: Long, isPaid: Boolean)
@@ -105,6 +121,10 @@ interface FinMoneyDao {
     @Query("DELETE FROM loan_transactions WHERE id = :id")
     suspend fun deleteLoanById(id: Long)
 
+    @Query("DELETE FROM loan_transactions")
+    suspend fun clearAllLoans()
+
+
     @Query("DELETE FROM loan_transactions WHERE cloudId = :cloudId AND cloudId != ''")
     suspend fun deleteLoanByCloudId(cloudId: String)
 
@@ -124,15 +144,114 @@ interface FinMoneyDao {
     @Query("SELECT * FROM app_notifications WHERE cloudId = :cloudId AND cloudId != '' LIMIT 1")
     suspend fun getNotificationByCloudId(cloudId: String): AppNotification?
 
+    @Query("SELECT * FROM app_notifications WHERE id = :id LIMIT 1")
+    suspend fun getNotificationById(id: Long): AppNotification?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertNotification(notification: AppNotification): Long
 
     @Query("UPDATE app_notifications SET isRead = 1 WHERE id = :id")
     suspend fun markNotificationRead(id: Long)
 
+    @Query("SELECT * FROM app_notifications WHERE relatedLoanId = :loanId")
+    suspend fun getNotificationsForLoan(loanId: Long): List<AppNotification>
+
     @Query("UPDATE app_notifications SET isRead = 1")
     suspend fun markAllNotificationsRead()
 
+    @Query("UPDATE app_notifications SET isRead = 1, actionType = 'SYSTEM' WHERE relatedLoanId = :loanId")
+    suspend fun markNotificationsReadForLoan(loanId: Long)
+
+    @Query("UPDATE app_notifications SET relatedLoanId = :loanId WHERE relatedLoanId IS NULL AND cloudId = :cloudId")
+    suspend fun updateNotificationRelatedLoanId(cloudId: String, loanId: Long)
+
     @Query("DELETE FROM app_notifications WHERE id = :id")
     suspend fun deleteNotification(id: Long)
+
+    // --- Monthly Reconciliations ---
+    @Query("SELECT * FROM monthly_reconciliations WHERE month = :month AND year = :year ORDER BY id DESC LIMIT 1")
+    fun getReconciliationForMonth(month: Int, year: Int): Flow<MonthlyReconciliation?>
+
+    @Query("SELECT * FROM monthly_reconciliations WHERE month = :month AND year = :year ORDER BY id DESC LIMIT 1")
+    suspend fun getReconciliationForMonthDirect(month: Int, year: Int): MonthlyReconciliation?
+
+    @Query("SELECT * FROM monthly_reconciliations WHERE cloudId = :cloudId AND cloudId != '' LIMIT 1")
+    suspend fun getReconciliationByCloudId(cloudId: String): MonthlyReconciliation?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateReconciliation(reconciliation: MonthlyReconciliation): Long
+
+    // --- Bank Transactions & Auto-Sync ---
+    @Query("SELECT * FROM bank_transactions ORDER BY timestamp DESC")
+    fun getAllBankTransactions(): Flow<List<BankTransactionRecord>>
+
+    @Query("SELECT * FROM bank_transactions ORDER BY timestamp DESC LIMIT :limit")
+    fun getRecentBankTransactions(limit: Int = 50): Flow<List<BankTransactionRecord>>
+
+    @Query("SELECT * FROM bank_transactions ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentBankTransactionsDirect(limit: Int = 50): List<BankTransactionRecord>
+
+    @Query("SELECT * FROM bank_transactions WHERE type = 'DEBIT' ORDER BY timestamp DESC")
+    fun getDebitBankTransactions(): Flow<List<BankTransactionRecord>>
+
+    @Query("SELECT * FROM bank_transactions WHERE type = 'CREDIT' ORDER BY timestamp DESC")
+    fun getCreditBankTransactions(): Flow<List<BankTransactionRecord>>
+
+    @Query("SELECT * FROM bank_transactions WHERE isConfirmed = 0 ORDER BY timestamp DESC")
+    fun getPendingBankTransactions(): Flow<List<BankTransactionRecord>>
+
+    @Query("SELECT * FROM bank_transactions WHERE isConfirmed = 0 ORDER BY timestamp DESC")
+    suspend fun getPendingBankTransactionsDirect(): List<BankTransactionRecord>
+
+    @Query("SELECT * FROM bank_transactions WHERE id = :id LIMIT 1")
+    suspend fun getBankTransactionById(id: Long): BankTransactionRecord?
+
+    @Query("SELECT * FROM bank_transactions WHERE referenceNumber = :ref AND referenceNumber != '' LIMIT 1")
+    suspend fun getBankTransactionByReference(ref: String): BankTransactionRecord?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBankTransaction(transaction: BankTransactionRecord): Long
+
+    @Query("UPDATE bank_transactions SET isConfirmed = :confirmed WHERE id = :id")
+    suspend fun setBankTransactionConfirmed(id: Long, confirmed: Boolean)
+
+    @Query("UPDATE bank_transactions SET isConfirmed = :confirmed, status = :status WHERE id = :id")
+    suspend fun updateBankTransactionStatus(id: Long, confirmed: Boolean, status: String)
+
+    @Query("SELECT * FROM bank_transactions WHERE fingerprint = :fingerprint AND fingerprint != '' LIMIT 1")
+    suspend fun getBankTransactionByFingerprint(fingerprint: String): BankTransactionRecord?
+
+    @Query("SELECT * FROM bank_transactions WHERE status = 'REJECTED'")
+    suspend fun getRejectedBankTransactions(): List<BankTransactionRecord>
+
+    @Query("DELETE FROM bank_transactions WHERE id = :id")
+    suspend fun deleteBankTransaction(id: Long)
+
+    @Query("DELETE FROM bank_transactions")
+    suspend fun clearAllBankTransactions()
+
+    // --- Raw Notifications Log ---
+    @Query("SELECT * FROM raw_notifications ORDER BY timestamp DESC")
+    fun getAllRawNotifications(): Flow<List<RawNotificationRecord>>
+
+    @Query("SELECT * FROM raw_notifications WHERE isFlagged = 1 ORDER BY timestamp DESC")
+    fun getFlaggedRawNotifications(): Flow<List<RawNotificationRecord>>
+
+    @Query("SELECT * FROM raw_notifications WHERE needsUserReview = 1 ORDER BY timestamp DESC")
+    fun getNeedsReviewNotifications(): Flow<List<RawNotificationRecord>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRawNotification(record: RawNotificationRecord): Long
+
+    @Query("UPDATE raw_notifications SET isFlagged = :isFlagged, flaggedReason = :reason, parseStatus = :parseStatus WHERE id = :id")
+    suspend fun updateRawNotificationFlag(id: Long, isFlagged: Boolean, reason: String?, parseStatus: String)
+
+    @Query("UPDATE raw_notifications SET needsUserReview = :needsReview, parseStatus = :parseStatus WHERE id = :id")
+    suspend fun updateRawNotificationReview(id: Long, needsReview: Boolean, parseStatus: String)
+
+    @Query("DELETE FROM raw_notifications WHERE id = :id")
+    suspend fun deleteRawNotification(id: Long)
+
+    @Query("DELETE FROM raw_notifications")
+    suspend fun clearAllRawNotifications()
 }

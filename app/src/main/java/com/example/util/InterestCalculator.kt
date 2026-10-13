@@ -1,6 +1,10 @@
 package com.example.util
 
-import com.example.data.model.PaymentRecord
+data class PaymentRecord(
+    val amount: Double = 0.0,
+    val isApproved: Boolean = true,
+    val paymentTarget: String = "COMBINED"
+)
 
 data class LoanInterestBreakdown(
     val principal: Double,
@@ -75,6 +79,106 @@ object InterestCalculator {
             interestRemaining = remainingInterest,
             elapsedMonths = elapsedMonths,
             elapsedDays = elapsedDays
+        )
+    }
+}
+
+data class EmiCalculationResult(
+    val principal: Double,
+    val annualInterestRate: Double,
+    val tenureMonths: Int,
+    val startMonth: Int,
+    val startYear: Int,
+    val monthlyEmi: Double,
+    val totalPayable: Double,
+    val totalInterestPayable: Double,
+    val monthsCompleted: Int,
+    val monthsRemaining: Int,
+    val paidSoFar: Double,
+    val outstandingTotalBalance: Double,
+    val outstandingPrincipal: Double,
+    val outstandingInterest: Double
+)
+
+object EmiCalculator {
+
+    fun calculateEmiAndOutstanding(
+        principal: Double,
+        annualInterestRatePercent: Double,
+        tenureMonths: Int,
+        startMonth: Int = 0,
+        startYear: Int = 0,
+        currentMonth: Int = java.util.Calendar.getInstance().get(java.util.Calendar.MONTH) + 1,
+        currentYear: Int = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+    ): EmiCalculationResult {
+        if (principal <= 0.0 || tenureMonths <= 0) {
+            return EmiCalculationResult(
+                principal = principal.coerceAtLeast(0.0),
+                annualInterestRate = annualInterestRatePercent,
+                tenureMonths = tenureMonths.coerceAtLeast(0),
+                startMonth = startMonth,
+                startYear = startYear,
+                monthlyEmi = 0.0,
+                totalPayable = 0.0,
+                totalInterestPayable = 0.0,
+                monthsCompleted = 0,
+                monthsRemaining = tenureMonths.coerceAtLeast(0),
+                paidSoFar = 0.0,
+                outstandingTotalBalance = 0.0,
+                outstandingPrincipal = 0.0,
+                outstandingInterest = 0.0
+            )
+        }
+
+        val monthlyRate = (annualInterestRatePercent / 12.0) / 100.0
+
+        val monthlyEmi = if (monthlyRate > 0.0) {
+            val powFactor = Math.pow(1.0 + monthlyRate, tenureMonths.toDouble())
+            (principal * monthlyRate * powFactor) / (powFactor - 1.0)
+        } else {
+            principal / tenureMonths.toDouble()
+        }
+
+        val totalPayable = monthlyEmi * tenureMonths
+        val totalInterestPayable = (totalPayable - principal).coerceAtLeast(0.0)
+
+        val monthsCompleted = if (startMonth in 1..12 && startYear > 1900) {
+            val elapsed = (currentYear - startYear) * 12 + (currentMonth - startMonth) + 1
+            elapsed.coerceIn(0, tenureMonths)
+        } else {
+            0
+        }
+
+        val monthsRemaining = (tenureMonths - monthsCompleted).coerceAtLeast(0)
+        val paidSoFar = (monthlyEmi * monthsCompleted).coerceAtMost(totalPayable)
+        val outstandingTotalBalance = (totalPayable - paidSoFar).coerceAtLeast(0.0)
+
+        val outstandingPrincipal = if (monthlyRate > 0.0) {
+            val powN = Math.pow(1.0 + monthlyRate, tenureMonths.toDouble())
+            val powM = Math.pow(1.0 + monthlyRate, monthsCompleted.toDouble())
+            val remP = principal * (powN - powM) / (powN - 1.0)
+            remP.coerceIn(0.0, principal)
+        } else {
+            (principal * (tenureMonths - monthsCompleted) / tenureMonths.toDouble()).coerceAtLeast(0.0)
+        }
+
+        val outstandingInterest = (outstandingTotalBalance - outstandingPrincipal).coerceAtLeast(0.0)
+
+        return EmiCalculationResult(
+            principal = principal,
+            annualInterestRate = annualInterestRatePercent,
+            tenureMonths = tenureMonths,
+            startMonth = startMonth,
+            startYear = startYear,
+            monthlyEmi = monthlyEmi,
+            totalPayable = totalPayable,
+            totalInterestPayable = totalInterestPayable,
+            monthsCompleted = monthsCompleted,
+            monthsRemaining = monthsRemaining,
+            paidSoFar = paidSoFar,
+            outstandingTotalBalance = outstandingTotalBalance,
+            outstandingPrincipal = outstandingPrincipal,
+            outstandingInterest = outstandingInterest
         )
     }
 }

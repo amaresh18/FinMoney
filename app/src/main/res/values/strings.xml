@@ -1,6 +1,3 @@
 <resources>
     <string name="app_name">FinMoney</string>
-    <string name="salary_utility_tab">Salary Utility</string>
-    <string name="chit_funds_tab">Chits</string>
-    <string name="lent_borrowed_tab">Lent &amp; Borrowed</string>
 </resources>

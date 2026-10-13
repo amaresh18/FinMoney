@@ -1,70 +1,35 @@
 workflows:
   android-release:
-    name: FinMoney Android Release Build
-    max_build_duration: 30
+    name: Android Release Build
     instance_type: mac_mini_m2
+    max_build_duration: 60
     environment:
       java: 17
       vars:
         PACKAGE_NAME: "com.aistudio.finmoney.vqpz"
-    triggering:
-      events:
-        - push
-        - tag
-      branch_patterns:
-        - pattern: '*'
-          include: true
-          source: true
     scripts:
-      - name: Build Android Release (AAB & APK)
+      - name: Set Java 17 location
         script: |
-          set -e
-          
-          # Root directory: . (repository root)
-          # Module directory: app
-          
-          # 1. Setup Android SDK path
-          if [ -n "$ANDROID_SDK_ROOT" ]; then
-            echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-          elif [ -n "$ANDROID_HOME" ]; then
-            echo "sdk.dir=$ANDROID_HOME" > local.properties
+          if [ -d "/usr/libexec/java_home" ]; then
+            export JAVA_HOME=$(/usr/libexec/java_home -v 17)
           fi
-          
-          # 2. Setup Java 17 for macOS runner (Free tier mac_mini_m2)
-          if [ -x "/usr/libexec/java_home" ]; then
-            export JAVA_HOME=$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home)
-          fi
-          
-          # 3. Decode release keystore if provided in CI environment variables
-          if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
-            echo "[CI] Decoding release keystore secret into my-upload-key.jks..."
-            python3 -c "import base64, os; open('my-upload-key.jks', 'wb').write(base64.b64decode(os.environ['RELEASE_KEYSTORE_BASE64'].strip()))" || true
-          fi
-          
-          if [ -f "my-upload-key.jks" ]; then
-            echo "[CI] SUCCESS: Release keystore 'my-upload-key.jks' detected. Artifacts will be signed with production release key."
+          echo "JAVA_HOME is $JAVA_HOME"
+      - name: Decode Keystore
+        script: |
+          if [ -n "$CM_KEYSTORE_BASE64" ]; then
+            echo "$CM_KEYSTORE_BASE64" | base64 --decode > $CM_BUILD_DIR/my-upload-key.jks
+            export KEYSTORE_PATH="$CM_BUILD_DIR/my-upload-key.jks"
+            echo "Release key decoded successfully."
           else
-            echo "[CI] NOTICE: No 'my-upload-key.jks' found. Decoding fallback debug keystore if present."
-            if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
-              python3 -c "import base64; open('debug.keystore', 'wb').write(base64.b64decode(open('debug.keystore.base64').read().strip()))" || true
-            fi
+            echo "No release key provided. Build will fall back to debug signing."
           fi
-          
-          # 4. Make Gradle wrapper executable at root
-          chmod +x ./gradlew
-          
-          # 5. Clean stale build artifacts and cache
+      - name: Grant Execute Permission for Gradle Wrapper
+        script: |
+          chmod +x ./gradlew || true
+      - name: Clean and Build Release Bundle
+        script: |
           ./gradlew clean --no-daemon
-          
-          # 6. Build clean Release AAB & Release APK
-          ./gradlew :app:bundleRelease :app:assembleRelease --no-daemon --stacktrace
+          ./gradlew :app:bundleRelease :app:assembleRelease --no-daemon
     artifacts:
       - app/build/outputs/bundle/release/*.aab
       - app/build/outputs/apk/release/*.apk
-    publishing:
-      email:
-        recipients:
-          - g.amaresh18@gmail.com
-        notify:
-          success: true
-          failure: true

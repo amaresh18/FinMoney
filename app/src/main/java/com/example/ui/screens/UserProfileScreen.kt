@@ -1,0 +1,485 @@
+package com.example.ui.screens
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.service.BankSyncManager
+import com.example.ui.FinMoneyViewModel
+import com.example.ui.components.IndCard
+import com.example.ui.theme.*
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
+
+/**
+ * User Profile & Notification Settings Screen
+ * Displays authenticated user account details, notification interceptor toggles,
+ * budget preferences, and sign-out controls matching INDmoney fintech design standards.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun UserProfileScreen(
+    viewModel: FinMoneyViewModel,
+    onBack: () -> Unit = {}
+) {
+    BackHandler { onBack() }
+
+    val context = LocalContext.current
+    val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
+    val firebaseUser = Firebase.auth.currentUser
+    val currencySymbol by viewModel.currencySymbol.collectAsStateWithLifecycle()
+    val isFinancialSafetyVisible by viewModel.isFinancialSafetyVisible.collectAsStateWithLifecycle()
+
+    var nameInput by remember(userProfile) { mutableStateOf(userProfile?.name ?: "You") }
+    var emailInput by remember(userProfile) { mutableStateOf(userProfile?.email ?: (firebaseUser?.email ?: "")) }
+    var phoneInput by remember(userProfile) { mutableStateOf(userProfile?.phoneNumber ?: "") }
+
+    var isEditProfileMode by remember { mutableStateOf(false) }
+
+    // Notification Settings States
+    var enableSmsInterceptor by remember { mutableStateOf(true) }
+    var enableInstantAlerts by remember { mutableStateOf(true) }
+    var enableDueReminders by remember { mutableStateOf(true) }
+
+    var showSignOutDialog by remember { mutableStateOf(false) }
+    var showResetDialog by remember { mutableStateOf(false) }
+
+    Scaffold(
+        containerColor = IndBackground,
+        topBar = {
+            Surface(
+                color = IndSurface,
+                shadowElevation = 2.dp,
+                border = BorderStroke(1.dp, IndBorderSubtle)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.testTag("profile_back_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = IndNavyHeader
+                            )
+                        }
+                        Text(
+                            text = "Profile & Settings",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = IndNavyHeader
+                        )
+                    }
+
+                    TextButton(onClick = { showSignOutDialog = true }) {
+                        Text(
+                            text = "Sign Out",
+                            fontWeight = FontWeight.Bold,
+                            color = IndRed,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // 1. Authenticated User Profile Summary Card
+            IndCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(CircleShape)
+                                    .background(IndGreenLight)
+                                    .border(2.dp, IndGreen, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = (userProfile?.name?.take(1) ?: firebaseUser?.displayName?.take(1) ?: "A").uppercase(),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = IndGreenDark
+                                )
+                            }
+
+                            Column {
+                                Text(
+                                    text = userProfile?.name?.ifBlank { firebaseUser?.displayName ?: "User" } ?: "User",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndNavyHeader
+                                )
+                                Text(
+                                    text = userProfile?.email?.ifBlank { firebaseUser?.email ?: "g.amaresh18@gmail.com" } ?: "g.amaresh18@gmail.com",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = IndTextSecondary
+                                )
+                                if (!userProfile?.phoneNumber.isNullOrBlank()) {
+                                    Text(
+                                        text = "+91 ${userProfile?.phoneNumber}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = IndTextMuted
+                                    )
+                                }
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { isEditProfileMode = !isEditProfileMode },
+                            modifier = Modifier.testTag("edit_profile_toggle")
+                        ) {
+                            Icon(
+                                imageVector = if (isEditProfileMode) Icons.Filled.Check else Icons.Outlined.Edit,
+                                contentDescription = "Edit Profile",
+                                tint = IndBlue
+                            )
+                        }
+                    }
+
+                    // Security & Account Verification Badges
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = IndGreenLight,
+                            border = BorderStroke(1.dp, IndGreen.copy(alpha = 0.3f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Filled.Verified, contentDescription = null, tint = IndGreenDark, modifier = Modifier.size(14.dp))
+                                Text("Google Verified", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndGreenDark)
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = IndBlueLight,
+                            border = BorderStroke(1.dp, IndBlue.copy(alpha = 0.3f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Filled.CloudSync, contentDescription = null, tint = IndBlue, modifier = Modifier.size(14.dp))
+                                Text("Sync Active", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndBlue)
+                            }
+                        }
+                    }
+
+                    // Inline Edit Profile Fields
+                    if (isEditProfileMode) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(
+                                value = nameInput,
+                                onValueChange = { nameInput = it },
+                                label = { Text("Full Name") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = emailInput,
+                                onValueChange = { emailInput = it },
+                                label = { Text("Email Address") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = phoneInput,
+                                onValueChange = { phoneInput = it },
+                                label = { Text("Phone Number") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Button(
+                                onClick = {
+                                    viewModel.saveUserProfile(
+                                        name = nameInput,
+                                        email = emailInput,
+                                        phoneNumber = phoneInput
+                                    )
+                                    isEditProfileMode = false
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = IndBlue),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Save Profile Changes", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Notification & Transaction Interceptor Settings Card
+            IndCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Filled.NotificationsActive, contentDescription = null, tint = IndBlue, modifier = Modifier.size(20.dp))
+                        Text(
+                            text = "NOTIFICATIONS & AUTO-SYNC",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = IndBlueDark
+                        )
+                    }
+
+                    // Toggle 1: Notification Interceptor
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Bank SMS & UPI Interceptor", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndNavyHeader)
+                            Text("Auto-detect transactions from HDFC, SBI, PhonePe & Google Pay", fontSize = 11.sp, color = IndTextSecondary)
+                        }
+                        Switch(
+                            checked = enableSmsInterceptor,
+                            onCheckedChange = { enableSmsInterceptor = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = IndBlue)
+                        )
+                    }
+
+                    Divider(color = IndBorderSubtle)
+
+                    // Toggle 2: Instant Approval Alerts
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Instant Approval Alerts", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndNavyHeader)
+                            Text("Show 1-tap Approve/Dismiss buttons in notification shade", fontSize = 11.sp, color = IndTextSecondary)
+                        }
+                        Switch(
+                            checked = enableInstantAlerts,
+                            onCheckedChange = { enableInstantAlerts = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = IndBlue)
+                        )
+                    }
+
+                    Divider(color = IndBorderSubtle)
+
+                    // Toggle 3: EMI & Bill Dues Reminders
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Monthly Due Reminders", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndNavyHeader)
+                            Text("Receive alerts 2 days before EMI, Rent & Bill due dates", fontSize = 11.sp, color = IndTextSecondary)
+                        }
+                        Switch(
+                            checked = enableDueReminders,
+                            onCheckedChange = { enableDueReminders = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = IndBlue)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                val intent = BankSyncManager.createNotificationSettingsIntent()
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "Open Settings -> Notification Access", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        border = BorderStroke(1.dp, IndBlue),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("grant_notification_access_button")
+                    ) {
+                        Icon(Icons.Default.Security, contentDescription = null, tint = IndBlue, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Grant Notification Listener Permission", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = IndBlue)
+                    }
+                }
+            }
+
+            // 3. Application Security & Preferences Card
+            IndCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Filled.Tune, contentDescription = null, tint = IndBlue, modifier = Modifier.size(20.dp))
+                        Text(
+                            text = "PREFERENCES & PRIVACY",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = IndBlueDark
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Financial Safety Privacy Mode", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndNavyHeader)
+                            Text("Mask sensitive balances and total income on dashboard", fontSize = 11.sp, color = IndTextSecondary)
+                        }
+                        Switch(
+                            checked = !isFinancialSafetyVisible,
+                            onCheckedChange = { viewModel.toggleFinancialSafetyVisible() },
+                            colors = SwitchDefaults.colors(checkedThumbColor = IndBlue)
+                        )
+                    }
+
+                    Divider(color = IndBorderSubtle)
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showResetDialog = true },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Reset Local Budget Data", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndRed)
+                            Text("Re-seed starter template dataset (October 2026)", fontSize = 11.sp, color = IndTextSecondary)
+                        }
+                        Icon(Icons.Filled.RestartAlt, contentDescription = null, tint = IndRed, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+
+            // 4. Sign Out Button
+            Button(
+                onClick = { showSignOutDialog = true },
+                colors = ButtonDefaults.buttonColors(containerColor = IndRed),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("sign_out_profile_button")
+            ) {
+                Icon(Icons.Filled.Logout, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Sign Out of FinMoney", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+
+    // Sign Out Confirmation Dialog
+    if (showSignOutDialog) {
+        AlertDialog(
+            onDismissRequest = { showSignOutDialog = false },
+            title = { Text("Sign Out Confirmation", fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to sign out? Your cloud synced data remains safe in Firebase.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showSignOutDialog = false
+                        viewModel.signOut()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = IndRed)
+                ) {
+                    Text("Sign Out", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSignOutDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Reset Data Dialog
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            title = { Text("Reset Starter Ledger?", fontWeight = FontWeight.Bold) },
+            text = { Text("This will re-seed the October 2026 starter budget dataset (₹100,000 Income & 42 debits).") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showResetDialog = false
+                        viewModel.restoreSampleLedger()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = IndBlue)
+                ) {
+                    Text("Reset Data", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
