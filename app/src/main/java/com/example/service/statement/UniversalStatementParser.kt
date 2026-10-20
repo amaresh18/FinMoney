@@ -73,16 +73,15 @@ object UniversalStatementParser {
             allTransactions.addAll(headerTableParsed)
         }
 
-        // Strategy 2: PhonePe Statement Parser (CSV, PDF OCR text, clipboard)
-        if (allTransactions.isEmpty() && isPhonePeStatement(lines)) {
+        // Strategy 2: PhonePe Statement Parser (CSV rows OR multi-line PDF blocks)
+        if (allTransactions.isEmpty() && isPhonePeStatement(rawText, lines, sourceFileName)) {
             val phonePeParsed = parsePhonePeStatement(lines)
-            if (phonePeParsed.isNotEmpty()) {
-                allTransactions.addAll(phonePeParsed)
-            }
+            val phonePeBlocks = parsePhonePeMultiLineBlocks(lines)
+            allTransactions.addAll(if (phonePeBlocks.size >= phonePeParsed.size) phonePeBlocks else phonePeParsed)
         }
 
         // Strategy 3: Google Pay (GPay) Statement Parser (Multi-line blocks, GPay PDF)
-        if (allTransactions.isEmpty() && isGooglePayStatement(rawText, lines)) {
+        if (allTransactions.isEmpty() && isGooglePayStatement(rawText, lines, sourceFileName)) {
             val gpayParsed = parseGooglePayStatement(lines)
             if (gpayParsed.isNotEmpty()) {
                 allTransactions.addAll(gpayParsed)
@@ -288,15 +287,19 @@ object UniversalStatementParser {
     // -------------------------------------------------------------
     // Strategy 2: PhonePe Statement Parser
     // -------------------------------------------------------------
-    private fun isPhonePeStatement(lines: List<String>): Boolean {
-        return lines.take(15).any { line ->
+    private fun isPhonePeStatement(rawText: String, lines: List<String>, fileName: String): Boolean {
+        val combined = "$rawText $fileName".lowercase()
+        if (combined.contains("phonepe") || combined.contains("support.phonepe.com")) return true
+        return lines.take(40).any { line ->
             (line.contains("Transaction Details", ignoreCase = true) && line.contains("UTR", ignoreCase = true)) ||
-            line.contains("PhonePe", ignoreCase = true) ||
-            line.contains("T26100", ignoreCase = true) ||
-            line.contains("support.phonepe.com", ignoreCase = true)
+                line.contains("UTR No.", ignoreCase = true) ||
+                Regex("""\bT26\d{10,}""", RegexOption.IGNORE_CASE).containsMatchIn(line)
         }
     }
 
+    /**
+     * PhonePe CSV / single-line table rows.
+     */
     private fun parsePhonePeStatement(lines: List<String>): List<ImportedStatementTransaction> {
         val result = mutableListOf<ImportedStatementTransaction>()
 
@@ -369,14 +372,156 @@ object UniversalStatementParser {
         return result
     }
 
+    /**
+     * PhonePe PDF layout (Skia) is multi-line blocks:
+     *   Oct 08, 2026
+     *   11:44 AM
+     *   DEBIT
+     *   ₹50,000
+     *   Paid to VOORE ANAND KUMAR
+     *   Transaction ID T26...
+     *   UTR No. 5666...
+     *   Paid by
+     *   XXXXXX0989
+     */
+    private fun parsePhonePeMultiLineBlocks(lines: List<String>): List<ImportedStatementTransaction> {
+        val result = mutableListOf<ImportedStatementTransaction>()
+        var i = 0
+
+        while (i < lines.size) {
+            val line = lines[i].trim()
+            val dateMatch = DATE_REGEX.find(line)
+            val isDateLine = dateMatch != null && (
+                isStandAloneDate(line) ||
+                    (line.length <= 24 && !line.contains("₹") && !line.contains("Transaction", ignoreCase = true))
+                )
+
+            if (isDateLine) {
+                val dateStr = dateMatch!!.groupValues[1]
+                var typeStr = ""
+                var details = ""
+                var utr = ""
+                var bankInfo = ""
+                var amountVal: Double? = null
+                var isFailed = false
+                var blockEnd = i
+
+                for (offset in 1..12) {
+                    if (i + offset >= lines.size) break
+                    val nextLine = lines[i + offset].trim()
+                    if (nextLine.isEmpty()) continue
+
+                    // Next transaction date starts a new block
+                    if (offset > 1 && DATE_REGEX.find(nextLine) != null &&
+                        (isStandAloneDate(nextLine) || (nextLine.length <= 24 && !nextLine.contains("₹"))) &&
+                        !isTimeFormat(nextLine)
+                    ) break
+
+                    blockEnd = i + offset
+                    val upper = nextLine.uppercase()
+
+                    when {
+                        upper == "DEBIT" || upper == "CREDIT" -> typeStr = upper
+                        nextLine.contains("Paid to", ignoreCase = true) ||
+                            nextLine.contains("Received from", ignoreCase = true) ||
+                            nextLine.contains("Recharge", ignoreCase = true) ||
+                            nextLine.contains("Paid via", ignoreCase = true) -> details = nextLine
+                        nextLine.contains("UTR No", ignoreCase = true) || nextLine.contains("UTR:", ignoreCase = true) -> {
+                            utr = nextLine.substringAfter(".", "").substringAfter(":", "").trim()
+                                .ifBlank { nextLine.filter { it.isDigit() } }
+                        }
+                        nextLine.contains("Transaction ID", ignoreCase = true) && utr.isBlank() -> {
+                            val id = nextLine.substringAfter("ID", "").trim()
+                            if (id.isNotBlank() && utr.isBlank()) {
+                                // Prefer UTR when present; keep txn id as fallback ref
+                                utr = id
+                            }
+                        }
+                        nextLine.contains("Paid by", ignoreCase = true) ||
+                            nextLine.contains("Credited to", ignoreCase = true) -> {
+                            bankInfo = nextLine
+                            // Account often on following line: XXXXXX0989
+                            if (i + offset + 1 < lines.size) {
+                                val maybeAcct = lines[i + offset + 1].trim()
+                                if (maybeAcct.matches(Regex("""(?i)(?:X{2,}|•{2,})?\d{2,6}""")) ||
+                                    maybeAcct.contains("HDFC", ignoreCase = true) ||
+                                    maybeAcct.contains("CREDIT", ignoreCase = true)
+                                ) {
+                                    bankInfo = "$nextLine $maybeAcct"
+                                }
+                            }
+                        }
+                        FAILED_KEYWORDS.any { upper.contains(it) } -> isFailed = true
+                        amountVal == null && !isTimeFormat(nextLine) && !isLikelyDate(nextLine) -> {
+                            val amt = parseAmountNumber(nextLine)
+                            if (amt > 0 && (nextLine.contains("₹") || nextLine.contains("Rs") ||
+                                    nextLine.matches(Regex("""^[\d,.+\-]+$""")))
+                            ) {
+                                amountVal = amt
+                            }
+                        }
+                    }
+                }
+
+                if (amountVal != null && amountVal > 0 && (typeStr.isNotBlank() || details.isNotBlank())) {
+                    val isDebit = when {
+                        typeStr == "DEBIT" -> true
+                        typeStr == "CREDIT" -> false
+                        details.contains("Paid to", ignoreCase = true) ||
+                            details.contains("Recharge", ignoreCase = true) -> true
+                        details.contains("Received from", ignoreCase = true) -> false
+                        else -> true
+                    }
+
+                    val cleanMerchant = details
+                        .replace(Regex("^(?:Paid to|Received from|Sent to)\\s+", RegexOption.IGNORE_CASE), "")
+                        .replace(Regex("""\s+"""), " ")
+                        .trim()
+                        .ifBlank { if (isDebit) "PhonePe Payment" else "PhonePe Credit" }
+
+                    val dateParsed = parseDate(dateStr)
+                    val bankDetails = extractBankAndAccount(bankInfo.ifBlank { details })
+                    val enriched = MerchantEnrichmentEngine.enrich(cleanMerchant, details, bankDetails.first)
+                    val combinedRaw = lines.subList(i, (blockEnd + 1).coerceAtMost(lines.size)).joinToString(" | ")
+
+                    result.add(
+                        ImportedStatementTransaction(
+                            rawLine = combinedRaw,
+                            merchantOrName = if (enriched.isVerifiedBrand) enriched.cleanName else cleanMerchant,
+                            bankName = bankDetails.first,
+                            accountLast4 = bankDetails.second,
+                            amount = amountVal,
+                            type = if (isDebit) BankTxType.DEBIT else BankTxType.CREDIT,
+                            dateText = dateStr,
+                            timestamp = dateParsed.first,
+                            day = dateParsed.second,
+                            month = dateParsed.third,
+                            year = dateParsed.fourth,
+                            status = if (isFailed) "FAILED" else "SUCCESS",
+                            isSuccess = !isFailed,
+                            referenceNumber = utr.filter { it.isLetterOrDigit() },
+                            category = enriched.categoryKey,
+                            sourceSystem = "PHONEPE"
+                        )
+                    )
+                    i = blockEnd
+                }
+            }
+            i++
+        }
+
+        return result
+    }
+
     // -------------------------------------------------------------
     // Strategy 3: Google Pay (GPay) Statement Parser
     // -------------------------------------------------------------
-    private fun isGooglePayStatement(rawText: String, lines: List<String>): Boolean {
-        val lower = rawText.lowercase()
+    private fun isGooglePayStatement(rawText: String, lines: List<String>, fileName: String = ""): Boolean {
+        val lower = "$rawText $fileName".lowercase()
         return lower.contains("google pay") || lower.contains("gpay") || lower.contains("googlepay") ||
-               (lower.contains("transaction statement") && lower.contains("upi transaction id")) ||
-               lines.any { it.contains("UPI Transaction ID:", ignoreCase = true) }
+            fileName.lowercase().contains("gpay") ||
+            (lower.contains("transaction statement") && lower.contains("upi transaction id")) ||
+            lines.any { it.contains("UPI Transaction ID:", ignoreCase = true) }
     }
 
     private fun parseGooglePayStatement(lines: List<String>): List<ImportedStatementTransaction> {
@@ -396,11 +541,11 @@ object UniversalStatementParser {
                 var isFailed = false
 
                 // Scan block lines
-                for (offset in 1..8) {
+                for (offset in 1..10) {
                     if (i + offset >= lines.size) break
                     val nextLine = lines[i + offset].trim()
 
-                    if (DATE_REGEX.matches(nextLine) && nextLine.length < 30) break
+                    if (DATE_REGEX.find(nextLine) != null && nextLine.length < 30 && !nextLine.contains("₹")) break
 
                     if (nextLine.contains("Paid to", ignoreCase = true) || nextLine.contains("Received from", ignoreCase = true) || nextLine.contains("Sent to", ignoreCase = true)) {
                         details = nextLine

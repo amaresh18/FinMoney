@@ -4,6 +4,7 @@
 name: Android CI/CD Release Build
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main", "master" ]
   pull_request:
@@ -23,6 +24,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
           cache: 'gradle'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Grant Execute Permission for Gradle Wrapper
         run: chmod +x ./gradlew

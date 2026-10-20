@@ -127,7 +127,16 @@ object StatementImportManager {
                 continue
             }
 
-            // 1. Insert into bank_transactions table as confirmed transaction
+            val monthYear = "%04d-%02d".format(tx.year, tx.month)
+            val fingerprint = listOf(
+                tx.sourceSystem,
+                tx.bankName,
+                tx.type.name,
+                "%.2f".format(tx.amount),
+                tx.referenceNumber.ifBlank { "${tx.day}-${tx.month}-${tx.year}-${tx.merchantOrName.take(12)}" }
+            ).joinToString("|").lowercase()
+
+            // 1. Insert into bank_transactions as APPROVED (already reconciled via statement)
             val record = BankTransactionRecord(
                 cloudId = UUID.randomUUID().toString(),
                 bankName = tx.bankName,
@@ -141,9 +150,12 @@ object StatementImportManager {
                 originalText = tx.rawLine,
                 source = "STATEMENT_IMPORT",
                 timestamp = tx.timestamp,
-                isConfirmed = true
+                isConfirmed = true,
+                status = "APPROVED",
+                fingerprint = fingerprint
             )
             val insertedTxId = dao.insertBankTransaction(record)
+            val savedRecord = record.copy(id = insertedTxId)
 
             // 2. Handle Debits vs Credits in financial ledger
             if (tx.type == BankTxType.DEBIT) {
@@ -151,7 +163,8 @@ object StatementImportManager {
                     cloudId = UUID.randomUUID().toString(),
                     month = tx.month,
                     year = tx.year,
-                    category = tx.category,
+                    monthYear = monthYear,
+                    category = tx.category.ifBlank { "GENERAL" },
                     title = tx.merchantOrName,
                     amount = tx.amount,
                     dueDateDay = tx.day,
@@ -159,22 +172,28 @@ object StatementImportManager {
                     isPaid = true,
                     isPaidViaDebitCard = true,
                     isPaidViaCreditCard = false,
+                    paidDateTimestamp = tx.timestamp,
+                    paidDate = tx.timestamp,
                     notes = "Imported from ${tx.sourceSystem} statement (${tx.bankName}). Status: SUCCESS",
                     createdAt = tx.timestamp
                 )
                 val debitId = dao.insertDebit(debitItem)
-                BankSyncManager.saveDebitToFirestore(context, debitItem.copy(id = debitId), userPhone)
+                // Link bank tx → debit for reconciliation screens
+                dao.insertBankTransaction(
+                    savedRecord.copy(matchedDebitId = debitId, matchedDebitTitle = debitItem.title)
+                )
+                BankSyncManager.saveDebitToFirestore(context, debitItem.copy(id = debitId), userPhone, savedRecord)
 
                 debitsAdded++
                 totalDebits += tx.amount
             } else {
-                // CREDIT: Add to Monthly Income
-                addIncomeCredit(context, dao, tx, userPhone)
+                // CREDIT: Add to Monthly Income sources for that month/year
+                addIncomeCredit(context, dao, tx, userPhone, savedRecord)
                 creditsAdded++
                 totalCredits += tx.amount
             }
 
-            BankSyncManager.saveTransactionToFirestore(context, record.copy(id = insertedTxId), userPhone)
+            BankSyncManager.saveTransactionToFirestore(context, savedRecord, userPhone)
         }
 
         ImportCommitSummary(
@@ -188,15 +207,23 @@ object StatementImportManager {
         )
     }
 
-    private suspend fun addIncomeCredit(context: Context, dao: com.example.data.local.FinMoneyDao, tx: ImportedStatementTransaction, userPhone: String) {
+    private suspend fun addIncomeCredit(
+        context: Context,
+        dao: com.example.data.local.FinMoneyDao,
+        tx: ImportedStatementTransaction,
+        userPhone: String,
+        bankTxRecord: BankTransactionRecord? = null
+    ) {
         val existingSalary = dao.getSalaryRecordDirect(tx.month, tx.year)
         val currentSources = if (!existingSalary?.incomeSourcesJson.isNullOrBlank()) {
             com.example.ui.FinMoneyViewModel.parseIncomeSources(existingSalary!!.incomeSourcesJson)
         } else emptyList()
 
+        val creditName = tx.merchantOrName.ifBlank { "${tx.bankName} Credit" }
         val newSource = IncomeSource(
             id = UUID.randomUUID().toString(),
-            name = tx.merchantOrName.ifBlank { "${tx.bankName} Credit" },
+            title = creditName,
+            name = creditName,
             amount = tx.amount,
             category = IncomeCategory.OTHER.name,
             isReceived = true,
@@ -207,26 +234,31 @@ object StatementImportManager {
         val updatedSources = currentSources + newSource
         val json = com.example.data.repository.FinMoneyRepository.encodeIncomeSources(updatedSources)
         val totalAdditional = updatedSources.sumOf { it.amount }
+        val monthYear = "%04d-%02d".format(tx.year, tx.month)
 
         if (existingSalary != null) {
             val updatedRecord = existingSalary.copy(
+                monthYear = existingSalary.monthYear.ifBlank { monthYear },
                 additionalIncome = totalAdditional,
                 incomeSourcesJson = json,
                 updatedAt = System.currentTimeMillis()
             )
             dao.insertOrUpdateSalary(updatedRecord)
+            BankSyncManager.saveSalaryToFirestore(context, updatedRecord, userPhone)
         } else {
             val newRecord = com.example.data.model.SalaryRecord(
                 month = tx.month,
                 year = tx.year,
+                monthYear = monthYear,
                 salaryAmount = 0.0,
                 additionalIncome = totalAdditional,
                 incomeSourcesJson = json,
                 updatedAt = System.currentTimeMillis()
             )
             dao.insertOrUpdateSalary(newRecord)
+            BankSyncManager.saveSalaryToFirestore(context, newRecord, userPhone)
         }
-        BankSyncManager.saveIncomeToFirestore(context, newSource, tx.month, tx.year, userPhone)
+        BankSyncManager.saveIncomeToFirestore(context, newSource, tx.month, tx.year, userPhone, bankTxRecord)
     }
 
     private fun getFileName(context: Context, uri: Uri): String {

@@ -35,14 +35,14 @@ data class TransactionParseResult(
      */
     fun toParsedBankTransaction(): ParsedBankTransaction? {
         if (!isFinancialNotification) return null
-        val finalAmount = amount ?: availableBalance ?: return null
-        if (finalAmount <= 0.0) return null
+        val txAmount = amount ?: return null
+        if (txAmount <= 0.0) return null
 
         return ParsedBankTransaction(
             id = id,
             bankName = bankName,
             accountNumberLast4 = accountEnding,
-            amount = finalAmount,
+            amount = txAmount,
             type = transactionType,
             classification = classification,
             availableBalance = availableBalance,
@@ -246,10 +246,8 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
         val isFinancial = (nonFinancialReason == null)
 
         // 1. Amount & Available Balance Extraction using multi-stage Regex
-        val txAmount = extractAmount(normalizedText)
+        val txAmount = extractTransactionAmount(normalizedText)
         val avlBalance = extractAvailableBalance(normalizedText)
-
-        val finalAmount = txAmount ?: if (avlBalance != null && avlBalance > 0.0) avlBalance else null
 
         // 2. Account / Card Last 4 Digits Extraction
         val accountEnding = extractAccountEnding(normalizedText)
@@ -289,15 +287,17 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
         // 10. Confidence Score Calculation
         val confidence = calculateConfidenceScore(
             isFinancial = isFinancial,
-            amount = finalAmount,
+            amount = txAmount,
             accountEnding = accountEnding,
             bankName = bankName,
             merchantName = merchantName,
-            nlpKeywords = nlpKeywords
+            nlpKeywords = nlpKeywords,
+            referenceNumber = refNumber,
+            hasExplicitTxVerb = NotificationTransactionGate.hasExplicitTransactionVerb(lowerText)
         )
 
         return TransactionParseResult(
-            amount = finalAmount,
+            amount = txAmount,
             accountEnding = accountEnding,
             availableBalance = avlBalance,
             bankName = bankName,
@@ -357,11 +357,14 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
         }
 
         // 4. Cashback Eligibility & Reward Loops
-        if (lower.contains("scratch card") || lower.contains("tap to claim") || 
-            lower.contains("win up to") || lower.contains("won a scratch") || 
-            lower.contains("claim your") || lower.contains("cashback on your next") || 
-            lower.contains("earn up to")) {
-            return "Matches scratch card/reward promotional pattern"
+        if (lower.contains("scratch card") || lower.contains("tap to claim") ||
+            lower.contains("win up to") || lower.contains("won a scratch") ||
+            lower.contains("claim your") || lower.contains("cashback on your next") ||
+            lower.contains("earn up to") || lower.contains("spin to win") ||
+            lower.contains("refer and earn") || lower.contains("lucky draw")) {
+            if (!NotificationTransactionGate.hasExplicitTransactionVerb(lower)) {
+                return "Matches scratch card/reward promotional pattern"
+            }
         }
 
         // 5. One-Time Passwords (OTP) & Security codes
@@ -389,7 +392,18 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             return "Matches banking alert/reminder pattern"
         }
 
-        // 8. Credit Card Promotions & Marketing Offers
+        // 8. UPI collect / payment requests (not settled transactions)
+        if (lower.contains("payment request") || lower.contains("collect request") ||
+            lower.contains("has requested") || lower.contains("money request") ||
+            lower.contains("upi request") || lower.contains("awaiting your approval") ||
+            lower.contains("reminder to pay")
+        ) {
+            if (!NotificationTransactionGate.hasExplicitTransactionVerb(lower)) {
+                return "Matches unsettled UPI/payment request pattern"
+            }
+        }
+
+        // 9. Credit Card Promotions & Marketing Offers
         if (lower.contains("eligible for") || lower.contains("pre-approved") || 
             lower.contains("pre approved") || lower.contains("limit increase") || 
             lower.contains("apply now") || lower.contains("10% off") || 
@@ -398,27 +412,20 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             return "Matches promotional/marketing offer pattern"
         }
 
-        // 9. Engagement Pings & App Marketing Spam
+        // 10. Engagement Pings & App Marketing Spam
         if (lower.contains("update available") || lower.contains("rate us") || 
             lower.contains("spin to win") || lower.contains("claim your reward") || 
             lower.contains("exclusive offer")) {
             return "Matches app marketing/engagement spam pattern"
         }
 
-        val hasTxKeyword = lower.contains("debited") || lower.contains("spent") ||
-                lower.contains("paid") || lower.contains("credited") ||
-                lower.contains("received") || lower.contains("sent") ||
-                lower.contains("withdrawn") || lower.contains("refund") ||
-                lower.contains("charged") || lower.contains("transferred") ||
-                lower.contains("recd") || lower.contains("cr") ||
-                lower.contains("deposit") || lower.contains("added") ||
-                lower.contains("inward") || lower.contains("incoming") ||
-                lower.contains("salary") || lower.contains("remittance") ||
-                lower.contains("cashback") || lower.contains("got") ||
-                lower.contains("avl bal") || lower.contains("available bal") ||
-                lower.contains("bal") || lower.contains("balance") ||
-                lower.contains("limit") || lower.contains("a/c") || lower.contains("account") ||
-                lower.contains("chatbanking") || lower.contains("reaching out") || lower.contains("upi")
+        val hasExplicitVerb = NotificationTransactionGate.hasExplicitTransactionVerb(lower)
+        val hasRefHint = lower.contains("utr") || lower.contains("txn id") || lower.contains("transaction id") ||
+            lower.contains("ref no") || lower.contains("reference no") || lower.contains("rrn")
+
+        val hasBalanceOnlyHint = lower.contains("avl bal") || lower.contains("available bal") ||
+            lower.contains("account balance") || lower.contains("balance in a/c") ||
+            lower.contains("balance is rs") || lower.contains("balance is ₹")
 
         val hasCurrency = lower.contains("inr") || lower.contains("rs") ||
                 lower.contains("₹") || lower.contains("r.s") || lower.contains("rupees") || lower.contains("usd")
@@ -430,7 +437,9 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
                 lower.contains("amex") || lower.contains("bank") || lower.contains("card") ||
                 lower.contains("paytm") || lower.contains("phonepe") || lower.contains("gpay")
 
-        val isValid = (hasTxKeyword && hasCurrency) || (isKnownBank && (hasCurrency || lower.contains("bal") || lower.contains("balance") || lower.contains("limit")))
+        val isValid = (hasExplicitVerb && hasCurrency) ||
+            (hasRefHint && hasCurrency && hasExplicitVerb) ||
+            (hasBalanceOnlyHint && hasCurrency && isKnownBank)
 
         return if (!isValid) "Non-financial message content" else null
     }
@@ -445,30 +454,48 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
     /**
      * Robust Regex patterns to extract transaction amount.
      */
-    fun extractAmount(text: String): Double? {
+    fun extractAmount(text: String): Double? = extractTransactionAmount(text)
+
+    /**
+     * Extracts the transaction amount only — never treats available balance / limit lines as payment amount.
+     */
+    fun extractTransactionAmount(text: String): Double? {
         val normalizedText = text.replace("&nbsp;", " ").replace("\u00A0", " ")
 
         val regexes = listOf(
-            // 1. Currency prefix: INR 1,500.00 / Rs. 3,021.57 / ₹1,500/- / Rs 1500 / INR 450.00 / ₹ 500
-            Regex("""(?:inr|rs\.?|₹|usd)\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
-            // 2. Verb followed by currency or amount: debited by 1,500.00 / paid Rs. 500 / received Rs 500 / recd 500 / cr 500 / added 500
-            Regex("""(?:debited|credited|paid|sent|spent|charged|withdrawn|transferred|transfer|withdrawal|done|received|recd|rec'd|cr|added|deposited|got)\s+(?:by|with|for|of)?\s*(?:inr|rs\.?|₹|usd)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
-            // 3. Amount followed by verb or currency: 1,500.00 INR / 1500 Rs / 1,500.00 debited / 500.00 paid / 500 recd / 500 credited
-            Regex("""([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?\s*(?:inr|rs\.?|₹|usd|debited|credited|paid|spent|charged|received|recd|rec'd|cr|added)""", RegexOption.IGNORE_CASE),
-            // 4. Mandate / Autopay / ATM / SIP / UPI / Salary / Deposit: autopay of 1200 / mandate of 1500 / upi 500 / salary 50000
-            Regex("""(?:autopay|mandate|sip|atm|upi|salary|deposit|refund|cashback|credit|remediation)\s+(?:of|for|by)?\s*(?:inr|rs\.?|₹|usd)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
-            // 5. Fallback balance/limit amount if no transaction amount is specified
-            Regex("""(?:balance|bal|limit)\s*(?:is|:|-)?\s*(?:inr|rs\.?|₹|usd)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE)
+            // 1. Verb followed by currency or amount
+            Regex("""(?:debited|credited|paid|sent|spent|charged|withdrawn|transferred|transfer|withdrawal|done|received|recd|rec'd|added|deposited)\s+(?:by|with|for|of|to|from)?\s*(?:inr|rs\.?|₹|usd)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
+            // 2. Amount followed by verb
+            Regex("""([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?\s*(?:inr|rs\.?|₹|usd)?\s*(?:debited|credited|paid|spent|charged|received|recd|rec'd|added)""", RegexOption.IGNORE_CASE),
+            // 3. Mandate / Autopay / ATM / SIP / UPI / Salary / Refund
+            Regex("""(?:autopay|mandate|sip|atm|upi|salary|deposit|refund)\s+(?:of|for|by)?\s*(?:inr|rs\.?|₹|usd)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
+            // 4. Currency prefix when paired with debit/credit context in the same line
+            Regex("""(?:inr|rs\.?|₹|usd)\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?\s*(?:debited|credited|paid|spent|sent|charged)""", RegexOption.IGNORE_CASE),
+            // 5. Generic currency prefix (last resort — skip if line is balance-only)
+            Regex("""(?:inr|rs\.?|₹|usd)\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE)
         )
 
         for (regex in regexes) {
             val match = regex.find(normalizedText)
             if (match != null) {
+                val lineStart = normalizedText.lastIndexOf('\n', match.range.first).let { if (it < 0) 0 else it }
+                val lineEnd = normalizedText.indexOf('\n', match.range.first).let { if (it < 0) normalizedText.length else it }
+                val line = normalizedText.substring(lineStart, lineEnd).lowercase()
+                if (isBalanceOrLimitLine(line) && !NotificationTransactionGate.hasExplicitTransactionVerb(line)) {
+                    continue
+                }
                 val num = cleanNumber(match.groupValues[1])
                 if (num != null && num > 0.0) return num
             }
         }
         return null
+    }
+
+    private fun isBalanceOrLimitLine(lowerLine: String): Boolean {
+        return lowerLine.contains("avl bal") || lowerLine.contains("avail") && lowerLine.contains("bal") ||
+            lowerLine.contains("available balance") || lowerLine.contains("account balance") ||
+            lowerLine.contains("balance is") || lowerLine.contains("credit limit") ||
+            lowerLine.contains("available limit")
     }
 
     /**
@@ -577,21 +604,22 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
     }
 
     private fun determineTransactionType(lowerText: String): BankTxType {
-        val isCredit = lowerText.contains("credited") || lowerText.contains("received") ||
-                lowerText.contains("recd") || lowerText.contains("rec'd") || lowerText.contains("recd.") ||
-                lowerText.contains("cr:") || lowerText.contains("cr.") || lowerText.contains(" cr ") ||
-                lowerText.contains("cr of") || lowerText.contains("cr in") || lowerText.contains("cr to") ||
-                lowerText.contains("deposited") || lowerText.contains("refunded") ||
-                lowerText.contains("added to") || lowerText.contains("added") ||
-                lowerText.contains("payment of rs") || lowerText.contains("payment received") ||
-                lowerText.contains("money received") || lowerText.contains("credit") ||
-                lowerText.contains("inward") || lowerText.contains("incoming") ||
-                lowerText.contains("transferred to your") || lowerText.contains("salary") ||
-                lowerText.contains("cashback") || lowerText.contains("remittance") ||
-                lowerText.contains("got ₹") || lowerText.contains("got rs") ||
-                lowerText.contains("account balance") || lowerText.contains("balance for account") ||
-                lowerText.contains("chatbanking")
+        val hasDebit = lowerText.contains("debited") || lowerText.contains("paid to") ||
+            lowerText.contains("spent on") || lowerText.contains("spent rs") || lowerText.contains("spent ₹") ||
+            lowerText.contains("sent to") || lowerText.contains("withdrawn") || lowerText.contains("charged to") ||
+            lowerText.contains("purchase of") || lowerText.contains("autopay of")
 
+        val isCredit = lowerText.contains("credited") || lowerText.contains("received from") ||
+                lowerText.contains("recd") || lowerText.contains("rec'd") || lowerText.contains("recd.") ||
+                Regex("""\bcr[:.]|\bcr\s""").containsMatchIn(lowerText) ||
+                lowerText.contains("deposited") || lowerText.contains("refunded") ||
+                lowerText.contains("payment received") || lowerText.contains("money received") ||
+                lowerText.contains("inward credit") || lowerText.contains("incoming") ||
+                lowerText.contains("transferred to your") || lowerText.contains("salary credited") ||
+                (lowerText.contains("cashback") && lowerText.contains("credited")) ||
+                lowerText.contains("remittance")
+
+        if (hasDebit && !isCredit) return BankTxType.DEBIT
         return if (isCredit) BankTxType.CREDIT else BankTxType.DEBIT
     }
 
@@ -605,14 +633,18 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
         accountEnding: String,
         bankName: String,
         merchantName: String,
-        nlpKeywords: List<String>
+        nlpKeywords: List<String>,
+        referenceNumber: String = "",
+        hasExplicitTxVerb: Boolean = false
     ): Float {
         if (!isFinancial) return 0.0f
 
-        var score = 0.3f
-        if (amount != null && amount > 0.0) score += 0.3f
-        if (accountEnding.isNotBlank()) score += 0.2f
-        if (bankName != "Bank Account") score += 0.1f
+        var score = 0.2f
+        if (amount != null && amount > 0.0) score += 0.25f
+        if (hasExplicitTxVerb) score += 0.2f
+        if (referenceNumber.isNotBlank()) score += 0.15f
+        if (accountEnding.isNotBlank()) score += 0.1f
+        if (bankName != "Bank Account" && bankName.isNotBlank()) score += 0.05f
         if (merchantName.isNotBlank() && merchantName != bankName) score += 0.05f
         if (nlpKeywords.any { it.startsWith("action:") }) score += 0.05f
 

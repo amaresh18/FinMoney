@@ -121,16 +121,8 @@ object BankSyncManager {
         timestamp: Long = System.currentTimeMillis(),
         sbnKey: String = ""
     ): ParsedBankTransaction? {
-        val combinedLower = "$title $text".lowercase()
-        val hasCurrency = combinedLower.contains("₹") || combinedLower.contains("rs") || combinedLower.contains("inr") || combinedLower.contains("usd")
-        val hasPaymentVerb = combinedLower.contains("credited") || combinedLower.contains("received") || combinedLower.contains("recd") ||
-                combinedLower.contains("cr:") || combinedLower.contains("cr.") || combinedLower.contains("paid") || combinedLower.contains("debited") ||
-                combinedLower.contains("spent") || combinedLower.contains("transferred") || combinedLower.contains("added") ||
-                combinedLower.contains("upi") || combinedLower.contains("gpay") || combinedLower.contains("phonepe") || combinedLower.contains("paytm")
-
         val isFinancial = BankTransactionParser.isFinancialMessage(text, title) ||
-                TransactionParser.isFinancialText(text, title) ||
-                (hasCurrency && hasPaymentVerb)
+            TransactionParser.isFinancialText(text, title)
 
         val db = AppDatabase.getDatabase(context)
         val dao = db.finMoneyDao()
@@ -145,24 +137,35 @@ object BankSyncManager {
             emptyList()
         }
 
+        val parseResult = TransactionParser.parse(
+            rawText = text,
+            senderOrTitle = title,
+            sourcePackage = packageName,
+            timestamp = timestamp
+        )
+
         var parsed = BankTransactionParser.parse(
             text = text,
             senderOrTitle = title,
             sourcePackage = packageName,
             timestamp = timestamp,
             plannedDebits = plannedDebits
-        )
+        ) ?: parseResult.toParsedBankTransaction()
 
-        // Fallback parser attempt if primary returned null but contains financial content
-        if (parsed == null && isFinancial) {
-            val fallbackResult = TransactionParser.parse(
-                rawText = text,
-                senderOrTitle = title,
-                sourcePackage = packageName,
-                timestamp = timestamp
+        if (parsed != null && parseResult.amount != null) {
+            parsed = parsed.copy(
+                type = parseResult.transactionType,
+                availableBalance = parseResult.availableBalance ?: parsed.availableBalance,
+                amount = parseResult.amount
             )
-            parsed = fallbackResult.toParsedBankTransaction()
         }
+
+        val gateDecision = NotificationTransactionGate.evaluate(
+            title = title,
+            body = text,
+            parseResult = parseResult,
+            parsedTx = parsed
+        )
 
         // Always log raw notification record into local database
         recordRawNotification(
@@ -175,6 +178,38 @@ object BankSyncManager {
             isFinancialContent = isFinancial,
             parsedTx = parsed
         )
+
+        when (gateDecision.action) {
+            NotificationTransactionGate.Action.IGNORE -> {
+                android.util.Log.i("BankSyncManager", "Filtered notification (${gateDecision.reason})")
+                return null
+            }
+            NotificationTransactionGate.Action.BALANCE_UPDATE_ONLY -> {
+                scope.launch {
+                    try {
+                        val balance = gateDecision.balanceToApply ?: parseResult.availableBalance
+                        if (balance != null && balance >= 0.0) {
+                            updateReconciliationBankBalance(
+                                dao = dao,
+                                month = month,
+                                year = year,
+                                bankName = parseResult.bankName,
+                                accountLast4 = parseResult.accountEnding,
+                                newBalance = balance
+                            )
+                            android.util.Log.i(
+                                "BankSyncManager",
+                                "Silent balance update for ${parseResult.bankName}: ₹${"%,.2f".format(balance)} (${gateDecision.reason})"
+                            )
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("BankSyncManager", "Balance-only update failed: ${e.message}")
+                    }
+                }
+                return null
+            }
+            NotificationTransactionGate.Action.REQUEST_USER_APPROVAL -> { /* continue */ }
+        }
 
         if (!isFinancial || parsed == null) {
             return null
@@ -203,6 +238,16 @@ object BankSyncManager {
             emptyList()
         }
 
+        val contentHash = BankTransactionDeduplicator.normalizeContentHash(text)
+        val isRepeatContent = existingTxs.any { existing ->
+            BankTransactionDeduplicator.normalizeContentHash(existing.originalText) == contentHash &&
+                kotlin.math.abs(existing.timestamp - timestamp) <= BankTransactionDeduplicator.DEDUPLICATION_MAX_AGE_MS
+        }
+        if (isRepeatContent) {
+            android.util.Log.i("BankSyncManager", "Silently discarding duplicate notification body (content hash)")
+            return null
+        }
+
         // Automated deep deduplication against pending, confirmed, and debits
         val dedupResult = BankTransactionDeduplicator.evaluate(
             newTx = parsed,
@@ -210,12 +255,17 @@ object BankSyncManager {
             existingDebits = plannedDebits
         )
 
-        // If it's a confirmed duplicate (Exact fingerprint, UTR, rapid broadcast, or previously recorded/rejected),
-        // SILENTLY DISCARD it to prevent duplicate expenses and notification spam!
-        if (dedupResult.isDuplicate && dedupResult.confidence != DuplicateConfidence.SUSPECTED_REPEAT) {
+        // Silently discard duplicates (SMS + app push, same UTR, repeats, prior rejections).
+        if (dedupResult.isDuplicate) {
             android.util.Log.i("BankSyncManager", "Silently discarding duplicate bank notification (${dedupResult.confidence}): ${dedupResult.reason}")
             processedTxSignatures.add(fingerprint)
             return parsed
+        }
+
+        val integrity = EntryIntegrityEngine.auditIncomingTransaction(parsed, text, existingTxs)
+        if (integrity.isIncorrect) {
+            android.util.Log.i("BankSyncManager", "Filtered incorrect parse: ${integrity.incorrectReason}")
+            return null
         }
 
         processedTxSignatures.add(fingerprint)

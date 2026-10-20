@@ -268,36 +268,18 @@ class BankNotificationListenerService : NotificationListenerService() {
 
             if (fullBody.isBlank()) return
 
-            val lowerFull = "$title $fullBody".lowercase()
             val isFinancialContent = BankTransactionParser.isFinancialMessage(fullBody, title) ||
-                    TransactionParser.isFinancialText(fullBody, title) ||
-                    lowerFull.contains("credited") || lowerFull.contains("received") || lowerFull.contains("recd") ||
-                    lowerFull.contains("cr:") || lowerFull.contains("cr.") || lowerFull.contains("debited") ||
-                    lowerFull.contains("spent") || lowerFull.contains("paid") || lowerFull.contains("added") ||
-                    lowerFull.contains("account balance") || lowerFull.contains("ending with") ||
-                    lowerFull.contains("balance is") || lowerFull.contains("chatbanking")
-
-            val hasCurrencySymbol = lowerFull.contains("₹") || lowerFull.contains("rs") || lowerFull.contains("inr") || lowerFull.contains("usd")
-            val hasPaymentVerb = lowerFull.contains("credited") || lowerFull.contains("received") || lowerFull.contains("recd") ||
-                    lowerFull.contains("cr") || lowerFull.contains("paid") || lowerFull.contains("debited") ||
-                    lowerFull.contains("spent") || lowerFull.contains("transferred") || lowerFull.contains("added") ||
-                    lowerFull.contains("upi") || lowerFull.contains("gpay") || lowerFull.contains("phonepe") || lowerFull.contains("paytm")
+                TransactionParser.isFinancialText(fullBody, title)
 
             val isMonitoredPkg = MONITORED_PACKAGES.contains(packageName) ||
-                    packageName.contains("messaging", ignoreCase = true) ||
-                    packageName.contains("message", ignoreCase = true) ||
-                    packageName.contains("sms", ignoreCase = true) ||
-                    packageName.contains("mms", ignoreCase = true) ||
-                    packageName.contains("bank", ignoreCase = true) ||
-                    packageName.contains("whatsapp", ignoreCase = true) ||
-                    packageName.contains("pay", ignoreCase = true) ||
-                    packageName.contains("upi", ignoreCase = true) ||
-                    packageName.contains("finance", ignoreCase = true) ||
-                    packageName.contains("money", ignoreCase = true) ||
-                    packageName.contains("card", ignoreCase = true) ||
-                    packageName.contains("talk", ignoreCase = true) ||
-                    packageName.contains("airtel", ignoreCase = true) ||
-                    (hasCurrencySymbol && hasPaymentVerb)
+                packageName.contains("messaging", ignoreCase = true) ||
+                packageName.contains("message", ignoreCase = true) ||
+                packageName.contains("sms", ignoreCase = true) ||
+                packageName.contains("mms", ignoreCase = true) ||
+                packageName.contains("bank", ignoreCase = true) ||
+                packageName.contains("whatsapp", ignoreCase = true) ||
+                packageName.contains("upi", ignoreCase = true) ||
+                packageName.contains("finance", ignoreCase = true)
 
             if (!isMonitoredPkg && !isFinancialContent) {
                 if (packageName.contains("message") || packageName.contains("sms") || packageName.contains("bank") || packageName.contains("pay")) {

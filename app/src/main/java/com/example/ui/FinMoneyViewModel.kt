@@ -277,7 +277,12 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     fun parseAndProcessCustomAlert(text: String, title: String = "", context: Context? = null) {}
 
     val pendingBankTransactions: StateFlow<List<BankTransactionRecord>> = bankTransactions.map { list ->
-        list.filter { !it.isConfirmed }
+        list.filter { tx ->
+            !tx.isConfirmed &&
+                tx.status.equals("PENDING", ignoreCase = true) &&
+                !tx.isDuplicate &&
+                !tx.isIncorrect
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun approveAllPendingTransactions() {
