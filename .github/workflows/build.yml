@@ -71,6 +71,11 @@ jobs:
           else
             echo "Notice: KEYSTORE_BASE64 secret not set. Build will use debug keystore."
           fi
+          if [ ! -f debug.keystore ]; then
+            keytool -genkeypair -v -keystore debug.keystore -storepass android -keypass android \
+              -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=FinMoney CI, OU=Dev, O=FinMoney, L=NA, ST=NA, C=IN"
+          fi
 
       - name: Clean and Build Bundle & APK
         env:
