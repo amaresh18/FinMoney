@@ -241,11 +241,12 @@ private fun AuthScreenContent(
         errorText = null
         statusMessage = null
 
-        val clientId = try {
-            context.getString(R.string.default_web_client_id)
-        } catch (e: Exception) {
-            ""
-        }
+        val webClientIdRes = context.resources.getIdentifier(
+            "default_web_client_id",
+            "string",
+            context.packageName
+        )
+        val clientId = if (webClientIdRes != 0) context.getString(webClientIdRes) else ""
         if (clientId.isBlank()) {
             isGoogleLoading = false
             errorText = "Google Sign-In configuration missing (default_web_client_id)"
