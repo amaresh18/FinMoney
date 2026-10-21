@@ -39,29 +39,26 @@ jobs:
         run: |
           cp .env.example .env
           if [ ! -f app/google-services.json ]; then
-            cat > app/google-services.json <<'EOF'
-          {
-            "project_info": {
-              "project_number": "000000000000",
-              "project_id": "finmoney-ci-placeholder",
-              "storage_bucket": "finmoney-ci-placeholder.appspot.com"
-            },
-            "client": [
-              {
-                "client_info": {
-                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
-                  "android_client_info": {
-                    "package_name": "com.aistudio.finmoney.vqpz"
-                  }
-                },
-                "oauth_client": [],
-                "api_key": [{ "current_key": "AIzaSyCiPlaceholderKeyNotForProduction" }],
-                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
-              }
-            ],
-            "configuration_version": "1"
-          }
-          EOF
+            printf '%s\n' \
+              '{' \
+              '  "project_info": {' \
+              '    "project_number": "000000000000",' \
+              '    "project_id": "finmoney-ci-placeholder",' \
+              '    "storage_bucket": "finmoney-ci-placeholder.appspot.com"' \
+              '  },' \
+              '  "client": [' \
+              '    {' \
+              '      "client_info": {' \
+              '        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",' \
+              '        "android_client_info": { "package_name": "com.aistudio.finmoney.vqpz" }' \
+              '      },' \
+              '      "oauth_client": [],' \
+              '      "api_key": [{ "current_key": "AIzaSyCiPlaceholderKeyNotForProduction" }],' \
+              '      "services": { "appinvite_service": { "other_platform_oauth_client": [] } }' \
+              '    }' \
+              '  ],' \
+              '  "configuration_version": "1"' \
+              '}' > app/google-services.json
           fi
 
       - name: Decode Release Keystore (if present)
