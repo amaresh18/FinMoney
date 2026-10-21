@@ -35,6 +35,35 @@ jobs:
       - name: Grant Execute Permission for Gradle Wrapper
         run: chmod +x ./gradlew
 
+      - name: Prepare CI config files
+        run: |
+          cp .env.example .env
+          if [ ! -f app/google-services.json ]; then
+            cat > app/google-services.json <<'EOF'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "finmoney-ci-placeholder",
+              "storage_bucket": "finmoney-ci-placeholder.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+                  "android_client_info": {
+                    "package_name": "com.aistudio.finmoney.vqpz"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [{ "current_key": "AIzaSyCiPlaceholderKeyNotForProduction" }],
+                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          EOF
+          fi
+
       - name: Decode Release Keystore (if present)
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -52,8 +81,7 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          ./gradlew clean --no-daemon
-          ./gradlew :app:bundleRelease :app:assembleRelease --no-daemon
+          ./gradlew :app:bundleRelease :app:assembleRelease --no-daemon --stacktrace
 
       - name: Upload Release AAB Artifact
         uses: actions/upload-artifact@v4
