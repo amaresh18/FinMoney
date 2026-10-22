@@ -42,6 +42,8 @@ data class DeduplicationResult(
 object BankTransactionDeduplicator {
 
     const val RAPID_BROADCAST_WINDOW_MS = 180_000L     // 3 minutes (SMS + Push dual alert window)
+    /** One real payment often arrives as SMS + UPI app + carrier retry with different refs/banks. */
+    const val SAME_PAYMENT_BURST_MS = 120_000L
     const val REPEAT_SUSPICION_WINDOW_MS = 3_600_000L   // 1 hour (Suspicious repeat without UTR)
     const val DEDUPLICATION_MAX_AGE_MS = 86_400_000L * 2 // 48 hours
 
@@ -155,7 +157,17 @@ object BankTransactionDeduplicator {
                 )
             }
 
-            // SCENARIO 6: DIFFERENT UTRS ARE NEVER DUPLICATES
+            // SCENARIO 5b: One payment, many alerts (SMS + UPI app + SIM), even if refs/banks differ.
+            if (isSameAmount && timeDiff <= SAME_PAYMENT_BURST_MS) {
+                return DeduplicationResult(
+                    isDuplicate = true,
+                    confidence = DuplicateConfidence.RAPID_BROADCAST_MATCH,
+                    reason = "Duplicate alert: Same ₹${"%,.0f".format(newTx.amount)} ${newTx.type.name.lowercase()} within ${timeDiff / 1000}s (SMS and app notified together).",
+                    matchedTxId = existing.id
+                )
+            }
+
+            // SCENARIO 6: Different UTRs outside the burst window are separate payments
             if (newRef.isNotBlank() && existingRef.isNotBlank() && !newRef.equals(existingRef, ignoreCase = true)) {
                 continue
             }

@@ -99,7 +99,7 @@ class BankTransactionDeduplicatorTest {
             amount = 50.0,
             type = BankTxType.DEBIT,
             referenceNumber = "REF222222222222",
-            timestamp = baseTimestamp + 60_000L // 1 minute later with different UTR
+            timestamp = baseTimestamp + 600_000L // 10 minutes later with different UTR
         )
 
         val result = BankTransactionDeduplicator.evaluate(incoming, existing)
@@ -130,6 +130,34 @@ class BankTransactionDeduplicatorTest {
 
         val result = BankTransactionDeduplicator.evaluate(incoming, existing)
         assertTrue("Rapid broadcast within 3m must be flagged as duplicate", result.isDuplicate)
+        assertEquals(DuplicateConfidence.RAPID_BROADCAST_MATCH, result.confidence)
+    }
+
+    @Test
+    fun `test sms and upi app alerts for one payment are duplicates even with different refs`() {
+        val existing = listOf(
+            BankTransactionRecord(
+                id = 8L,
+                bankName = "HDFC Bank",
+                accountNumberLast4 = "1234",
+                amount = 250.0,
+                type = "DEBIT",
+                merchant = "Swiggy",
+                referenceNumber = "UTR111111111111",
+                timestamp = baseTimestamp
+            )
+        )
+        val incoming = ParsedBankTransaction(
+            bankName = "Google Pay",
+            accountNumberLast4 = "1234",
+            amount = 250.0,
+            type = BankTxType.DEBIT,
+            merchantOrParty = "Swiggy",
+            referenceNumber = "GPAY999888777",
+            timestamp = baseTimestamp + 20_000L
+        )
+        val result = BankTransactionDeduplicator.evaluate(incoming, existing)
+        assertTrue(result.isDuplicate)
         assertEquals(DuplicateConfidence.RAPID_BROADCAST_MATCH, result.confidence)
     }
 

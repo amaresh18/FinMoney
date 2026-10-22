@@ -20,3 +20,8 @@ local.properties
 .env
 debug.keystore
 debug.keystore.base64
+*.jks
+*.jks.base64
+upload_certificate.pem
+gpay_*.txt
+phonepe_*.txt

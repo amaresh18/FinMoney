@@ -91,6 +91,28 @@ class MerchantEnrichmentEngineTest {
     }
 
     @Test
+    fun `carrier notification title does not override merchant in SMS body`() {
+        val sms = "Dear Customer, INR 450.00 debited from A/C **1234 to SWIGGY on 09-OCT-26. Avl Bal: INR 35,420.50."
+        val result = MerchantEnrichmentEngine.enrich(
+            rawMerchant = "Swiggy",
+            rawText = sms,
+            senderOrTitle = "Airtel"
+        )
+        assertEquals("Swiggy", result.cleanName)
+        assertTrue(result.isVerifiedBrand)
+    }
+
+    @Test
+    fun `airtel title alone does not classify random debit as Airtel recharge`() {
+        val result = MerchantEnrichmentEngine.enrich(
+            rawMerchant = "",
+            rawText = "INR 820 debited from A/C XX5678. Avl Bal Rs 14,230.",
+            senderOrTitle = "Airtel"
+        )
+        assertNotEquals("Airtel", result.cleanName)
+    }
+
+    @Test
     fun `test unknown merchant is formatted into clean title-cased fallback`() {
         val result = MerchantEnrichmentEngine.enrich("RAMESH GENERAL PROVISION STORE PVT LTD")
         assertEquals("Ramesh General Provision", result.cleanName)

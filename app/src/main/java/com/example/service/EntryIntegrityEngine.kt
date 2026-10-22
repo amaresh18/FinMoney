@@ -98,13 +98,16 @@ object EntryIntegrityEngine {
                     break
                 }
 
-                // Rapid Broadcast (Same bank, same amount, within 3 minutes)
+                // Same payment shown as SMS + UPI app + carrier notification
                 val isSameAmount = abs(current.amount - previous.amount) < 0.01
-                val isSameBank = isBankMatch(current.bankName, previous.bankName)
+                val sameType = current.type.equals(previous.type, ignoreCase = true)
+                val accountsConflict = current.accountNumberLast4.isNotBlank() &&
+                    previous.accountNumberLast4.isNotBlank() &&
+                    !current.accountNumberLast4.equals(previous.accountNumberLast4, ignoreCase = true)
                 val timeDiff = abs(current.timestamp - previous.timestamp)
-                if (isSameAmount && isSameBank && timeDiff <= 180_000L) {
+                if (isSameAmount && sameType && !accountsConflict && timeDiff <= BankTransactionDeduplicator.SAME_PAYMENT_BURST_MS) {
                     isDup = true
-                    dupReason = "Duplicate: Multiple alerts received for ₹${"%,.0f".format(current.amount)} from ${current.bankName}."
+                    dupReason = "Duplicate: Multiple alerts for one ₹${"%,.0f".format(current.amount)} payment."
                     matchedId = previous.id
                     break
                 }

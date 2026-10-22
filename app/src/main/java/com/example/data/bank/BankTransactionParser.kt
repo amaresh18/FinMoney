@@ -567,22 +567,107 @@ object BankTransactionParser {
         "SODEXO" to "Pluxee"
     )
 
-    fun extractMerchant(text: String, fallback: String): String {
-        // 1. Deep brand enrichment across top Indian VPAs and corporate names
-        val enriched = MerchantEnrichmentEngine.enrich(rawMerchant = fallback, rawText = text)
-        if (enriched.isVerifiedBrand) {
-            return enriched.cleanName
-        }
+    private val TELECOM_POPULAR_KEYS = setOf("AIRTEL", "JIO")
 
-        val upper = "$fallback $text".uppercase()
+    private val MERCHANT_STOPWORDS = setOf(
+        "a/c", "ac", "account", "acct", "inr", "rs", "avl", "bal", "balance", "ref", "upi",
+        "customer", "dear", "hdfc", "sbi", "icici", "axis", "kotak", "bank", "card", "limit"
+    )
 
-        // 2. Check known top merchants first for pristine brand extraction
-        for ((key, displayName) in POPULAR_MERCHANTS) {
-            if (upper.contains(key)) {
-                return displayName
+    /**
+     * Pulls counterparty name from bank/UPI alert body (before using notification title).
+     */
+    fun extractCounterpartyFromTransactionBody(text: String): String {
+        val normalized = text.replace("\n", " ").trim()
+        if (normalized.isBlank()) return ""
+
+        val patterns = listOf(
+            Regex(
+                """(?:debited|credited|transfer(?:red)?|sent|paid|spent|charged)\s+(?:from|for)?\s+.*?\s+to\s+([A-Za-z0-9][A-Za-z0-9\s.'&/_-]{1,45}?)(?:\s+on|\s+dated|\s+ref|\s+upi|\s+avl|\s+bal|\.|,|$)""",
+                RegexOption.IGNORE_CASE
+            ),
+            Regex(
+                """(?:spent|charged)\s+(?:on|at)\s+(?:your\s+)?(?:\w+\s+)?(?:card|a/c)?\s*(?:ending\s+\d+)?\s*(?:at|on)?\s*([A-Za-z0-9][A-Za-z0-9\s.'&/_-]{1,40}?)(?:\s+on|\s+dated|\s+avl|\.|,|$)""",
+                RegexOption.IGNORE_CASE
+            ),
+            Regex(
+                """(?:paid|payment)\s+to\s+([A-Za-z0-9][A-Za-z0-9\s._@&'-]{1,35}?)(?:\s+using|\s+via|\s+on|\s+ref|\.|,|$)""",
+                RegexOption.IGNORE_CASE
+            ),
+            Regex(
+                """(?:received|received\s+from)\s+([A-Za-z0-9][A-Za-z0-9\s._@&'-]{1,35}?)(?:\s+in|\s+on|\s+ref|\.|,|$)""",
+                RegexOption.IGNORE_CASE
+            ),
+            Regex(
+                """(?:towards|to|at|vpa|info:)\s+([A-Za-z0-9][A-Za-z0-9\s._@&'-]{2,35}?)(?:\s+on|\s+ref|\s+txn|\s+upi|\s+bal|\.|,|$)""",
+                RegexOption.IGNORE_CASE
+            ),
+            Regex("""\b([a-z0-9][a-z0-9._-]{1,40}@[a-z]{2,16})\b""", RegexOption.IGNORE_CASE)
+        )
+
+        for (pattern in patterns) {
+            val match = pattern.find(normalized) ?: continue
+            val candidate = match.groupValues[1].trim().trimEnd('.', ',')
+            if (isValidMerchantCandidate(candidate)) {
+                return candidate
             }
         }
+        return ""
+    }
 
+    private fun isValidMerchantCandidate(candidate: String): Boolean {
+        if (candidate.length < 2) return false
+        val lower = candidate.lowercase()
+        if (MERCHANT_STOPWORDS.any { lower == it || lower.startsWith("$it ") }) return false
+        if (lower.matches(Regex("""^\*+\d+$"""))) return false
+        if (lower.matches(Regex("""^x{2,}\d+$""", RegexOption.IGNORE_CASE))) return false
+        return true
+    }
+
+    private fun resolveMerchantDisplayName(candidate: String, bodyText: String): String {
+        val enriched = MerchantEnrichmentEngine.enrich(
+            rawMerchant = candidate,
+            rawText = bodyText,
+            senderOrTitle = ""
+        )
+        if (enriched.isVerifiedBrand) return enriched.cleanName
+        val cleaned = MerchantEnrichmentEngine.cleanRawMerchantString(candidate)
+        return cleaned.ifBlank { candidate }
+    }
+
+    fun extractMerchant(text: String, fallback: String): String {
+        val allowTelecom = MerchantEnrichmentEngine.isTelecomRechargeOrBillContext(text)
+        val safeTitle = if (MerchantEnrichmentEngine.isCarrierNotificationTitle(fallback)) {
+            ""
+        } else {
+            fallback.replace(Regex("""^[A-Z]{2}-"""), "").trim()
+        }
+
+        // 1. Structured counterparty from alert body (highest priority)
+        val fromBody = extractCounterpartyFromTransactionBody(text)
+        if (fromBody.isNotBlank()) {
+            // Payee named in the SMS (e.g. "to AIRTEL", "paid to Bharti Airtel") is a real telecom txn
+            MerchantEnrichmentEngine.telecomBrandFromPayee(fromBody)?.let { return it }
+            return resolveMerchantDisplayName(fromBody, text)
+        }
+
+        // 1b. SIM title is Airtel/Jio only when the body is actually a recharge or bill
+        if (allowTelecom) {
+            MerchantEnrichmentEngine.telecomBrandFromCarrierTitle(fallback)?.let { return it }
+        }
+
+        // 2. Known merchants mentioned in body only (ignore telecom unless recharge/bill)
+        val upperText = text.uppercase()
+        for ((key, displayName) in POPULAR_MERCHANTS) {
+            if (key in TELECOM_POPULAR_KEYS && !allowTelecom) continue
+            if (upperText.contains(key)) return displayName
+        }
+
+        // 3. Brand enrichment from body text (not notification title)
+        val bodyBrand = MerchantEnrichmentEngine.enrich(rawMerchant = "", rawText = text, senderOrTitle = "")
+        if (bodyBrand.isVerifiedBrand) return bodyBrand.cleanName
+
+        // 4. Regex fallbacks on body
         val patterns = listOf(
             Regex("""(?:towards|to|at|vpa|info:)\s+([A-Za-z0-9\s._@&-]{2,30}?)(?:\s+on|\s+ref|\s+txn|\s+upi|\s+bal|\.|\s*$)""", RegexOption.IGNORE_CASE),
             Regex("""paid\s+(?:to\s+)?([A-Za-z0-9\s._@&-]{2,25}?)(?:\s+using|\s+on|\s+ref|\.|\s*$)""", RegexOption.IGNORE_CASE),
@@ -593,13 +678,18 @@ object BankTransactionParser {
             val match = pattern.find(text)
             if (match != null) {
                 val candidate = match.groupValues[1].trim()
-                if (candidate.isNotBlank() && !candidate.equals("a/c", ignoreCase = true) && !candidate.equals("account", ignoreCase = true)) {
-                    return candidate
+                if (isValidMerchantCandidate(candidate)) {
+                    return resolveMerchantDisplayName(candidate, text)
                 }
             }
         }
 
-        return fallback.replace(Regex("""^[A-Z]{2}-"""), "").trim().ifBlank { "Bank Transaction" }
+        // 5. Non-carrier notification title as last resort
+        if (safeTitle.isNotBlank()) {
+            return resolveMerchantDisplayName(safeTitle, text)
+        }
+
+        return "Bank Transaction"
     }
 
     fun extractReference(text: String): String {

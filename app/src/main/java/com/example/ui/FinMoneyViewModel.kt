@@ -17,6 +17,8 @@ import com.example.domain.usecase.CalculateBudgetHealthUseCase
 import com.example.domain.usecase.ReconcileTransactionUseCase
 import com.example.domain.usecase.ValidateLoanLifecycleUseCase
 import com.example.service.BankSyncManager
+import com.example.service.EntryIntegrityEngine
+import com.example.service.LoanAgreementService
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.Dispatchers
@@ -277,18 +279,21 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     fun parseAndProcessCustomAlert(text: String, title: String = "", context: Context? = null) {}
 
     val pendingBankTransactions: StateFlow<List<BankTransactionRecord>> = bankTransactions.map { list ->
-        list.filter { tx ->
+        val pending = list.filter { tx ->
             !tx.isConfirmed &&
                 tx.status.equals("PENDING", ignoreCase = true) &&
                 !tx.isDuplicate &&
                 !tx.isIncorrect
         }
+        val audit = EntryIntegrityEngine.auditPendingTransactions(pending)
+        pending.filter { tx -> audit[tx.id]?.isDuplicate != true }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun approveAllPendingTransactions() {
         viewModelScope.launch {
             val pending = dao.getPendingBankTransactionsDirect()
-            pending.forEach { tx ->
+            val audit = EntryIntegrityEngine.auditPendingTransactions(pending)
+            pending.filter { tx -> audit[tx.id]?.isDuplicate != true }.forEach { tx ->
                 BankSyncManager.approveTransactionAndCreateExpense(
                     context = app,
                     txId = tx.id,
@@ -740,27 +745,88 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         type: String,
         notes: String = ""
     ) {
+        submitLoanForApproval(
+            personName = personName,
+            phone = "",
+            amount = amount,
+            type = type,
+            notes = notes,
+            interestPercent = 0.0,
+            startDate = System.currentTimeMillis(),
+            returnDate = null,
+            proofPaths = "",
+            sendNow = false
+        )
+    }
+
+    fun submitLoanForApproval(
+        personName: String,
+        phone: String,
+        amount: Double,
+        type: String,
+        notes: String,
+        interestPercent: Double,
+        startDate: Long,
+        returnDate: Long?,
+        proofPaths: String,
+        sendNow: Boolean
+    ) {
         val loanType = try {
             LoanType.valueOf(type.uppercase())
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             if (type.equals("BORROWED", true) || type.equals("TAKEN", true)) LoanType.BORROWED else LoanType.LENT
         }
         viewModelScope.launch {
-            repository.insertLoan(
-                LoanTransaction(
-                    personName = personName,
-                    totalAmount = amount,
-                    type = loanType,
-                    status = LoanApprovalStatus.APPROVED,
-                    notes = notes
-                )
+            val draft = LoanTransaction(
+                personName = personName,
+                counterpartyName = personName,
+                personContact = phone,
+                counterpartyContact = phone,
+                totalAmount = amount,
+                principalAmount = amount,
+                type = loanType,
+                status = LoanApprovalStatus.PENDING_APPROVAL,
+                counterpartyApproved = false,
+                notes = notes,
+                interestRatePercent = interestPercent,
+                startDateTimestamp = startDate,
+                dueDateTimestamp = returnDate,
+                dueDate = returnDate,
+                proofPaths = proofPaths,
+                agreementText = ""
             )
+            val id = repository.insertLoan(draft)
+            if (sendNow) {
+                LoanAgreementService.notifyCounterparty(getApplication(), draft.copy(id = id))
+            }
+        }
+    }
+
+    fun notifyLoanCounterparty(loanId: Long) {
+        viewModelScope.launch {
+            val loan = dao.getLoanById(loanId) ?: return@launch
+            if (loan.status == LoanApprovalStatus.REJECTED || loan.status == LoanApprovalStatus.SETTLED) return@launch
+            if (loan.counterpartyApproved && loan.status != LoanApprovalStatus.PENDING_APPROVAL &&
+                loan.status != LoanApprovalStatus.PENDING_SETTLEMENT
+            ) {
+                return@launch
+            }
+            LoanAgreementService.notifyCounterparty(getApplication(), loan)
         }
     }
 
     fun approveLoan(loanId: Long) {
         viewModelScope.launch {
-            dao.updateLoanApproval(loanId, LoanApprovalStatus.APPROVED.name, true)
+            val loan = dao.getLoanById(loanId) ?: return@launch
+            val agreed = LoanAgreementService.buildAgreement(loan)
+            repository.updateLoan(
+                loan.copy(
+                    status = LoanApprovalStatus.MUTUAL_APPROVED,
+                    counterpartyApproved = true,
+                    agreementText = agreed,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
         }
     }
 
@@ -782,11 +848,15 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             if (loan != null) {
                 val updated = loan.copy(
                     totalAmount = newAmount,
+                    principalAmount = newAmount,
                     notes = newNotes,
                     status = LoanApprovalStatus.PENDING_APPROVAL,
+                    counterpartyApproved = false,
+                    agreementText = "",
                     updatedAt = System.currentTimeMillis()
                 )
                 repository.updateLoan(updated)
+                LoanAgreementService.notifyCounterparty(getApplication(), updated)
             }
         }
     }
@@ -797,9 +867,11 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             if (loan != null) {
                 val updated = loan.copy(
                     status = LoanApprovalStatus.PENDING_SETTLEMENT,
+                    counterpartyApproved = false,
                     updatedAt = System.currentTimeMillis()
                 )
                 repository.updateLoan(updated)
+                LoanAgreementService.notifyCounterparty(getApplication(), updated)
             }
         }
     }

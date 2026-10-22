@@ -22,8 +22,12 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.LoanApprovalStatus
 import com.example.data.model.LoanTransaction
 import com.example.data.model.LoanType
+import com.example.service.LoanAgreementService
 import com.example.ui.FinMoneyViewModel
 import com.example.ui.theme.*
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,10 +41,6 @@ fun LentBorrowedScreen(
     val currencySymbol by viewModel.currencySymbol.collectAsState()
 
     var showAddLoanDialog by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf("") }
-    var amountStr by remember { mutableStateOf("") }
-    var type by remember { mutableStateOf("LENT") }
-    var notesInput by remember { mutableStateOf("") }
 
     var editingLoan by remember { mutableStateOf<LoanTransaction?>(null) }
     var editAmountStr by remember { mutableStateOf("") }
@@ -206,18 +206,18 @@ fun LentBorrowedScreen(
                                     Surface(
                                         shape = RoundedCornerShape(12.dp),
                                         color = when (loan.status) {
-                                            LoanApprovalStatus.APPROVED -> IndGreenLight
+                                            LoanApprovalStatus.APPROVED, LoanApprovalStatus.MUTUAL_APPROVED -> IndGreenLight
                                             LoanApprovalStatus.SETTLED -> IndBlueLight
                                             LoanApprovalStatus.REJECTED -> IndRed.copy(alpha = 0.1f)
                                             else -> Color(0xFFFEF3C7)
                                         }
                                     ) {
                                         Text(
-                                            text = loan.status.name,
+                                            text = loanStatusLabel(loan.status),
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = when (loan.status) {
-                                                LoanApprovalStatus.APPROVED -> IndGreenDark
+                                                LoanApprovalStatus.APPROVED, LoanApprovalStatus.MUTUAL_APPROVED -> IndGreenDark
                                                 LoanApprovalStatus.SETTLED -> IndBlue
                                                 LoanApprovalStatus.REJECTED -> IndRed
                                                 else -> Color(0xFFD97706)
@@ -227,9 +227,26 @@ fun LentBorrowedScreen(
                                     }
                                 }
 
+                                val phone = loan.personContact.ifBlank { loan.counterpartyContact }
+                                if (phone.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(phone, fontSize = 12.sp, color = IndTextSecondary)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "Interest ${loan.interestRatePercent}% · Start ${formatLoanDay(loan.startDateTimestamp)}" +
+                                        (loan.dueDateTimestamp?.let { " · Return ${formatLoanDay(it)}" } ?: "") +
+                                        " · Proofs ${LoanAgreementService.proofCount(loan)}",
+                                    fontSize = 11.sp,
+                                    color = IndTextSecondary
+                                )
                                 if (loan.notes.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text("Note: ${loan.notes}", fontSize = 12.sp, color = IndTextSecondary)
+                                }
+                                if (loan.agreementText.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text("Mutual agreement on file", fontSize = 12.sp, color = IndGreenDark, fontWeight = FontWeight.SemiBold)
                                 }
 
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -248,6 +265,18 @@ fun LentBorrowedScreen(
                                     )
 
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        val awaiting = loan.status == LoanApprovalStatus.PENDING ||
+                                            loan.status == LoanApprovalStatus.PENDING_APPROVAL ||
+                                            loan.status == LoanApprovalStatus.PENDING_SETTLEMENT
+                                        if (awaiting) {
+                                            OutlinedButton(
+                                                onClick = { viewModel.notifyLoanCounterparty(loan.id) },
+                                                modifier = Modifier.height(32.dp),
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                            ) {
+                                                Text("Notify", fontSize = 11.sp)
+                                            }
+                                        }
                                         if (loan.status == LoanApprovalStatus.PENDING || loan.status == LoanApprovalStatus.PENDING_APPROVAL) {
                                             OutlinedButton(
                                                 onClick = { viewModel.rejectLoan(loan.id) },
@@ -264,7 +293,7 @@ fun LentBorrowedScreen(
                                             ) {
                                                 Text("Approve", fontSize = 11.sp, color = Color.White)
                                             }
-                                        } else if (loan.status == LoanApprovalStatus.APPROVED) {
+                                        } else if (loan.status == LoanApprovalStatus.APPROVED || loan.status == LoanApprovalStatus.MUTUAL_APPROVED) {
                                             Button(
                                                 onClick = { viewModel.settleLoan(loan.id) },
                                                 modifier = Modifier.height(32.dp),
@@ -285,73 +314,23 @@ fun LentBorrowedScreen(
     }
 
     if (showAddLoanDialog) {
-        AlertDialog(
-            onDismissRequest = { showAddLoanDialog = false },
-            title = { Text("Add Loan Record", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text("Counterparty Name") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = amountStr,
-                        onValueChange = { amountStr = it },
-                        label = { Text("Amount ($currencySymbol)") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = notesInput,
-                        onValueChange = { notesInput = it },
-                        label = { Text("Notes / Purpose") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilterChip(
-                            selected = type == "LENT",
-                            onClick = { type = "LENT" },
-                            label = { Text("Lent (Given)") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = type == "BORROWED",
-                            onClick = { type = "BORROWED" },
-                            label = { Text("Borrowed (Taken)") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val amt = amountStr.toDoubleOrNull() ?: 0.0
-                        if (name.isNotBlank() && amt > 0.0) {
-                            viewModel.addLoan(name, amt, type, notesInput)
-                            showAddLoanDialog = false
-                            name = ""
-                            amountStr = ""
-                            notesInput = ""
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = IndBlue)
-                ) {
-                    Text("Save Record")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddLoanDialog = false }) {
-                    Text("Cancel")
-                }
+        LoanRecordWizard(
+            currencySymbol = currencySymbol,
+            onDismiss = { showAddLoanDialog = false },
+            onSaveAndSend = { type, person, phone, amount, start, interest, returnDate, notes, proofs ->
+                viewModel.submitLoanForApproval(
+                    personName = person,
+                    phone = phone,
+                    amount = amount,
+                    type = type,
+                    notes = notes,
+                    interestPercent = interest,
+                    startDate = start,
+                    returnDate = returnDate,
+                    proofPaths = proofs,
+                    sendNow = true
+                )
+                showAddLoanDialog = false
             }
         )
     }
@@ -405,4 +384,18 @@ fun LentBorrowedScreen(
 
 private fun LoanTransaction.totalAssetAmount(): Double {
     return if (this.totalAmount > 0.0) this.totalAmount else 0.0
+}
+
+private fun formatLoanDay(millis: Long): String {
+    return SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(millis))
+}
+
+private fun loanStatusLabel(status: LoanApprovalStatus): String {
+    return when (status) {
+        LoanApprovalStatus.PENDING, LoanApprovalStatus.PENDING_APPROVAL -> "Pending approval"
+        LoanApprovalStatus.PENDING_SETTLEMENT -> "Change pending"
+        LoanApprovalStatus.MUTUAL_APPROVED, LoanApprovalStatus.APPROVED -> "Mutual agreement"
+        LoanApprovalStatus.SETTLED -> "Settled"
+        LoanApprovalStatus.REJECTED -> "Rejected"
+    }
 }

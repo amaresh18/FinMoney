@@ -193,7 +193,11 @@ data class LoanTransaction(
     val dueDateTimestamp: Long? = null,
     val dueDate: Long? = null,
     val notes: String = "",
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    /** Local copies of image/PDF proofs, one path per line. */
+    val proofPaths: String = "",
+    /** Frozen text of the mutual agreement after both sides accept. */
+    val agreementText: String = ""
 )
 
 @Entity(tableName = "app_notifications")

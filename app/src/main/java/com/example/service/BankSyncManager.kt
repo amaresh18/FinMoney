@@ -45,6 +45,9 @@ object BankSyncManager {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val processedTxSignatures = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+    private val dedupLock = Any()
+    private data class PaymentBurst(val type: String, val amount: Double, val accountLast4: String, val at: Long)
+    private val recentPaymentBursts = ArrayDeque<PaymentBurst>()
 
     private val _lastDetectedTransaction = MutableStateFlow<ParsedBankTransaction?>(null)
     val lastDetectedTransaction: StateFlow<ParsedBankTransaction?> = _lastDetectedTransaction.asStateFlow()
@@ -225,11 +228,30 @@ object BankSyncManager {
             referenceNumber = parsed.referenceNumber
         )
 
-        // Fast in-memory cache check
-        if (processedTxSignatures.contains(fingerprint)) {
-            android.util.Log.d("BankSyncManager", "Duplicate transaction detected in memory fingerprint cache: $fingerprint")
-            return parsed
+        synchronized(dedupLock) {
+            val now = parsed.timestamp
+            val duplicateBurst = recentPaymentBursts.any { burst ->
+                burst.type == parsed.type.name &&
+                    kotlin.math.abs(burst.amount - parsed.amount) < 0.01 &&
+                    kotlin.math.abs(now - burst.at) <= BankTransactionDeduplicator.SAME_PAYMENT_BURST_MS &&
+                    (burst.accountLast4.isBlank() || parsed.accountNumberLast4.isBlank() ||
+                        burst.accountLast4.equals(parsed.accountNumberLast4, ignoreCase = true))
+            }
+            if (duplicateBurst) {
+                android.util.Log.i("BankSyncManager", "Duplicate payment burst suppressed for ₹${parsed.amount}")
+                return parsed
+            }
+            if (processedTxSignatures.contains(fingerprint)) {
+                android.util.Log.d("BankSyncManager", "Duplicate transaction detected in memory fingerprint cache: $fingerprint")
+                return parsed
+            }
+            recentPaymentBursts.addLast(
+                PaymentBurst(parsed.type.name, parsed.amount, parsed.accountNumberLast4, now)
+            )
+            while (recentPaymentBursts.size > 80) recentPaymentBursts.removeFirst()
         }
+
+        // Fast in-memory cache check already applied inside the lock above.
 
         // Query database for recent transactions to run deep market-proven deduplication check
         val existingTxs = try {

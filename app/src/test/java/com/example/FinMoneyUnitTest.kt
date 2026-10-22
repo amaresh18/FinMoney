@@ -120,6 +120,41 @@ class FinMoneyUnitTest {
     }
 
     @Test
+    fun testMerchantNotCarrierTitleWhenSimLabelIsAirtel() {
+        val parsed = com.example.data.bank.BankTransactionParser.parse(
+            text = "Dear Customer, INR 450.00 debited from A/C **1234 to SWIGGY on 09-OCT-26. Avl Bal: INR 35,420.50.",
+            senderOrTitle = "Airtel"
+        )
+        assertNotNull(parsed)
+        assertEquals("Swiggy", parsed!!.merchantOrParty)
+    }
+
+    @Test
+    fun testAirtelRechargeAndBillStillIdentified() {
+        val recharge = com.example.data.bank.BankTransactionParser.parse(
+            text = "INR 299.00 debited from A/C **1234 to AIRTEL for mobile recharge. Avl Bal: INR 12,000.00.",
+            senderOrTitle = "AD-HDFCBK"
+        )
+        assertNotNull(recharge)
+        assertEquals("Airtel", recharge!!.merchantOrParty)
+        assertEquals(com.example.data.model.DebitCategory.RECHARGE.name, recharge.category)
+
+        val bill = com.example.data.bank.BankTransactionParser.parse(
+            text = "Rs.799.00 paid to Bharti Airtel towards postpaid bill. Ref 998877.",
+            senderOrTitle = "VK-SBIINB"
+        )
+        assertNotNull(bill)
+        assertEquals("Airtel", bill!!.merchantOrParty)
+
+        val simTitleRecharge = com.example.data.bank.BankTransactionParser.parse(
+            text = "INR 199.00 debited from A/C **4321. Prepaid recharge successful. Validity extended. Avl Bal INR 8,200.00.",
+            senderOrTitle = "Airtel"
+        )
+        assertNotNull(simTitleRecharge)
+        assertEquals("Airtel", simTitleRecharge!!.merchantOrParty)
+    }
+
+    @Test
     fun testAutomaticCategoryKeywordMapping() {
         val parser = com.example.service.TransactionParser
 

@@ -43,6 +43,8 @@ data class EnrichedMerchant(
  */
 object MerchantEnrichmentEngine {
 
+    private val TELECOM_BRAND_NAMES = setOf("Airtel", "Jio", "Vi")
+
     private data class BrandDefinition(
         val cleanName: String,
         val subtitle: String,
@@ -670,20 +672,68 @@ object MerchantEnrichmentEngine {
     )
 
     /**
-     * Enriches a raw merchant text / VPA handle into a clean brand representation.
+     * True when the notification title is the mobile carrier label (SIM), not the payer/payee.
+     * Common on dual-SIM devices when bank SMS is grouped under "Airtel" / "Jio" / "Vi".
      */
-    fun enrich(
-        rawMerchant: String,
-        rawText: String = "",
-        senderOrTitle: String = ""
-    ): EnrichedMerchant {
-        val searchCorpus = "$rawMerchant $senderOrTitle $rawText".lowercase()
-        val cleanedInput = cleanRawMerchantString(rawMerchant)
+    fun isCarrierNotificationTitle(title: String): Boolean {
+        val t = title.trim().lowercase()
+        if (t.isBlank()) return false
+        val carrierTokens = listOf(
+            "airtel", "jio", "vi", "vodafone", "idea", "bsnl", "mtnl", "aircel",
+            "reliance jio", "vodafone idea"
+        )
+        if (carrierTokens.any { t == it || t.startsWith("$it ") || t.endsWith(" $it") || t.contains("message from $it") }) {
+            return true
+        }
+        return t.matches(Regex("""^(ad|vm|vk|jd|bp|ax)-?(airtel|jiop|jio|vod|idea|bsnl)"""))
+    }
 
-        // 1. Exact or Alias Brand Matching
+    /** Telecom brands only when the message is clearly a recharge / mobile bill payment. */
+    fun isTelecomRechargeOrBillContext(text: String): Boolean {
+        val l = text.lowercase()
+        val hints = listOf(
+            "recharge", "recharged", "topup", "top-up", "top up",
+            "postpaid", "post paid", "prepaid", "pre paid",
+            "mobile bill", "phone bill", "dth", "talktime", "talk time",
+            "bill payment", "bill paid", "pay bill", "utility bill",
+            "plan renewed", "plan renewal", "validity", "data pack", "data plan",
+            "fiber bill", "broadband bill", "wifi bill", "xstream",
+            "airtel black", "airtel thanks", "jio recharge", "myjio"
+        )
+        return hints.any { l.contains(it) }
+    }
+
+    /**
+     * Maps a SIM/carrier notification title to a telecom brand when the body is a real recharge or bill.
+     */
+    fun telecomBrandFromCarrierTitle(title: String): String? {
+        val t = title.trim().lowercase()
+        return when {
+            t.contains("airtel") -> "Airtel"
+            t.contains("jio") -> "Jio"
+            t == "vi" || t.contains("vodafone") || t.contains("idea") -> "Vi"
+            else -> null
+        }
+    }
+
+    /** Payee/body explicitly names a telecom operator (not just the SIM notification title). */
+    fun telecomBrandFromPayee(payee: String): String? {
+        val p = payee.trim().lowercase()
+        if (p.isBlank()) return null
+        return when {
+            p.contains("airtel") || p.contains("bharti") -> "Airtel"
+            p.contains("jio") -> "Jio"
+            p.contains("vodafone") || p == "vi" || p.contains("idea") -> "Vi"
+            else -> null
+        }
+    }
+
+    private fun matchBrandInCorpus(corpus: String, allowTelecom: Boolean): EnrichedMerchant? {
+        if (corpus.isBlank()) return null
         for (brand in BRAND_REGISTRY) {
+            if (!allowTelecom && TELECOM_BRAND_NAMES.contains(brand.cleanName)) continue
             for (alias in brand.aliases) {
-                if (searchCorpus.contains(alias) || cleanedInput.contains(alias, ignoreCase = true)) {
+                if (corpus.contains(alias)) {
                     return EnrichedMerchant(
                         cleanName = brand.cleanName,
                         subtitle = brand.subtitle,
@@ -696,8 +746,39 @@ object MerchantEnrichmentEngine {
                 }
             }
         }
+        return null
+    }
 
-        // 2. Fallback heuristic cleaning if no brand matched
+    /**
+     * Enriches a raw merchant text / VPA handle into a clean brand representation.
+     */
+    fun enrich(
+        rawMerchant: String,
+        rawText: String = "",
+        senderOrTitle: String = ""
+    ): EnrichedMerchant {
+        val payeeIsTelecom = telecomBrandFromPayee(rawMerchant) != null
+        val allowTelecom = isTelecomRechargeOrBillContext(rawText) || payeeIsTelecom
+        // Keep an explicit payee like "Airtel" / "Bharti Airtel". Strip only SIM notification titles.
+        val safeMerchant = when {
+            payeeIsTelecom -> rawMerchant
+            isCarrierNotificationTitle(rawMerchant) -> ""
+            else -> rawMerchant
+        }
+        val safeTitle = if (isCarrierNotificationTitle(senderOrTitle)) "" else senderOrTitle
+
+        // 1. Prefer brands found in transaction body (not carrier notification title)
+        val bodyCorpus = "$safeMerchant $rawText".lowercase()
+        matchBrandInCorpus(bodyCorpus, allowTelecom)?.let { return it }
+
+        // 2. Sender/title only when not a carrier label
+        if (safeTitle.isNotBlank()) {
+            matchBrandInCorpus(safeTitle.lowercase(), allowTelecom && isTelecomRechargeOrBillContext(safeTitle))?.let { return it }
+        }
+
+        val cleanedInput = cleanRawMerchantString(safeMerchant.ifBlank { rawMerchant })
+
+        // 3. Fallback heuristic cleaning if no brand matched
         val fallbackTitle = formatFallbackMerchantName(cleanedInput)
         val defaultMonogram = fallbackTitle.take(2).uppercase().ifBlank { "TX" }
 

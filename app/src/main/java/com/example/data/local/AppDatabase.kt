@@ -24,7 +24,7 @@ import kotlinx.coroutines.launch
         BankTransactionRecord::class,
         RawNotificationRecord::class
     ],
-    version = 16,
+    version = 17,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -35,6 +35,13 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE loan_transactions ADD COLUMN proofPaths TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE loan_transactions ADD COLUMN agreementText TEXT NOT NULL DEFAULT ''")
+            }
+        }
 
         val MIGRATION_15_16 = object : Migration(15, 16) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -84,7 +91,7 @@ abstract class AppDatabase : RoomDatabase() {
                         AppDatabase::class.java,
                         "finmoney_database"
                     )
-                        .addMigrations(MIGRATION_15_16)
+                        .addMigrations(MIGRATION_15_16, MIGRATION_16_17)
                         .fallbackToDestructiveMigration()
                         .fallbackToDestructiveMigrationOnDowngrade()
                         .build()
