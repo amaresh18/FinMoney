@@ -19,8 +19,8 @@ android {
     applicationId = "com.aistudio.finmoney.vqpz"
     minSdk = 24
     targetSdk = 36
-    versionCode = 207
-    versionName = "207.0"
+    versionCode = 208
+    versionName = "208.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

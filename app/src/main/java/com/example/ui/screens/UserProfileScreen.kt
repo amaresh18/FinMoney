@@ -48,13 +48,33 @@ fun UserProfileScreen(
 
     val context = LocalContext.current
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
-    val firebaseUser = Firebase.auth.currentUser
+    val firebaseUser = remember {
+        try {
+            com.google.firebase.Firebase.auth.currentUser
+        } catch (_: Throwable) {
+            null
+        }
+    }
     val currencySymbol by viewModel.currencySymbol.collectAsStateWithLifecycle()
     val isFinancialSafetyVisible by viewModel.isFinancialSafetyVisible.collectAsStateWithLifecycle()
 
-    var nameInput by remember(userProfile) { mutableStateOf(userProfile?.name ?: "You") }
-    var emailInput by remember(userProfile) { mutableStateOf(userProfile?.email ?: (firebaseUser?.email ?: "")) }
-    var phoneInput by remember(userProfile) { mutableStateOf(userProfile?.phoneNumber ?: "") }
+    val effectiveName = remember(userProfile, firebaseUser) {
+        userProfile?.name?.takeIf { it != "Signed Out" && it.isNotBlank() }
+            ?: firebaseUser?.displayName?.takeIf { it.isNotBlank() }
+            ?: "Amaresh"
+    }
+    val effectiveEmail = remember(userProfile, firebaseUser) {
+        userProfile?.email?.takeIf { it.isNotBlank() }
+            ?: firebaseUser?.email?.takeIf { it.isNotBlank() }
+            ?: "g.amaresh18@gmail.com"
+    }
+    val effectivePhone = remember(userProfile) {
+        userProfile?.phoneNumber?.takeIf { it.isNotBlank() } ?: ""
+    }
+
+    var nameInput by remember(effectiveName) { mutableStateOf(effectiveName) }
+    var emailInput by remember(effectiveEmail) { mutableStateOf(effectiveEmail) }
+    var phoneInput by remember(effectivePhone) { mutableStateOf(effectivePhone) }
 
     var isEditProfileMode by remember { mutableStateOf(false) }
 
@@ -158,7 +178,7 @@ fun UserProfileScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = (userProfile?.name?.take(1) ?: firebaseUser?.displayName?.take(1) ?: "A").uppercase(),
+                                    text = (effectiveName.trim().take(1).takeIf { it.isNotBlank() } ?: "A").uppercase(),
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = IndGreenDark
@@ -167,19 +187,19 @@ fun UserProfileScreen(
 
                             Column {
                                 Text(
-                                    text = userProfile?.name?.ifBlank { firebaseUser?.displayName ?: "User" } ?: "User",
+                                    text = effectiveName,
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = IndNavyHeader
                                 )
                                 Text(
-                                    text = userProfile?.email?.ifBlank { firebaseUser?.email ?: "Not provided" } ?: "Not provided",
+                                    text = effectiveEmail,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = IndTextSecondary
                                 )
-                                if (!userProfile?.phoneNumber.isNullOrBlank()) {
+                                if (effectivePhone.isNotBlank()) {
                                     Text(
-                                        text = "+91 ${userProfile?.phoneNumber}",
+                                        text = "+91 $effectivePhone",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = IndTextMuted
                                     )

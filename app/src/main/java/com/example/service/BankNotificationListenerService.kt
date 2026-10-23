@@ -141,30 +141,7 @@ class BankNotificationListenerService : NotificationListenerService() {
         BankSyncManager.updateListenerConnectionStatus(true)
         scanActiveNotifications(applicationContext)
 
-        // Start foreground service to prevent Doze mode / background termination by OS task killers
-        try {
-            val channelId = "finmoney_listener_channel"
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                val channel = android.app.NotificationChannel(
-                    channelId,
-                    "FinMoney Smart Sync Active",
-                    android.app.NotificationManager.IMPORTANCE_LOW
-                ).apply {
-                    description = "Maintains active bank notification listening in background"
-                }
-                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-                notificationManager.createNotificationChannel(channel)
-            }
-            val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
-                .setContentTitle("FinMoney Smart Sync Active")
-                .setContentText("Listening for bank & UPI transaction alerts")
-                .setSmallIcon(android.R.drawable.ic_menu_compass)
-                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
-                .build()
-            startForeground(1001, notification)
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not start foreground service: ${e.message}")
-        }
+        // NotificationListenerService is bound and kept alive by Android OS NotificationManagerService.
     }
 
     override fun onListenerDisconnected() {

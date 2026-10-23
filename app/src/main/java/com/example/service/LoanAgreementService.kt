@@ -25,22 +25,50 @@ object LoanAgreementService {
         var name = ""
         var phone = ""
         val resolver = context.contentResolver
-        resolver.query(contactUri, arrayOf(
-            ContactsContract.Contacts._ID,
-            ContactsContract.Contacts.DISPLAY_NAME
-        ), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                name = cursor.getString(1).orEmpty()
-                val id = cursor.getString(0)
-                resolver.query(
-                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                    arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
-                    "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
-                    arrayOf(id),
-                    null
-                )?.use { phones ->
-                    if (phones.moveToFirst()) phone = phones.getString(0).orEmpty()
+        try {
+            // Read directly from Phone data URI (zero-permission Intent.ACTION_PICK on CommonDataKinds.Phone.CONTENT_URI)
+            resolver.query(
+                contactUri,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                ),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    name = cursor.getString(0).orEmpty()
+                    phone = cursor.getString(1).orEmpty()
                 }
+            }
+        } catch (_: Exception) {
+            // Ignore permission or cursor failure
+        }
+
+        // Secondary fallback if contact-only URI was provided
+        if (name.isBlank() && phone.isBlank()) {
+            try {
+                resolver.query(contactUri, arrayOf(
+                    ContactsContract.Contacts._ID,
+                    ContactsContract.Contacts.DISPLAY_NAME
+                ), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        name = cursor.getString(1).orEmpty()
+                        val id = cursor.getString(0)
+                        resolver.query(
+                            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                            arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
+                            "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
+                            arrayOf(id),
+                            null
+                        )?.use { phones ->
+                            if (phones.moveToFirst()) phone = phones.getString(0).orEmpty()
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                // Ignore permission or cursor failure
             }
         }
         return ContactDetails(name.trim(), phone.trim())

@@ -207,7 +207,7 @@ fun MainScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = (userProfile?.name?.trim()?.take(1) ?: "A").uppercase(),
+                                text = (userProfile?.name?.takeIf { it != "Signed Out" && it.isNotBlank() }?.trim()?.take(1) ?: "A").uppercase(),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = if (selectedTab == 4 && !showKuberaAi) Color.White else IndGreenDark

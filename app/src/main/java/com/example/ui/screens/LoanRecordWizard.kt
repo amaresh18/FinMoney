@@ -1,7 +1,5 @@
 package com.example.ui.screens
 
-import android.Manifest
-import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -36,7 +34,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import com.example.service.LoanAgreementService
 import com.example.ui.theme.IndBlue
 import java.text.SimpleDateFormat
@@ -74,24 +71,30 @@ fun LoanRecordWizard(
     var pickingStart by remember { mutableStateOf(false) }
     var pickingReturn by remember { mutableStateOf(false) }
 
-    val contactPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickContact()) { uri ->
-        if (uri != null) {
-            val contact = LoanAgreementService.readContact(context, uri)
-            if (contact.name.isNotBlank()) name = contact.name
-            if (contact.phone.isNotBlank()) phone = contact.phone
+    val contactPicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val uri = result.data?.data
+            if (uri != null) {
+                val contact = LoanAgreementService.readContact(context, uri)
+                if (contact.name.isNotBlank()) name = contact.name
+                if (contact.phone.isNotBlank()) phone = contact.phone
+            }
         }
-    }
-    val contactPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) contactPicker.launch(null)
     }
     val proofPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) proofUris = proofUris + uris
     }
 
     fun openContacts() {
-        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) ==
-            PackageManager.PERMISSION_GRANTED
-        if (granted) contactPicker.launch(null) else contactPermission.launch(Manifest.permission.READ_CONTACTS)
+        try {
+            val intent = android.content.Intent(
+                android.content.Intent.ACTION_PICK,
+                android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+            )
+            contactPicker.launch(intent)
+        } catch (_: Exception) {
+            // Graceful fallback if no contact app installed
+        }
     }
 
     AlertDialog(

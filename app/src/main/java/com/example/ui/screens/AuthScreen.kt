@@ -248,8 +248,8 @@ private fun AuthScreenContent(
         )
         val clientId = if (webClientIdRes != 0) context.getString(webClientIdRes) else ""
         if (clientId.isBlank()) {
-            val fallbackEmail = Firebase.auth.currentUser?.email ?: "g.amaresh18@gmail.com"
-            val fallbackName = Firebase.auth.currentUser?.displayName ?: "Amaresh"
+            val fallbackEmail = try { Firebase.auth.currentUser?.email } catch (_: Throwable) { null } ?: "g.amaresh18@gmail.com"
+            val fallbackName = try { Firebase.auth.currentUser?.displayName } catch (_: Throwable) { null } ?: "Amaresh"
             nameInput = fallbackName
             emailInput = fallbackEmail
             isGoogleSignedIn = true
@@ -308,8 +308,8 @@ private fun AuthScreenContent(
                 Log.w("AuthScreen", "Google Sign-In cancelled: ${e.message}")
             } catch (e: Exception) {
                 Log.e("AuthScreen", "Google Sign-In exception: ${e.message}", e)
-                val fallbackEmail = Firebase.auth.currentUser?.email ?: "g.amaresh18@gmail.com"
-                val fallbackName = Firebase.auth.currentUser?.displayName ?: "Amaresh"
+                val fallbackEmail = try { Firebase.auth.currentUser?.email } catch (_: Throwable) { null } ?: "g.amaresh18@gmail.com"
+                val fallbackName = try { Firebase.auth.currentUser?.displayName } catch (_: Throwable) { null } ?: "Amaresh"
                 nameInput = fallbackName
                 emailInput = fallbackEmail
                 isGoogleSignedIn = true

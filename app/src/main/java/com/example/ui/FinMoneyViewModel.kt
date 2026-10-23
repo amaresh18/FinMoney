@@ -953,7 +953,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             try {
                 dao.insertOrUpdateUserProfile(
                     UserProfile(
-                        id = 1,
+                        id = 1L,
                         name = "Signed Out",
                         email = "",
                         phoneNumber = "",
@@ -963,10 +963,10 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 )
                 try {
                     com.google.firebase.Firebase.auth.signOut()
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     Log.w("FinMoneyViewModel", "Firebase sign out notice: ${e.message}")
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e("FinMoneyViewModel", "Error signing out", e)
             }
         }
