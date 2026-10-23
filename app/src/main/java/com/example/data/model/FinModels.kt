@@ -86,23 +86,28 @@ data class IncomeSource(
     val receivedDateTimestamp: Long? = null
 )
 
-@Entity(tableName = "user_profile")
+@Entity(tableName = "user_profiles")
 data class UserProfile(
-    @PrimaryKey val id: Long = 1L,
+    @PrimaryKey val userId: String = "user_default",
+    val id: Long = 1L,
     val name: String = "You",
     val email: String = "",
     val phoneNumber: String = "",
     val profilePicUri: String? = null,
     val isOtpVerified: Boolean = true,
     val isEmailVerified: Boolean = true,
+    val isCurrentActive: Boolean = true,
     val monthlyBudget: Double = 0.0,
     val currencySymbol: String = "₹",
-    val profileImageUri: String? = null
+    val profileImageUri: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val lastLoginAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "salary_records")
 data class SalaryRecord(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val userId: String = "",
     val month: Int = 10,
     val year: Int = 2026,
     val monthYear: String = "2026-10",
@@ -117,6 +122,7 @@ data class SalaryRecord(
 @Entity(tableName = "debit_items")
 data class DebitItem(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val userId: String = "",
     val cloudId: String = "",
     val month: Int = 10,
     val year: Int = 2026,
@@ -148,6 +154,7 @@ fun DebitItem.isActualCreditCardTransaction(): Boolean =
 @Entity(tableName = "custom_categories")
 data class CustomCategory(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val userId: String = "",
     val name: String = "",
     val iconName: String = "Category",
     val isDefault: Boolean = false,
@@ -177,6 +184,7 @@ typealias ApprovalStatus = LoanApprovalStatus
 @Entity(tableName = "loan_transactions")
 data class LoanTransaction(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val userId: String = "",
     val cloudId: String = "",
     val personName: String = "",
     val personContact: String = "",
@@ -206,6 +214,7 @@ data class LoanTransaction(
 @Entity(tableName = "app_notifications")
 data class AppNotification(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val userId: String = "",
     val cloudId: String = "",
     val title: String = "",
     val message: String = "",
@@ -220,6 +229,7 @@ data class AppNotification(
 @Entity(tableName = "monthly_reconciliations")
 data class MonthlyReconciliation(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val userId: String = "",
     val cloudId: String = "",
     val month: Int = 10,
     val year: Int = 2026,
@@ -233,6 +243,7 @@ data class MonthlyReconciliation(
 @Entity(tableName = "bank_transactions")
 data class BankTransactionRecord(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val userId: String = "",
     val cloudId: String = "",
     val bankName: String = "",
     val accountNumberLast4: String = "",
@@ -264,6 +275,7 @@ fun BankTransactionRecord.isCreditCardRecord(): Boolean =
 @Entity(tableName = "raw_notifications")
 data class RawNotificationRecord(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val userId: String = "",
     val packageName: String = "",
     val title: String = "",
     val body: String = "",

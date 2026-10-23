@@ -61,12 +61,12 @@ fun UserProfileScreen(
     val effectiveName = remember(userProfile, firebaseUser) {
         userProfile?.name?.takeIf { it != "Signed Out" && it.isNotBlank() }
             ?: firebaseUser?.displayName?.takeIf { it.isNotBlank() }
-            ?: "Amaresh"
+            ?: "FinMoney Member"
     }
     val effectiveEmail = remember(userProfile, firebaseUser) {
         userProfile?.email?.takeIf { it.isNotBlank() }
             ?: firebaseUser?.email?.takeIf { it.isNotBlank() }
-            ?: "g.amaresh18@gmail.com"
+            ?: ""
     }
     val effectivePhone = remember(userProfile) {
         userProfile?.phoneNumber?.takeIf { it.isNotBlank() } ?: ""

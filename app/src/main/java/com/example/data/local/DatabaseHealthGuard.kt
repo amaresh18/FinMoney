@@ -18,24 +18,23 @@ object DatabaseHealthGuard {
             val userProfile = dao.getUserProfileDirect()
 
             if (userProfile == null || forceReset) {
-                Log.i(TAG, "Initializing clean user database (no simulated/mock data).")
-
                 if (forceReset) {
                     dao.clearAllDebits()
                     dao.clearAllLoans()
                 }
 
-                // Clean User Profile
-                dao.insertOrUpdateUserProfile(
-                    UserProfile(
-                        id = 1,
-                        name = userProfile?.name?.ifBlank { "Amaresh" } ?: "Amaresh",
-                        email = userProfile?.email?.ifBlank { "g.amaresh18@gmail.com" } ?: "g.amaresh18@gmail.com",
-                        phoneNumber = userProfile?.phoneNumber ?: "",
-                        monthlyBudget = userProfile?.monthlyBudget ?: 0.0,
-                        currencySymbol = "₹"
+                if (userProfile == null) {
+                    dao.insertOrUpdateUserProfile(
+                        UserProfile(
+                            userId = "user_default",
+                            name = "FinMoney Member",
+                            email = "",
+                            phoneNumber = "",
+                            monthlyBudget = 0.0,
+                            currencySymbol = "₹"
+                        )
                     )
-                )
+                }
 
                 Log.i(TAG, "Database verified clean with 0 simulated transactions.")
             }

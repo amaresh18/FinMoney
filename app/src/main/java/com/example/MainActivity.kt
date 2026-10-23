@@ -5,19 +5,24 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.service.BankSyncManager
 import com.example.ui.FinMoneyViewModel
 import com.example.ui.MainScreen
+import com.example.ui.components.BrandLogo
 import com.example.ui.theme.FinMoneyTheme
 import com.example.ui.theme.IndBackground
-import com.google.firebase.Firebase
-import com.google.firebase.auth.auth
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
 
@@ -36,26 +41,53 @@ class MainActivity : ComponentActivity() {
                     color = IndBackground
                 ) {
                     val viewModel: FinMoneyViewModel = viewModel()
-                    val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
+                    val userProfileState by viewModel.userProfile.collectAsStateWithLifecycle()
                     val shouldOpenPending by openPendingState
 
-                    val isLoggedIn = userProfile != null &&
-                        userProfile?.name != "Signed Out" &&
-                        !userProfile?.name.isNullOrBlank() &&
-                        (userProfile?.isOtpVerified == true || userProfile?.isEmailVerified == true)
+                    var isInitializing by remember { mutableStateOf(true) }
 
-                    if (isLoggedIn) {
-                        MainScreen(
-                            initialOpenPending = shouldOpenPending,
-                            onPendingConsumed = { openPendingState.value = false }
-                        )
+                    LaunchedEffect(userProfileState) {
+                        // Brief settlement delay ensures smooth surface transition on app boot
+                        delay(50)
+                        isInitializing = false
+                    }
+
+                    if (isInitializing) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(IndBackground),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            BrandLogo(
+                                name = "FinMoney",
+                                badgeSize = 64.dp
+                            )
+                        }
                     } else {
-                        com.example.ui.screens.AuthScreen(
-                            viewModel = viewModel,
-                            onContinue = {
-                                viewModel.markUserLoggedIn()
+                        val isLoggedIn = userProfileState != null &&
+                            userProfileState?.name != "Signed Out" &&
+                            !userProfileState?.name.isNullOrBlank() &&
+                            (userProfileState?.isOtpVerified == true || userProfileState?.isEmailVerified == true)
+
+                        Crossfade(
+                            targetState = isLoggedIn,
+                            label = "AppAuthTransition"
+                        ) { loggedIn ->
+                            if (loggedIn) {
+                                MainScreen(
+                                    initialOpenPending = shouldOpenPending,
+                                    onPendingConsumed = { openPendingState.value = false }
+                                )
+                            } else {
+                                com.example.ui.screens.AuthScreen(
+                                    viewModel = viewModel,
+                                    onContinue = {
+                                        viewModel.markUserLoggedIn()
+                                    }
+                                )
                             }
-                        )
+                        }
                     }
                 }
             }

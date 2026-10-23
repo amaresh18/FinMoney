@@ -1374,7 +1374,7 @@ fun DashboardScreen(
     if (showManageIncomeDialog || showAddCreditDialog) {
         ManageIncomeCreditDialog(
             incomeSources = summary.incomeSources,
-            baseSalary = currentSalaryRecord?.baseSalary ?: (summary.incomeSources.find { it.category == "SALARY" || it.id == "1" }?.amount ?: 85000.0),
+            baseSalary = currentSalaryRecord?.baseSalary ?: (summary.incomeSources.find { it.category == "SALARY" || it.id == "1" }?.amount ?: 0.0),
             onDismiss = {
                 showManageIncomeDialog = false
                 showAddCreditDialog = false

@@ -7,45 +7,63 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface FinMoneyDao {
 
-    // --- User Profile ---
-    @Query("SELECT * FROM user_profile WHERE id = 1 LIMIT 1")
+    // --- User Profiles ---
+    @Query("SELECT * FROM user_profiles WHERE isCurrentActive = 1 LIMIT 1")
     fun getUserProfile(): Flow<UserProfile?>
 
-    @Query("SELECT * FROM user_profile WHERE id = 1 LIMIT 1")
+    @Query("SELECT * FROM user_profiles WHERE isCurrentActive = 1 LIMIT 1")
     suspend fun getUserProfileDirect(): UserProfile?
+
+    @Query("SELECT * FROM user_profiles WHERE phoneNumber = :phone AND phoneNumber != '' LIMIT 1")
+    suspend fun getUserByPhone(phone: String): UserProfile?
+
+    @Query("SELECT * FROM user_profiles WHERE LOWER(email) = LOWER(:email) AND email != '' LIMIT 1")
+    suspend fun getUserByEmail(email: String): UserProfile?
+
+    @Query("SELECT * FROM user_profiles WHERE userId = :userId LIMIT 1")
+    suspend fun getUserById(userId: String): UserProfile?
+
+    @Query("SELECT * FROM user_profiles ORDER BY lastLoginAt DESC")
+    suspend fun getAllUserProfiles(): List<UserProfile>
+
+    @Query("UPDATE user_profiles SET isCurrentActive = 0")
+    suspend fun deactivateAllUserProfiles()
+
+    @Query("UPDATE user_profiles SET isCurrentActive = 1, lastLoginAt = :now WHERE userId = :userId")
+    suspend fun activateUserProfile(userId: String, now: Long = System.currentTimeMillis())
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateUserProfile(profile: UserProfile): Long
 
     // --- Salary Records ---
-    @Query("SELECT * FROM salary_records WHERE month = :month AND year = :year ORDER BY id DESC LIMIT 1")
-    fun getSalaryRecord(month: Int, year: Int): Flow<SalaryRecord?>
+    @Query("SELECT * FROM salary_records WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year ORDER BY id DESC LIMIT 1")
+    fun getSalaryRecord(month: Int, year: Int, userId: String = ""): Flow<SalaryRecord?>
 
-    @Query("SELECT * FROM salary_records WHERE month = :month AND year = :year ORDER BY id DESC LIMIT 1")
-    suspend fun getSalaryRecordDirect(month: Int, year: Int): SalaryRecord?
+    @Query("SELECT * FROM salary_records WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year ORDER BY id DESC LIMIT 1")
+    suspend fun getSalaryRecordDirect(month: Int, year: Int, userId: String = ""): SalaryRecord?
 
-    @Query("SELECT * FROM salary_records ORDER BY year DESC, month DESC")
-    fun getAllSalaryRecords(): Flow<List<SalaryRecord>>
+    @Query("SELECT * FROM salary_records WHERE (userId = :userId OR :userId = '') ORDER BY year DESC, month DESC")
+    fun getAllSalaryRecords(userId: String = ""): Flow<List<SalaryRecord>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateSalary(record: SalaryRecord): Long
 
-    @Query("DELETE FROM salary_records WHERE month = :month AND year = :year")
-    suspend fun deleteSalary(month: Int, year: Int)
+    @Query("DELETE FROM salary_records WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year")
+    suspend fun deleteSalary(month: Int, year: Int, userId: String = "")
 
-    @Query("DELETE FROM salary_records")
-    suspend fun clearAllSalaryRecords()
+    @Query("DELETE FROM salary_records WHERE userId = :userId OR :userId = ''")
+    suspend fun clearAllSalaryRecords(userId: String = "")
 
-    @Query("SELECT COUNT(*) FROM debit_items")
-    suspend fun getDebitsCount(): Int
+    @Query("SELECT COUNT(*) FROM debit_items WHERE userId = :userId OR :userId = ''")
+    suspend fun getDebitsCount(userId: String = ""): Int
 
 
     // --- Debit Items ---
-    @Query("SELECT * FROM debit_items WHERE month = :month AND year = :year ORDER BY dueDateDay DESC, createdAt DESC, id DESC")
-    fun getDebitsForMonth(month: Int, year: Int): Flow<List<DebitItem>>
+    @Query("SELECT * FROM debit_items WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year ORDER BY dueDateDay DESC, createdAt DESC, id DESC")
+    fun getDebitsForMonth(month: Int, year: Int, userId: String = ""): Flow<List<DebitItem>>
 
-    @Query("SELECT * FROM debit_items WHERE month = :month AND year = :year ORDER BY dueDateDay DESC, createdAt DESC, id DESC")
-    suspend fun getDebitsForMonthDirect(month: Int, year: Int): List<DebitItem>
+    @Query("SELECT * FROM debit_items WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year ORDER BY dueDateDay DESC, createdAt DESC, id DESC")
+    suspend fun getDebitsForMonthDirect(month: Int, year: Int, userId: String = ""): List<DebitItem>
 
     @Query("SELECT * FROM debit_items WHERE id = :id LIMIT 1")
     suspend fun getDebitById(id: Long): DebitItem?
@@ -53,8 +71,8 @@ interface FinMoneyDao {
     @Query("SELECT * FROM debit_items WHERE cloudId = :cloudId AND cloudId != '' LIMIT 1")
     suspend fun getDebitByCloudId(cloudId: String): DebitItem?
 
-    @Query("SELECT * FROM debit_items ORDER BY year DESC, month DESC")
-    fun getAllDebits(): Flow<List<DebitItem>>
+    @Query("SELECT * FROM debit_items WHERE (userId = :userId OR :userId = '') ORDER BY year DESC, month DESC")
+    fun getAllDebits(userId: String = ""): Flow<List<DebitItem>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDebit(item: DebitItem): Long
@@ -62,11 +80,11 @@ interface FinMoneyDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDebits(items: List<DebitItem>)
 
-    @Query("SELECT * FROM debit_items WHERE isRecurring = 1")
-    suspend fun getRecurringDebitsDirect(): List<DebitItem>
+    @Query("SELECT * FROM debit_items WHERE (userId = :userId OR :userId = '') AND isRecurring = 1")
+    suspend fun getRecurringDebitsDirect(userId: String = ""): List<DebitItem>
 
-    @Query("SELECT * FROM debit_items WHERE isRecurring = 1")
-    fun getRecurringDebitsFlow(): Flow<List<DebitItem>>
+    @Query("SELECT * FROM debit_items WHERE (userId = :userId OR :userId = '') AND isRecurring = 1")
+    fun getRecurringDebitsFlow(userId: String = ""): Flow<List<DebitItem>>
 
     @Update
     suspend fun updateDebit(item: DebitItem)
@@ -77,18 +95,18 @@ interface FinMoneyDao {
     @Query("DELETE FROM debit_items WHERE id = :id")
     suspend fun deleteDebitById(id: Long)
 
-    @Query("DELETE FROM debit_items")
-    suspend fun clearAllDebits()
+    @Query("DELETE FROM debit_items WHERE userId = :userId OR :userId = ''")
+    suspend fun clearAllDebits(userId: String = "")
 
     @Query("UPDATE debit_items SET isPaid = :isPaid WHERE id = :id")
     suspend fun setDebitPaidStatus(id: Long, isPaid: Boolean)
 
     // --- Custom Categories ---
-    @Query("SELECT * FROM custom_categories ORDER BY id ASC")
-    fun getAllCustomCategories(): Flow<List<CustomCategory>>
+    @Query("SELECT * FROM custom_categories WHERE userId = :userId OR :userId = '' ORDER BY id ASC")
+    fun getAllCustomCategories(userId: String = ""): Flow<List<CustomCategory>>
 
-    @Query("SELECT * FROM custom_categories WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
-    suspend fun getCustomCategoryByName(name: String): CustomCategory?
+    @Query("SELECT * FROM custom_categories WHERE (userId = :userId OR :userId = '') AND LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
+    suspend fun getCustomCategoryByName(name: String, userId: String = ""): CustomCategory?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCustomCategory(category: CustomCategory): Long
@@ -97,14 +115,14 @@ interface FinMoneyDao {
     suspend fun deleteCustomCategory(category: CustomCategory)
 
     // --- Loan Transactions (Lent & Borrowed) ---
-    @Query("SELECT * FROM loan_transactions ORDER BY createdAt DESC")
-    fun getAllLoans(): Flow<List<LoanTransaction>>
+    @Query("SELECT * FROM loan_transactions WHERE userId = :userId OR :userId = '' ORDER BY createdAt DESC")
+    fun getAllLoans(userId: String = ""): Flow<List<LoanTransaction>>
 
-    @Query("SELECT * FROM loan_transactions WHERE type = :type ORDER BY createdAt DESC")
-    fun getLoansByType(type: String): Flow<List<LoanTransaction>>
+    @Query("SELECT * FROM loan_transactions WHERE (userId = :userId OR :userId = '') AND type = :type ORDER BY createdAt DESC")
+    fun getLoansByType(type: String, userId: String = ""): Flow<List<LoanTransaction>>
 
-    @Query("SELECT * FROM loan_transactions WHERE status = 'PENDING_APPROVAL' ORDER BY createdAt DESC")
-    fun getPendingApprovalLoans(): Flow<List<LoanTransaction>>
+    @Query("SELECT * FROM loan_transactions WHERE (userId = :userId OR :userId = '') AND status = 'PENDING_APPROVAL' ORDER BY createdAt DESC")
+    fun getPendingApprovalLoans(userId: String = ""): Flow<List<LoanTransaction>>
 
     @Query("SELECT * FROM loan_transactions WHERE id = :id LIMIT 1")
     suspend fun getLoanById(id: Long): LoanTransaction?
@@ -121,8 +139,8 @@ interface FinMoneyDao {
     @Query("DELETE FROM loan_transactions WHERE id = :id")
     suspend fun deleteLoanById(id: Long)
 
-    @Query("DELETE FROM loan_transactions")
-    suspend fun clearAllLoans()
+    @Query("DELETE FROM loan_transactions WHERE userId = :userId OR :userId = ''")
+    suspend fun clearAllLoans(userId: String = "")
 
 
     @Query("DELETE FROM loan_transactions WHERE cloudId = :cloudId AND cloudId != ''")
@@ -135,11 +153,11 @@ interface FinMoneyDao {
     suspend fun settleLoan(id: Long, updatedAt: Long = System.currentTimeMillis())
 
     // --- App Notifications ---
-    @Query("SELECT * FROM app_notifications ORDER BY timestamp DESC")
-    fun getAllNotifications(): Flow<List<AppNotification>>
+    @Query("SELECT * FROM app_notifications WHERE userId = :userId OR :userId = '' ORDER BY timestamp DESC")
+    fun getAllNotifications(userId: String = ""): Flow<List<AppNotification>>
 
-    @Query("SELECT COUNT(*) FROM app_notifications WHERE isRead = 0")
-    fun getUnreadNotificationCount(): Flow<Int>
+    @Query("SELECT COUNT(*) FROM app_notifications WHERE (userId = :userId OR :userId = '') AND isRead = 0")
+    fun getUnreadNotificationCount(userId: String = ""): Flow<Int>
 
     @Query("SELECT * FROM app_notifications WHERE cloudId = :cloudId AND cloudId != '' LIMIT 1")
     suspend fun getNotificationByCloudId(cloudId: String): AppNotification?
@@ -169,11 +187,11 @@ interface FinMoneyDao {
     suspend fun deleteNotification(id: Long)
 
     // --- Monthly Reconciliations ---
-    @Query("SELECT * FROM monthly_reconciliations WHERE month = :month AND year = :year ORDER BY id DESC LIMIT 1")
-    fun getReconciliationForMonth(month: Int, year: Int): Flow<MonthlyReconciliation?>
+    @Query("SELECT * FROM monthly_reconciliations WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year ORDER BY id DESC LIMIT 1")
+    fun getReconciliationForMonth(month: Int, year: Int, userId: String = ""): Flow<MonthlyReconciliation?>
 
-    @Query("SELECT * FROM monthly_reconciliations WHERE month = :month AND year = :year ORDER BY id DESC LIMIT 1")
-    suspend fun getReconciliationForMonthDirect(month: Int, year: Int): MonthlyReconciliation?
+    @Query("SELECT * FROM monthly_reconciliations WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year ORDER BY id DESC LIMIT 1")
+    suspend fun getReconciliationForMonthDirect(month: Int, year: Int, userId: String = ""): MonthlyReconciliation?
 
     @Query("SELECT * FROM monthly_reconciliations WHERE cloudId = :cloudId AND cloudId != '' LIMIT 1")
     suspend fun getReconciliationByCloudId(cloudId: String): MonthlyReconciliation?
@@ -182,26 +200,26 @@ interface FinMoneyDao {
     suspend fun insertOrUpdateReconciliation(reconciliation: MonthlyReconciliation): Long
 
     // --- Bank Transactions & Auto-Sync ---
-    @Query("SELECT * FROM bank_transactions ORDER BY timestamp DESC")
-    fun getAllBankTransactions(): Flow<List<BankTransactionRecord>>
+    @Query("SELECT * FROM bank_transactions WHERE userId = :userId OR :userId = '' ORDER BY timestamp DESC")
+    fun getAllBankTransactions(userId: String = ""): Flow<List<BankTransactionRecord>>
 
-    @Query("SELECT * FROM bank_transactions ORDER BY timestamp DESC LIMIT :limit")
-    fun getRecentBankTransactions(limit: Int = 50): Flow<List<BankTransactionRecord>>
+    @Query("SELECT * FROM bank_transactions WHERE userId = :userId OR :userId = '' ORDER BY timestamp DESC LIMIT :limit")
+    fun getRecentBankTransactions(limit: Int = 50, userId: String = ""): Flow<List<BankTransactionRecord>>
 
-    @Query("SELECT * FROM bank_transactions ORDER BY timestamp DESC LIMIT :limit")
-    suspend fun getRecentBankTransactionsDirect(limit: Int = 50): List<BankTransactionRecord>
+    @Query("SELECT * FROM bank_transactions WHERE userId = :userId OR :userId = '' ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentBankTransactionsDirect(limit: Int = 50, userId: String = ""): List<BankTransactionRecord>
 
-    @Query("SELECT * FROM bank_transactions WHERE type = 'DEBIT' ORDER BY timestamp DESC")
-    fun getDebitBankTransactions(): Flow<List<BankTransactionRecord>>
+    @Query("SELECT * FROM bank_transactions WHERE (userId = :userId OR :userId = '') AND type = 'DEBIT' ORDER BY timestamp DESC")
+    fun getDebitBankTransactions(userId: String = ""): Flow<List<BankTransactionRecord>>
 
-    @Query("SELECT * FROM bank_transactions WHERE type = 'CREDIT' ORDER BY timestamp DESC")
-    fun getCreditBankTransactions(): Flow<List<BankTransactionRecord>>
+    @Query("SELECT * FROM bank_transactions WHERE (userId = :userId OR :userId = '') AND type = 'CREDIT' ORDER BY timestamp DESC")
+    fun getCreditBankTransactions(userId: String = ""): Flow<List<BankTransactionRecord>>
 
-    @Query("SELECT * FROM bank_transactions WHERE isConfirmed = 0 ORDER BY timestamp DESC")
-    fun getPendingBankTransactions(): Flow<List<BankTransactionRecord>>
+    @Query("SELECT * FROM bank_transactions WHERE (userId = :userId OR :userId = '') AND isConfirmed = 0 ORDER BY timestamp DESC")
+    fun getPendingBankTransactions(userId: String = ""): Flow<List<BankTransactionRecord>>
 
-    @Query("SELECT * FROM bank_transactions WHERE isConfirmed = 0 ORDER BY timestamp DESC")
-    suspend fun getPendingBankTransactionsDirect(): List<BankTransactionRecord>
+    @Query("SELECT * FROM bank_transactions WHERE (userId = :userId OR :userId = '') AND isConfirmed = 0 ORDER BY timestamp DESC")
+    suspend fun getPendingBankTransactionsDirect(userId: String = ""): List<BankTransactionRecord>
 
     @Query("SELECT * FROM bank_transactions WHERE id = :id LIMIT 1")
     suspend fun getBankTransactionById(id: Long): BankTransactionRecord?
@@ -224,11 +242,14 @@ interface FinMoneyDao {
     @Query("SELECT * FROM bank_transactions WHERE status = 'REJECTED'")
     suspend fun getRejectedBankTransactions(): List<BankTransactionRecord>
 
+    @Query("SELECT * FROM bank_transactions WHERE userId = :userId OR :userId = ''")
+    suspend fun getBankTransactionsDirect(userId: String = ""): List<BankTransactionRecord>
+
     @Query("DELETE FROM bank_transactions WHERE id = :id")
     suspend fun deleteBankTransaction(id: Long)
 
-    @Query("DELETE FROM bank_transactions")
-    suspend fun clearAllBankTransactions()
+    @Query("DELETE FROM bank_transactions WHERE userId = :userId OR :userId = ''")
+    suspend fun clearAllBankTransactions(userId: String = "")
 
     // --- Raw Notifications Log ---
     @Query("SELECT * FROM raw_notifications ORDER BY timestamp DESC")

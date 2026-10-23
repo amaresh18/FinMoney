@@ -555,7 +555,7 @@ fun ManageIncomeCreditDialog(
     var amountStr by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(IncomeCategory.FREELANCE.name) }
     var dateString by remember { mutableStateOf(defaultDateStr) }
-    var salaryStr by remember { mutableStateOf(if (baseSalary > 0) baseSalary.toInt().toString() else "85000") }
+    var salaryStr by remember { mutableStateOf(if (baseSalary > 0) baseSalary.toInt().toString() else "") }
 
     val creditCategories = remember { IncomeCategory.entries.map { it.name } }
 
@@ -854,7 +854,7 @@ fun ManageIncomeCreditDialog(
                     value = salaryStr,
                     onValueChange = { salaryStr = it },
                     label = "Primary Base Salary (₹)",
-                    placeholder = "85000",
+                    placeholder = "e.g. 50000",
                     leadingIcon = Icons.Filled.AccountBalance,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     testTag = "base_salary_input"

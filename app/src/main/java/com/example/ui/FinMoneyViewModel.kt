@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.DateFormatSymbols
 
 class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
@@ -83,33 +84,49 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         _selectedSpecificDay.value = day
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val currentSalaryRecord: StateFlow<SalaryRecord?> = combine(_currentMonth, _currentYear) { m, y -> m to y }
-        .flatMapLatest { (m, y) -> dao.getSalaryRecord(m, y) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    fun getActiveUserId(): String {
+        val fbUid = try { com.google.firebase.Firebase.auth.currentUser?.uid } catch (_: Throwable) { null }
+        val profileUid = userProfile.value?.userId?.takeIf { it.isNotBlank() }
+        return fbUid ?: profileUid ?: "user_default"
+    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val currentDebits: StateFlow<List<DebitItem>> = combine(_currentMonth, _currentYear) { m, y -> m to y }
-        .flatMapLatest { (m, y) -> dao.getDebitsForMonth(m, y) }
+    val currentSalaryRecord: StateFlow<SalaryRecord?> = combine(_currentMonth, _currentYear, userProfile) { m, y, u ->
+        Triple(m, y, u?.userId ?: getActiveUserId())
+    }.flatMapLatest { (m, y, uid) -> dao.getSalaryRecord(m, y, uid) }
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val currentDebits: StateFlow<List<DebitItem>> = combine(_currentMonth, _currentYear, userProfile) { m, y, u ->
+        Triple(m, y, u?.userId ?: getActiveUserId())
+    }.flatMapLatest { (m, y, uid) -> dao.getDebitsForMonth(m, y, uid) }
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val currentReconciliation: StateFlow<MonthlyReconciliation?> = combine(_currentMonth, _currentYear, userProfile) { m, y, u ->
+        Triple(m, y, u?.userId ?: getActiveUserId())
+    }.flatMapLatest { (m, y, uid) -> dao.getReconciliationForMonth(m, y, uid) }
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val allLoans: StateFlow<List<LoanTransaction>> = userProfile
+        .flatMapLatest { u -> dao.getAllLoans(u?.userId ?: getActiveUserId()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val currentReconciliation: StateFlow<MonthlyReconciliation?> = combine(_currentMonth, _currentYear) { m, y -> m to y }
-        .flatMapLatest { (m, y) -> dao.getReconciliationForMonth(m, y) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val allDebits: StateFlow<List<DebitItem>> = userProfile
+        .flatMapLatest { u -> dao.getAllDebits(u?.userId ?: getActiveUserId()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val allLoans: StateFlow<List<LoanTransaction>> = repository.allLoans.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
-    )
-    val allDebits: StateFlow<List<DebitItem>> = repository.allDebits.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
-    )
-    val notifications: StateFlow<List<AppNotification>> = repository.allNotifications.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
-    )
-    val bankTransactions: StateFlow<List<BankTransactionRecord>> = repository.allBankTransactions.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
-    )
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val notifications: StateFlow<List<AppNotification>> = userProfile
+        .flatMapLatest { u -> dao.getAllNotifications(u?.userId ?: getActiveUserId()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val bankTransactions: StateFlow<List<BankTransactionRecord>> = userProfile
+        .flatMapLatest { u -> dao.getAllBankTransactions(u?.userId ?: getActiveUserId()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val monthlySummary: StateFlow<MonthlyFinanceSummary?> = combine(
         currentSalaryRecord,
@@ -120,13 +137,17 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     ) { salary, debits, recon, m, y ->
         val incomeSources = if (salary != null && salary.incomeSourcesJson.isNotBlank() && salary.incomeSourcesJson != "[]") {
             FinMoneyRepository.parseIncomeSources(salary.incomeSourcesJson)
+        } else if (salary != null && (salary.baseSalary > 0 || salary.additionalIncome > 0)) {
+            val list = mutableListOf<IncomeSource>()
+            if (salary.baseSalary > 0) {
+                list.add(IncomeSource("1", "Primary Salary", "Employer Transfer", salary.baseSalary, "SALARY", true))
+            }
+            if (salary.additionalIncome > 0) {
+                list.add(IncomeSource("2", "Secondary / Extra", "Additional Earnings", salary.additionalIncome, "FREELANCE", true))
+            }
+            list
         } else {
-            val base = salary?.baseSalary ?: 85000.0
-            val extra = salary?.additionalIncome ?: 15000.0
-            listOf(
-                IncomeSource("1", "Primary Salary", "Employer Transfer", base, "SALARY", true),
-                IncomeSource("2", "Freelance / Extra", "Secondary Earnings", extra, "FREELANCE", true)
-            )
+            emptyList()
         }
 
         val totalIncome = incomeSources.sumOf { it.amount }
@@ -235,10 +256,12 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         isReconciled: Boolean = true
     ) {
         viewModelScope.launch {
+            val activeUid = getActiveUserId()
             val json = FinMoneyRepository.encodeBankBalances(bankBalances)
             val adj = manualAdjustment.toString().toDoubleOrNull() ?: 0.0
             dao.insertOrUpdateReconciliation(
                 MonthlyReconciliation(
+                    userId = activeUid,
                     month = month,
                     year = year,
                     bankBalancesJson = json,
@@ -266,13 +289,15 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun updateBankTransaction(tx: BankTransactionRecord) {
         viewModelScope.launch {
-            dao.insertBankTransaction(tx)
+            val activeUid = getActiveUserId()
+            val updatedTx = if (tx.userId.isBlank()) tx.copy(userId = activeUid) else tx
+            dao.insertBankTransaction(updatedTx)
         }
     }
 
     fun clearAllBankTransactions() {
         viewModelScope.launch {
-            dao.clearAllBankTransactions()
+            dao.clearAllBankTransactions(getActiveUserId())
         }
     }
 
@@ -292,7 +317,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun approveAllPendingTransactions() {
         viewModelScope.launch {
-            val pending = dao.getPendingBankTransactionsDirect()
+            val pending = dao.getPendingBankTransactionsDirect(getActiveUserId())
             val audit = EntryIntegrityEngine.auditPendingTransactions(pending)
             pending.filter { tx -> audit[tx.id]?.isDuplicate != true }.forEach { tx ->
                 BankSyncManager.approveTransactionAndCreateExpense(
@@ -403,8 +428,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
     private fun generateOfflineKuberaAdvice(query: String, summary: MonthlyFinanceSummary?): String {
         val q = query.lowercase()
-        val inc = summary?.totalIncome ?: 100000.0
-        val deb = summary?.totalDebits ?: 65000.0
+        val inc = summary?.totalIncome ?: 0.0
+        val deb = summary?.totalDebits ?: 0.0
         val net = inc - deb
 
         return when {
@@ -447,8 +472,10 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         isRecurring: Boolean = false
     ) {
         viewModelScope.launch {
+            val activeUid = getActiveUserId()
             repository.insertDebit(
                 DebitItem(
+                    userId = activeUid,
                     title = title,
                     amount = amount,
                     category = category.uppercase(),
@@ -474,8 +501,9 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     fun prefillRecurringDebitsForMonth(targetMonth: Int = _currentMonth.value, targetYear: Int = _currentYear.value) {
         viewModelScope.launch {
             try {
-                val recurringDebits = dao.getRecurringDebitsDirect()
-                val currentMonthItems = dao.getDebitsForMonthDirect(targetMonth, targetYear)
+                val activeUid = getActiveUserId()
+                val recurringDebits = dao.getRecurringDebitsDirect(activeUid)
+                val currentMonthItems = dao.getDebitsForMonthDirect(targetMonth, targetYear, activeUid)
                 val newDebitsToInsert = mutableListOf<DebitItem>()
 
                 for (template in recurringDebits) {
@@ -490,6 +518,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                             newDebitsToInsert.add(
                                 template.copy(
                                     id = 0L,
+                                    userId = activeUid,
                                     cloudId = "",
                                     month = targetMonth,
                                     year = targetYear,
@@ -507,7 +536,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
                 if (newDebitsToInsert.isNotEmpty()) {
                     dao.insertDebits(newDebitsToInsert)
-                    Log.i("FinMoneyViewModel", "Prefilled ${newDebitsToInsert.size} recurring debits into $targetMonth/$targetYear")
+                    Log.i("FinMoneyViewModel", "Prefilled ${newDebitsToInsert.size} recurring debits into $targetMonth/$targetYear for $activeUid")
                 }
 
             } catch (e: Exception) {
@@ -524,15 +553,18 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun insertDebit(item: DebitItem) {
-
         viewModelScope.launch {
-            repository.insertDebit(item)
+            val activeUid = getActiveUserId()
+            val itemWithUid = if (item.userId.isBlank()) item.copy(userId = activeUid) else item
+            repository.insertDebit(itemWithUid)
         }
     }
 
     fun insertDebits(items: List<DebitItem>) {
         viewModelScope.launch {
-            repository.insertDebits(items)
+            val activeUid = getActiveUserId()
+            val itemsWithUid = items.map { if (it.userId.isBlank()) it.copy(userId = activeUid) else it }
+            repository.insertDebits(itemsWithUid)
         }
     }
 
@@ -569,13 +601,17 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     private fun getOrCreateIncomeSources(existing: SalaryRecord?): MutableList<IncomeSource> {
         return if (existing != null && !existing.incomeSourcesJson.isNullOrBlank() && existing.incomeSourcesJson != "[]") {
             FinMoneyRepository.parseIncomeSources(existing.incomeSourcesJson).toMutableList()
+        } else if (existing != null && (existing.baseSalary > 0 || existing.additionalIncome > 0)) {
+            val list = mutableListOf<IncomeSource>()
+            if (existing.baseSalary > 0) {
+                list.add(IncomeSource("1", "Primary Salary", "Employer Transfer", existing.baseSalary, "SALARY", true))
+            }
+            if (existing.additionalIncome > 0) {
+                list.add(IncomeSource("2", "Secondary / Extra", "Additional Earnings", existing.additionalIncome, "FREELANCE", true))
+            }
+            list
         } else {
-            val base = existing?.baseSalary?.takeIf { it > 0 } ?: 85000.0
-            val extra = existing?.additionalIncome?.takeIf { it > 0 } ?: 15000.0
-            mutableListOf(
-                IncomeSource("1", "Primary Salary", "Employer Transfer", base, "SALARY", true),
-                IncomeSource("2", "Freelance / Extra", "Secondary Earnings", extra, "FREELANCE", true)
-            )
+            mutableListOf()
         }
     }
 
@@ -586,13 +622,15 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         year: Int,
         overrideBaseSalary: Double? = null
     ) {
+        val activeUid = getActiveUserId()
         val newJson = FinMoneyRepository.encodeIncomeSources(sources)
         val salaryItem = sources.find { it.category == "SALARY" || it.id == "1" }
-        val newBase = overrideBaseSalary ?: salaryItem?.amount ?: (existing?.baseSalary ?: 85000.0)
+        val newBase = overrideBaseSalary ?: salaryItem?.amount ?: (existing?.baseSalary ?: 0.0)
         val newAdditional = sources.filter { it.category != "SALARY" && it.id != "1" }.sumOf { it.amount }
 
         val updatedRecord = if (existing != null) {
             existing.copy(
+                userId = activeUid,
                 baseSalary = newBase,
                 salaryAmount = newBase,
                 additionalIncome = newAdditional,
@@ -601,6 +639,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             )
         } else {
             SalaryRecord(
+                userId = activeUid,
                 month = month,
                 year = year,
                 monthYear = "$year-${if (month < 10) "0$month" else month}",
@@ -635,7 +674,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         val y = year ?: _currentYear.value
 
         viewModelScope.launch {
-            val existing = dao.getSalaryRecordDirect(m, y)
+            val activeUid = getActiveUserId()
+            val existing = dao.getSalaryRecordDirect(m, y, activeUid)
             val currentSources = getOrCreateIncomeSources(existing)
             val newSource = IncomeSource(
                 id = java.util.UUID.randomUUID().toString(),
@@ -673,7 +713,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         val y = year ?: _currentYear.value
 
         viewModelScope.launch {
-            val existing = dao.getSalaryRecordDirect(m, y)
+            val activeUid = getActiveUserId()
+            val existing = dao.getSalaryRecordDirect(m, y, activeUid)
             val currentSources = getOrCreateIncomeSources(existing)
             val index = currentSources.indexOfFirst { it.id == id }
             if (index != -1) {
@@ -699,7 +740,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         val y = year ?: _currentYear.value
 
         viewModelScope.launch {
-            val existing = dao.getSalaryRecordDirect(m, y)
+            val activeUid = getActiveUserId()
+            val existing = dao.getSalaryRecordDirect(m, y, activeUid)
             val currentSources = getOrCreateIncomeSources(existing)
             val index = currentSources.indexOfFirst { it.id == id }
             if (index != -1) {
@@ -721,7 +763,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         val y = year ?: _currentYear.value
 
         viewModelScope.launch {
-            val existing = dao.getSalaryRecordDirect(m, y)
+            val activeUid = getActiveUserId()
+            val existing = dao.getSalaryRecordDirect(m, y, activeUid)
             val currentSources = getOrCreateIncomeSources(existing)
             val removed = currentSources.removeAll { it.id == id }
             if (removed) {
@@ -739,7 +782,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         val y = year ?: _currentYear.value
 
         viewModelScope.launch {
-            val existing = dao.getSalaryRecordDirect(m, y)
+            val activeUid = getActiveUserId()
+            val existing = dao.getSalaryRecordDirect(m, y, activeUid)
             val currentSources = getOrCreateIncomeSources(existing)
 
             val salaryIndex = currentSources.indexOfFirst { it.id == "1" || it.category == "SALARY" }
@@ -806,7 +850,9 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             if (type.equals("BORROWED", true) || type.equals("TAKEN", true)) LoanType.BORROWED else LoanType.LENT
         }
         viewModelScope.launch {
+            val activeUid = getActiveUserId()
             val draft = LoanTransaction(
+                userId = activeUid,
                 personName = personName,
                 counterpartyName = personName,
                 personContact = phone,
@@ -923,44 +969,97 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     ) {
         viewModelScope.launch {
             val existing = dao.getUserProfileDirect()
+            val activeUid = existing?.userId ?: "user_${phoneNumber.filter { it.isDigit() }.takeLast(10).ifBlank { "default" }}"
             val cleanExistingName = if (existing?.name != null && existing.name != "Signed Out" && existing.name.isNotBlank()) existing.name else "FinMoney Member"
             val finalName = if (name.isNotBlank() && name != "Signed Out") name else cleanExistingName
             val finalEmail = if (email.isNotBlank()) email else (existing?.email ?: "")
-            val finalPhone = if (phoneNumber.isNotBlank()) phoneNumber else (existing?.phoneNumber ?: "")
+            val finalPhone = if (phoneNumber.isNotBlank()) phoneNumber.filter { it.isDigit() }.takeLast(10) else (existing?.phoneNumber ?: "")
             val finalBudget = monthlyBudget ?: (existing?.monthlyBudget ?: 0.0)
             val finalCurrency = currencySymbol ?: (existing?.currencySymbol ?: "₹")
             val finalPic = profilePicUri ?: existing?.profilePicUri ?: existing?.profileImageUri
 
             dao.insertOrUpdateUserProfile(
                 UserProfile(
-                    id = 1,
+                    userId = activeUid,
                     name = finalName,
                     email = finalEmail,
                     phoneNumber = finalPhone,
                     profilePicUri = finalPic,
                     isOtpVerified = isOtpVerified,
                     isEmailVerified = isEmailVerified,
+                    isCurrentActive = true,
                     monthlyBudget = finalBudget,
                     currencySymbol = finalCurrency,
-                    profileImageUri = finalPic
+                    profileImageUri = finalPic,
+                    lastLoginAt = System.currentTimeMillis()
                 )
             )
+        }
+    }
+
+    suspend fun registerOrAuthenticateUser(
+        name: String,
+        email: String,
+        phone: String,
+        profilePicUri: String? = null
+    ): Result<UserProfile> = withContext(Dispatchers.IO) {
+        try {
+            val cleanPhone = phone.filter { it.isDigit() }.takeLast(10)
+            val cleanEmail = email.trim().lowercase()
+
+            val existingByPhone = if (cleanPhone.isNotBlank()) dao.getUserByPhone(cleanPhone) else null
+            val existingByEmail = if (cleanEmail.isNotBlank()) dao.getUserByEmail(cleanEmail) else null
+
+            // Prevent duplicate registration collisions across users
+            if (existingByPhone != null && cleanEmail.isNotBlank() && existingByPhone.email.isNotBlank() && existingByPhone.email.lowercase() != cleanEmail) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("Mobile number +91 $cleanPhone is already registered to ${existingByPhone.email}. Please sign in with your registered email or use a different phone number.")
+                )
+            }
+
+            if (existingByEmail != null && cleanPhone.isNotBlank() && existingByEmail.phoneNumber.isNotBlank() && existingByEmail.phoneNumber != cleanPhone) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("Email address $cleanEmail is already registered to phone +91 ${existingByEmail.phoneNumber}. Please sign in with your registered phone number.")
+                )
+            }
+
+            // Determine unique userId
+            val fbUser = try { com.google.firebase.Firebase.auth.currentUser } catch (_: Throwable) { null }
+            val userId = fbUser?.uid?.ifBlank { null }
+                ?: existingByPhone?.userId?.ifBlank { null }
+                ?: existingByEmail?.userId?.ifBlank { null }
+                ?: "user_${cleanPhone.ifBlank { cleanEmail.replace("@", "_").replace(".", "_") }}"
+
+            dao.deactivateAllUserProfiles()
+
+            val finalName = name.ifBlank { fbUser?.displayName ?: existingByPhone?.name ?: existingByEmail?.name ?: "FinMoney Member" }
+            val finalEmail = cleanEmail.ifBlank { fbUser?.email ?: existingByPhone?.email ?: "" }
+            val finalPhone = cleanPhone.ifBlank { fbUser?.phoneNumber ?: existingByPhone?.phoneNumber ?: "" }
+            val pic = profilePicUri ?: fbUser?.photoUrl?.toString() ?: existingByPhone?.profilePicUri ?: existingByEmail?.profilePicUri
+
+            val newProfile = UserProfile(
+                userId = userId,
+                name = finalName,
+                email = finalEmail,
+                phoneNumber = finalPhone,
+                profilePicUri = pic,
+                isOtpVerified = true,
+                isEmailVerified = true,
+                isCurrentActive = true,
+                lastLoginAt = System.currentTimeMillis()
+            )
+
+            dao.insertOrUpdateUserProfile(newProfile)
+            Result.success(newProfile)
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
     fun signOut() {
         viewModelScope.launch {
             try {
-                dao.insertOrUpdateUserProfile(
-                    UserProfile(
-                        id = 1L,
-                        name = "Signed Out",
-                        email = "",
-                        phoneNumber = "",
-                        isOtpVerified = false,
-                        isEmailVerified = false
-                    )
-                )
+                dao.deactivateAllUserProfiles()
                 try {
                     com.google.firebase.Firebase.auth.signOut()
                 } catch (e: Throwable) {
@@ -974,39 +1073,100 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun markUserLoggedIn(name: String? = null, email: String? = null, phone: String? = null) {
         viewModelScope.launch {
-            val existing = dao.getUserProfileDirect()
-            val finalName = if (!name.isNullOrBlank() && name != "Signed Out") name
-                else if (existing?.name != null && existing.name != "Signed Out" && existing.name.isNotBlank()) existing.name
-                else "Amaresh"
-            val finalEmail = if (!email.isNullOrBlank()) email
-                else existing?.email?.takeIf { it.isNotBlank() }
-                ?: "g.amaresh18@gmail.com"
-            val finalPhone = if (!phone.isNullOrBlank()) phone
-                else existing?.phoneNumber?.takeIf { it.isNotBlank() }
-                ?: "9876543210"
+            val cleanPhone = phone?.filter { it.isDigit() }?.takeLast(10) ?: ""
+            val cleanEmail = email?.trim()?.lowercase() ?: ""
+            val cleanName = name?.takeIf { it != "Signed Out" && it.isNotBlank() } ?: "FinMoney Member"
 
-            dao.insertOrUpdateUserProfile(
-                UserProfile(
-                    id = 1,
-                    name = finalName,
-                    email = finalEmail,
-                    phoneNumber = finalPhone,
-                    isOtpVerified = true,
-                    isEmailVerified = true
-                )
+            if (cleanPhone.isBlank() && cleanEmail.isBlank()) return@launch
+
+            val result = registerOrAuthenticateUser(
+                name = cleanName,
+                email = cleanEmail,
+                phone = cleanPhone
             )
+            if (result.isFailure) {
+                Log.w("FinMoneyViewModel", "Login registration notice: ${result.exceptionOrNull()?.message}")
+            }
         }
     }
 
     fun restoreSampleLedger() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             DatabaseHealthGuard.verifyAndRepairDatabase(dao, forceReset = true)
         }
     }
 
+    private val authStateListener = com.google.firebase.auth.FirebaseAuth.AuthStateListener { firebaseAuth ->
+        val user = firebaseAuth.currentUser
+        viewModelScope.launch(Dispatchers.IO) {
+            if (user != null) {
+                val uid = user.uid
+                val fbDisplayName = user.displayName?.takeIf { it.isNotBlank() }
+                    ?: user.providerData.firstNotNullOfOrNull { it.displayName?.takeIf { name -> name.isNotBlank() } }
+                    ?: user.email?.substringBefore("@")?.takeIf { it.isNotBlank() }
+                    ?: "FinMoney Member"
+                val fbEmail = user.email?.takeIf { it.isNotBlank() }
+                    ?: user.providerData.firstNotNullOfOrNull { it.email?.takeIf { email -> email.isNotBlank() } }
+                    ?: ""
+                val rawPhone = user.phoneNumber?.takeIf { it.isNotBlank() }
+                    ?: user.providerData.firstNotNullOfOrNull { it.phoneNumber?.takeIf { phone -> phone.isNotBlank() } }
+                    ?: ""
+                val cleanPhone = rawPhone.filter { it.isDigit() }.takeLast(10)
+                val fbPhotoUri = user.photoUrl?.toString()
+                    ?: user.providerData.firstNotNullOfOrNull { it.photoUrl?.toString() }
+
+                val existing = dao.getUserProfileDirect()
+
+                // If authenticated as a different user or stale local cached profile exists, deactivate old profile
+                if (existing != null && existing.userId != uid) {
+                    Log.i("FinMoneyViewModel", "Switching user session to $uid. Deactivating stale local user profile (${existing.userId}).")
+                    dao.deactivateAllUserProfiles()
+                }
+
+                val finalPhone = if (cleanPhone.isNotBlank()) cleanPhone else (existing?.phoneNumber ?: "")
+                val finalEmail = if (fbEmail.isNotBlank()) fbEmail else (existing?.email ?: "")
+                val finalName = if (fbDisplayName.isNotBlank() && fbDisplayName != "Signed Out") fbDisplayName else (existing?.name ?: "FinMoney Member")
+
+                val updatedProfile = UserProfile(
+                    userId = uid,
+                    name = finalName,
+                    email = finalEmail,
+                    phoneNumber = finalPhone,
+                    profilePicUri = fbPhotoUri ?: existing?.profilePicUri ?: existing?.profileImageUri,
+                    profileImageUri = fbPhotoUri ?: existing?.profileImageUri ?: existing?.profilePicUri,
+                    isOtpVerified = finalPhone.isNotBlank() || (existing?.isOtpVerified == true),
+                    isEmailVerified = user.isEmailVerified || finalEmail.isNotBlank(),
+                    isCurrentActive = true,
+                    monthlyBudget = existing?.monthlyBudget ?: 0.0,
+                    currencySymbol = existing?.currencySymbol ?: "₹",
+                    lastLoginAt = System.currentTimeMillis()
+                )
+
+                dao.insertOrUpdateUserProfile(updatedProfile)
+                Log.i("FinMoneyViewModel", "FirebaseAuth session listener updated UserProfile: UID=$uid, Name=$finalName, Email=$finalEmail, Phone=$finalPhone")
+            } else {
+                Log.i("FinMoneyViewModel", "FirebaseAuth session listener: User signed out.")
+            }
+        }
+    }
+
     init {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             DatabaseHealthGuard.verifyAndRepairDatabase(dao, forceReset = false)
+        }
+        try {
+            com.google.firebase.Firebase.auth.addAuthStateListener(authStateListener)
+        } catch (e: Throwable) {
+            Log.w("FinMoneyViewModel", "Unable to register auth state listener: ${e.message}")
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        try {
+            com.google.firebase.Firebase.auth.removeAuthStateListener(authStateListener)
+        } catch (e: Throwable) {
+            Log.w("FinMoneyViewModel", "Error unregistering auth state listener: ${e.message}")
         }
     }
 
