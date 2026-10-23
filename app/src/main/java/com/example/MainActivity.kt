@@ -41,7 +41,8 @@ class MainActivity : ComponentActivity() {
 
                     val isLoggedIn = userProfile != null &&
                         userProfile?.name != "Signed Out" &&
-                        (userProfile?.isOtpVerified == true || userProfile?.isEmailVerified == true || !userProfile?.phoneNumber.isNullOrBlank() || !userProfile?.email.isNullOrBlank() || com.google.firebase.Firebase.auth.currentUser != null)
+                        !userProfile?.name.isNullOrBlank() &&
+                        (userProfile?.isOtpVerified == true || userProfile?.isEmailVerified == true)
 
                     if (isLoggedIn) {
                         MainScreen(
@@ -52,7 +53,7 @@ class MainActivity : ComponentActivity() {
                         com.example.ui.screens.AuthScreen(
                             viewModel = viewModel,
                             onContinue = {
-                                // Transition to MainScreen upon auth completion
+                                viewModel.markUserLoggedIn()
                             }
                         )
                     }

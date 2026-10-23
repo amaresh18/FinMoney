@@ -56,17 +56,16 @@ fun MainScreen(
 
     var showQuickMultiAddSheet by remember { mutableStateOf(false) }
     var showAnalytics by remember { mutableStateOf(false) }
-    var showUserProfile by remember { mutableStateOf(false) }
-    var showSignOutDialog by remember { mutableStateOf(false) }
+    var showKuberaAi by remember { mutableStateOf(false) }
 
     // Intercept back button on secondary views or tabs to navigate back safely
-    if (showUserProfile) {
-        BackHandler {
-            showUserProfile = false
-        }
-    } else if (showPendingTransactions) {
+    if (showPendingTransactions) {
         BackHandler {
             showPendingTransactions = false
+        }
+    } else if (showKuberaAi) {
+        BackHandler {
+            showKuberaAi = false
         }
     } else if (selectedTab != 0 || showAnalytics) {
         BackHandler {
@@ -128,6 +127,25 @@ fun MainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        // Kubera AI Quick Action
+                        IconButton(
+                            onClick = {
+                                showPendingTransactions = false
+                                showKuberaAi = true
+                            },
+                            modifier = Modifier
+                                .testTag("top_ai_button")
+                                .clip(CircleShape)
+                                .background(if (showKuberaAi) Color(0xFFFDE68A) else Color(0xFFFEF3C7))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.AutoAwesome,
+                                contentDescription = "Kubera AI Assistant",
+                                tint = Color(0xFFD97706),
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+
                         // Quick Add Multi-Debit FAB icon
                         IconButton(
                             onClick = { showQuickMultiAddSheet = true },
@@ -175,20 +193,24 @@ fun MainScreen(
                         // Profile Avatar
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
+                                .testTag("top_profile_button")
+                                .size(40.dp)
                                 .clip(CircleShape)
-                                .background(IndGreenLight)
-                                .border(1.dp, IndGreen, CircleShape)
+                                .background(if (selectedTab == 4 && !showKuberaAi) IndGreen else IndGreenLight)
+                                .border(1.5.dp, if (selectedTab == 4 && !showKuberaAi) IndGreenDark else IndGreen, CircleShape)
                                 .clickable {
-                                    showUserProfile = true
+                                    showPendingTransactions = false
+                                    showKuberaAi = false
+                                    showAnalytics = false
+                                    selectedTab = 4
                                 },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = (userProfile?.name?.take(1) ?: "Y").uppercase(),
-                                style = MaterialTheme.typography.titleSmall,
+                                text = (userProfile?.name?.trim()?.take(1) ?: "A").uppercase(),
+                                style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = IndGreenDark
+                                color = if (selectedTab == 4 && !showKuberaAi) Color.White else IndGreenDark
                             )
                         }
                     }
@@ -272,36 +294,27 @@ fun MainScreen(
                 NavigationBarItem(
                     icon = {
                         Icon(
-                            imageVector = if (selectedTab == 4) Icons.Filled.AutoAwesome else Icons.Outlined.AutoAwesome,
-                            contentDescription = "Kubera AI"
+                            imageVector = if (selectedTab == 4 && !showKuberaAi) Icons.Filled.Person else Icons.Outlined.Person,
+                            contentDescription = "Profile & Settings"
                         )
                     },
-                    label = { Text("Kubera AI", style = MaterialTheme.typography.labelSmall) },
-                    selected = selectedTab == 4,
-                    onClick = { selectedTab = 4 },
+                    label = { Text("Profile", style = MaterialTheme.typography.labelSmall) },
+                    selected = selectedTab == 4 && !showKuberaAi,
+                    onClick = {
+                        showPendingTransactions = false
+                        showKuberaAi = false
+                        showAnalytics = false
+                        selectedTab = 4
+                    },
                     colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color(0xFFD97706),
-                        selectedTextColor = Color(0xFFD97706),
-                        indicatorColor = Color(0xFFFEF3C7)
+                        selectedIconColor = IndBlue,
+                        selectedTextColor = IndBlue,
+                        indicatorColor = IndBlueLight
                     )
                 )
             }
         },
-        floatingActionButton = {
-            if (selectedTab == 0 || selectedTab == 1) {
-                ExtendedFloatingActionButton(
-                    onClick = { showQuickMultiAddSheet = true },
-                    containerColor = IndBlue,
-                    contentColor = Color.White,
-                    elevation = FloatingActionButtonDefaults.elevation(6.dp),
-                    modifier = Modifier.testTag("quick_add_fab")
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Add Entry")
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Add Entry", fontWeight = FontWeight.Bold)
-                }
-            }
-        }
+
     ) { padding ->
         Box(
             modifier = Modifier
@@ -309,16 +322,13 @@ fun MainScreen(
                 .padding(padding)
                 .background(IndBackground)
         ) {
-            if (showUserProfile) {
-                UserProfileScreen(
-                    viewModel = viewModel,
-                    onBack = { showUserProfile = false }
-                )
-            } else if (showPendingTransactions) {
+            if (showPendingTransactions) {
                 PendingTransactionsScreen(
                     viewModel = viewModel,
                     onBack = { showPendingTransactions = false }
                 )
+            } else if (showKuberaAi) {
+                KuberaAiScreen(viewModel = viewModel)
             } else {
                 Crossfade(
                     targetState = selectedTab,
@@ -352,7 +362,10 @@ fun MainScreen(
                         viewModel = viewModel,
                         onBack = { selectedTab = 0 }
                     )
-                    4 -> KuberaAiScreen(viewModel = viewModel)
+                    4 -> UserProfileScreen(
+                        viewModel = viewModel,
+                        onBack = { selectedTab = 0 }
+                    )
                 }
             }
         }
@@ -376,35 +389,4 @@ fun MainScreen(
         )
     }
 
-    if (showSignOutDialog) {
-        AlertDialog(
-            onDismissRequest = { showSignOutDialog = false },
-            title = { Text("Account Profile", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Name: ${userProfile?.name ?: "You"}")
-                    Text("Phone: ${userProfile?.phoneNumber.takeIf { !it.isNullOrBlank() } ?: "Not linked"}")
-                    Text("Email: ${userProfile?.email.takeIf { !it.isNullOrBlank() } ?: "Not linked"}")
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Do you want to sign out of FinMoney?", color = IndTextSecondary, fontSize = 12.sp)
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showSignOutDialog = false
-                        viewModel.signOut()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = IndRed)
-                ) {
-                    Text("Sign Out", color = Color.White)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSignOutDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
 }

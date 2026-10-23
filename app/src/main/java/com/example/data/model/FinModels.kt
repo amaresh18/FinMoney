@@ -142,6 +142,9 @@ data class DebitItem(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+fun DebitItem.isActualCreditCardTransaction(): Boolean =
+    isPaidViaCreditCard || category.equals("Credit Card", ignoreCase = true)
+
 @Entity(tableName = "custom_categories")
 data class CustomCategory(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
@@ -254,6 +257,9 @@ data class BankTransactionRecord(
     val fingerprint: String = "",
     val sbnKey: String = ""
 )
+
+fun BankTransactionRecord.isCreditCardRecord(): Boolean =
+    classification.equals("Credit Card", ignoreCase = true) || bankName.contains("Credit Card", ignoreCase = true)
 
 @Entity(tableName = "raw_notifications")
 data class RawNotificationRecord(

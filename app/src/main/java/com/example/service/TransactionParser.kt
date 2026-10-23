@@ -78,6 +78,7 @@ data class TransactionParseResult(
         }
 
         val accTypeStr = when {
+            lowerRaw.contains("debit card") || lowerRaw.contains("debitcard") -> "ACCOUNT"
             classification == "Credit Card" || lowerRaw.contains("credit card") -> "CREDIT_CARD"
             lowerRaw.contains("upi") -> "UPI"
             sourcePackage.contains("paytm") || sourcePackage.contains("phonepe") -> "WALLETS"
@@ -492,10 +493,11 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
     }
 
     private fun isBalanceOrLimitLine(lowerLine: String): Boolean {
-        return lowerLine.contains("avl bal") || lowerLine.contains("avail") && lowerLine.contains("bal") ||
+        return lowerLine.contains("avl bal") || (lowerLine.contains("avail") && lowerLine.contains("bal")) ||
             lowerLine.contains("available balance") || lowerLine.contains("account balance") ||
-            lowerLine.contains("balance is") || lowerLine.contains("credit limit") ||
-            lowerLine.contains("available limit")
+            lowerLine.contains("balance in") || lowerLine.contains("balance is") ||
+            (lowerLine.contains("balance") && lowerLine.contains("is")) ||
+            lowerLine.contains("credit limit") || lowerLine.contains("available limit")
     }
 
     /**

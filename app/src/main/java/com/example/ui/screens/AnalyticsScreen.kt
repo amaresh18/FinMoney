@@ -54,6 +54,8 @@ fun AnalyticsScreen(
     var selectedCategoryForDrillDown by remember { mutableStateOf<CategorySummary?>(null) }
     var showIncomeDrillDown by remember { mutableStateOf(false) }
 
+    var editingDebitItem by remember { mutableStateOf<DebitItem?>(null) }
+
     val currentMonthDebits = remember(allDebits, month, year) {
         allDebits.filter { it.month == month && it.year == year }
     }
@@ -299,7 +301,56 @@ fun AnalyticsScreen(
             monthName = monthName,
             year = year,
             currencySymbol = currencySymbol,
-            onDismiss = { selectedCategoryForDrillDown = null }
+            onDismiss = { selectedCategoryForDrillDown = null },
+            onEditItem = { item -> editingDebitItem = item },
+            onDeleteItem = { item -> viewModel.deleteDebit(item) },
+            onTogglePaid = { item -> viewModel.toggleDebitPaid(item) },
+            onToggleCreditCard = { item -> viewModel.toggleDebitCreditCardStatus(item) },
+            onToggleRecurring = { item -> viewModel.toggleDebitRecurring(item) }
+        )
+    }
+
+    // Edit Debit Dialog for Analytics
+    if (editingDebitItem != null) {
+        val item = editingDebitItem!!
+        val amtStr = if (item.amount > 0) (if (item.amount % 1.0 == 0.0) item.amount.toInt().toString() else item.amount.toString()) else ""
+        val principalStr = if (item.principalAmount > 0) (if (item.principalAmount % 1.0 == 0.0) item.principalAmount.toInt().toString() else item.principalAmount.toString()) else ""
+        val rateStr = if (item.interestRate > 0) item.interestRate.toString() else ""
+        val totalTenureStr = if (item.totalTenureMonths > 0) item.totalTenureMonths.toString() else ""
+        val currentTenureStr = if (item.currentMonthTenure > 0) item.currentMonthTenure.toString() else "1"
+
+        AddEditDebitDialog(
+            initialTitle = item.title,
+            initialAmount = amtStr,
+            initialCategory = item.category,
+            initialDueDate = item.dueDateDay.toString(),
+            initialNotes = item.notes,
+            initialPrincipalAmount = principalStr,
+            initialInterestRate = rateStr,
+            initialTotalTenureMonths = totalTenureStr,
+            initialCurrentMonthTenure = currentTenureStr,
+            initialIsPaidViaCreditCard = item.isPaidViaCreditCard,
+            initialIsRecurring = item.isRecurring,
+            onDismiss = { editingDebitItem = null },
+            onSave = { title, amount, category, dueDate, notes, principalAmount, interestRate, totalTenureMonths, currentMonthTenure, isPaidViaCreditCard, isRecurring ->
+                val dayInt = dueDate.filter { it.isDigit() }.toIntOrNull() ?: item.dueDateDay
+                viewModel.updateDebit(
+                    item.copy(
+                        title = title,
+                        amount = amount,
+                        category = category,
+                        dueDateDay = dayInt,
+                        notes = notes,
+                        isPaidViaCreditCard = isPaidViaCreditCard,
+                        isRecurring = isRecurring,
+                        principalAmount = principalAmount,
+                        interestRate = interestRate,
+                        totalTenureMonths = totalTenureMonths,
+                        currentMonthTenure = currentMonthTenure
+                    )
+                )
+                editingDebitItem = null
+            }
         )
     }
 
@@ -410,16 +461,26 @@ fun CategoryDrillDownDialog(
     monthName: String,
     year: Int,
     currencySymbol: String,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onEditItem: ((DebitItem) -> Unit)? = null,
+    onDeleteItem: ((DebitItem) -> Unit)? = null,
+    onTogglePaid: ((DebitItem) -> Unit)? = null,
+    onToggleCreditCard: ((DebitItem) -> Unit)? = null,
+    onToggleRecurring: ((DebitItem) -> Unit)? = null
 ) {
     var filterMode by remember { mutableStateOf("ALL") }
 
+    val liveTotalAmount = remember(debitItems) { debitItems.sumOf { it.amount } }
+    val livePaidAmount = remember(debitItems) { debitItems.filter { it.isPaid }.sumOf { it.amount } }
+    val livePendingAmount = remember(liveTotalAmount, livePaidAmount) { (liveTotalAmount - livePaidAmount).coerceAtLeast(0.0) }
+
     val filteredItems = remember(debitItems, filterMode) {
-        when (filterMode) {
+        val list = when (filterMode) {
             "PAID" -> debitItems.filter { it.isPaid }
             "PENDING" -> debitItems.filter { !it.isPaid }
             else -> debitItems
         }
+        list.sortedWith(compareByDescending<DebitItem> { it.createdAt }.thenByDescending { it.id })
     }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -480,7 +541,7 @@ fun CategoryDrillDownDialog(
                             Column {
                                 Text("TOTAL CATEGORY SPEND", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = IndTextMuted)
                                 Text(
-                                    text = "$currencySymbol${"%,.0f".format(categorySummary.totalAmount)}",
+                                    text = "$currencySymbol${"%,.0f".format(liveTotalAmount)}",
                                     style = MaterialTheme.typography.headlineSmall,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = IndNavyHeader
@@ -488,9 +549,30 @@ fun CategoryDrillDownDialog(
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text("STATUS BREAKDOWN", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = IndTextMuted)
-                                Text("Paid: $currencySymbol${"%,.0f".format(categorySummary.paidAmount)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndGreenDark)
-                                Text("Pending: $currencySymbol${"%,.0f".format(categorySummary.yetToPayAmount)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndRed)
+                                Text("Paid: $currencySymbol${"%,.0f".format(livePaidAmount)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndGreenDark)
+                                Text("Pending: $currencySymbol${"%,.0f".format(livePendingAmount)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndRed)
                             }
+                        }
+                    }
+                }
+
+                // Filter row for ALL, PAID, PENDING
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            "ALL" to "All (${debitItems.size})",
+                            "PENDING" to "Pending (${debitItems.count { !it.isPaid }})",
+                            "PAID" to "Paid (${debitItems.count { it.isPaid }})"
+                        ).forEach { (mode, label) ->
+                            FilterChip(
+                                selected = filterMode == mode,
+                                onClick = { filterMode = mode },
+                                label = { Text(label, fontSize = 11.sp) },
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                     }
                 }
@@ -512,32 +594,157 @@ fun CategoryDrillDownDialog(
                             border = androidx.compose.foundation.BorderStroke(1.dp, IndBorder),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
+                            Column(
                                 modifier = Modifier.padding(12.dp).fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(item.title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = IndTextPrimary)
-                                    Text(
-                                        text = "Due Day ${item.dueDateDay}",
-                                        fontSize = 11.sp,
-                                        color = IndTextSecondary
-                                    )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .then(if (onEditItem != null) Modifier.clickable { onEditItem(item) } else Modifier)
+                                    ) {
+                                        Text(item.title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = IndTextPrimary)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                text = "Due Day ${item.dueDateDay}",
+                                                fontSize = 11.sp,
+                                                color = IndTextSecondary
+                                            )
+                                            if (item.isPaidViaCreditCard) {
+                                                Text("• 💳 CC", fontSize = 11.sp, color = Color(0xFF7C3AED), fontWeight = FontWeight.SemiBold)
+                                            }
+                                            if (item.isRecurring) {
+                                                Text("• 🔁 Recurring", fontSize = 11.sp, color = Color(0xFF0284C7), fontWeight = FontWeight.SemiBold)
+                                            }
+                                        }
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "$currencySymbol${"%,.0f".format(item.amount)}",
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 15.sp,
+                                            color = if (item.isPaid) IndGreenDark else IndRed
+                                        )
+                                        Text(
+                                            text = if (item.isPaid) "✓ Paid" else "⏳ Pending",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (item.isPaid) IndGreenDark else Color(0xFFB45309)
+                                        )
+                                    }
                                 }
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        text = "$currencySymbol${"%,.0f".format(item.amount)}",
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 15.sp,
-                                        color = if (item.isPaid) IndGreenDark else IndRed
-                                    )
-                                    Text(
-                                        text = if (item.isPaid) "✓ Paid" else "⏳ Pending",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (item.isPaid) IndGreenDark else Color(0xFFB45309)
-                                    )
+
+                                if (onEditItem != null || onDeleteItem != null || onTogglePaid != null) {
+                                    HorizontalDivider(color = IndBorderSubtle, thickness = 0.5.dp)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            if (onTogglePaid != null) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = if (item.isPaid) IndGreenLight else IndAmberLight,
+                                                    modifier = Modifier.clickable { onTogglePaid(item) }
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                                    ) {
+                                                        RadioButton(
+                                                            selected = item.isPaid,
+                                                            onClick = { onTogglePaid(item) },
+                                                            colors = RadioButtonDefaults.colors(
+                                                                selectedColor = IndGreenDark,
+                                                                unselectedColor = Color(0xFFB45309)
+                                                            ),
+                                                            modifier = Modifier.size(14.dp)
+                                                        )
+                                                        Text(
+                                                            text = if (item.isPaid) "Paid" else "Yet to Pay",
+                                                            fontSize = 9.5.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = if (item.isPaid) IndGreenDark else Color(0xFFB45309)
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            if (onToggleCreditCard != null) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = if (item.isPaidViaCreditCard) Color(0xFFEDE9FE) else IndSurface,
+                                                    border = androidx.compose.foundation.BorderStroke(0.5.dp, if (item.isPaidViaCreditCard) Color(0xFF7C3AED) else IndBorder),
+                                                    modifier = Modifier.clickable { onToggleCreditCard(item) }
+                                                ) {
+                                                    Text(
+                                                        text = if (item.isPaidViaCreditCard) "CC" else "No CC",
+                                                        fontSize = 9.5.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = if (item.isPaidViaCreditCard) Color(0xFF7C3AED) else IndTextSecondary,
+                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            if (onEditItem != null) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = Color(0xFFEFF6FF),
+                                                    border = androidx.compose.foundation.BorderStroke(0.5.dp, IndBlue),
+                                                    modifier = Modifier
+                                                        .clickable { onEditItem(item) }
+                                                        .testTag("drilldown_edit_debit_${item.id}")
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Filled.Edit,
+                                                            contentDescription = "Edit",
+                                                            tint = IndBlue,
+                                                            modifier = Modifier.size(12.dp)
+                                                        )
+                                                        Text(
+                                                            text = "Edit",
+                                                            fontSize = 9.5.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = IndBlue
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            if (onDeleteItem != null) {
+                                                IconButton(
+                                                    onClick = { onDeleteItem(item) },
+                                                    modifier = Modifier.size(28.dp).testTag("drilldown_delete_debit_${item.id}")
+                                                ) {
+                                                    Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = IndTextMuted, modifier = Modifier.size(14.dp))
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

@@ -34,6 +34,9 @@ import java.util.Locale
  * Supported recognizable high-fidelity bank and merchant brands.
  */
 enum class BrandType {
+    // App Brand
+    FINMONEY,
+
     // Banks
     HDFC,
     SBI,
@@ -118,6 +121,9 @@ fun identifyBrand(nameOrText: String, fallbackCategory: String = ""): BrandType 
     val lower = "$nameOrText ${enriched.cleanName} $fallbackCategory".lowercase(Locale.ROOT)
 
     return when {
+        // App Brand
+        lower.contains("finmoney") || lower.contains("fin money") -> BrandType.FINMONEY
+
         // Banks
         lower.contains("hdfc") -> BrandType.HDFC
         lower.contains("sbi") || lower.contains("state bank") -> BrandType.SBI
@@ -231,6 +237,7 @@ fun BrandLogo(
         contentAlignment = Alignment.Center
     ) {
         when (brand) {
+            BrandType.FINMONEY -> FinMoneyAppLogo(badgeSize, shape)
             BrandType.HDFC -> HdfcLogo(badgeSize)
             BrandType.SBI -> SbiLogo(badgeSize)
             BrandType.ICICI -> IciciLogo(badgeSize)
@@ -301,6 +308,17 @@ fun BrandLogo(
 // ==============================================================================
 // 1. BANK LOGOS (Authentic Visual Insignia)
 // ==============================================================================
+
+@Composable
+fun FinMoneyAppLogo(size: Dp, shape: Shape = RoundedCornerShape(10.dp)) {
+    androidx.compose.foundation.Image(
+        painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.app_icon_logo),
+        contentDescription = "FinMoney App Icon",
+        modifier = Modifier
+            .size(size)
+            .clip(shape)
+    )
+}
 
 /**
  * HDFC Bank: Navy blue background (#004C8F) with the iconic white center square

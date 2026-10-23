@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.BankTransactionRecord
+import com.example.data.model.isCreditCardRecord
 import com.example.service.BankSyncManager
 import com.example.ui.FinMoneyViewModel
 import com.example.ui.theme.*
@@ -512,8 +513,13 @@ fun BankTransactionsHistorySheet(
                 filterOptions.forEach { filter ->
                     val isSelected = selectedFilter == filter
                     val count = remember(transactions, filter) {
-                        if (filter == "All") transactions.size
-                        else transactions.count { it.classification.equals(filter, ignoreCase = true) }
+                        when (filter) {
+                            "All" -> transactions.size
+                            "Credit Card" -> transactions.count { it.isCreditCardRecord() }
+                            "Bank" -> transactions.count { !it.isCreditCardRecord() && (it.classification.equals("Bank", true) || !it.classification.equals("Merchant", true)) }
+                            "Merchant" -> transactions.count { !it.isCreditCardRecord() && it.classification.equals("Merchant", true) }
+                            else -> transactions.count { it.classification.equals(filter, ignoreCase = true) }
+                        }
                     }
                     Surface(
                         shape = RoundedCornerShape(8.dp),
@@ -552,8 +558,13 @@ fun BankTransactionsHistorySheet(
             Spacer(modifier = Modifier.height(12.dp))
 
             val filteredTransactions = remember(transactions, selectedFilter) {
-                if (selectedFilter == "All") transactions
-                else transactions.filter { it.classification.equals(selectedFilter, ignoreCase = true) }
+                when (selectedFilter) {
+                    "All" -> transactions
+                    "Credit Card" -> transactions.filter { it.isCreditCardRecord() }
+                    "Bank" -> transactions.filter { !it.isCreditCardRecord() && (it.classification.equals("Bank", true) || !it.classification.equals("Merchant", true)) }
+                    "Merchant" -> transactions.filter { !it.isCreditCardRecord() && it.classification.equals("Merchant", true) }
+                    else -> transactions.filter { it.classification.equals(selectedFilter, ignoreCase = true) }
+                }
             }
 
             if (filteredTransactions.isEmpty()) {
@@ -754,7 +765,7 @@ fun BankTransactionCard(
                             overflow = TextOverflow.Ellipsis
                         )
                         // Auto-classified label ('Bank', 'Credit Card', 'Merchant')
-                        val classLabel = tx.classification.ifBlank { "Bank" }
+                        val classLabel = if (tx.isCreditCardRecord()) "Credit Card" else if (tx.classification.equals("Credit Card", true)) "Bank" else tx.classification.ifBlank { "Bank" }
                         val (classBg, classFg) = when (classLabel) {
                             "Credit Card" -> Color(0xFFF3E8FF) to Color(0xFF7E22CE)
                             "Merchant" -> Color(0xFFFFEDD5) to Color(0xFFC2410C)

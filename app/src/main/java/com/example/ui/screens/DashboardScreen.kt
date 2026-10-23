@@ -22,12 +22,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import com.example.data.model.CategorySummary
 import com.example.data.model.DebitItem
 import com.example.data.model.BankTransactionRecord
 import com.example.data.model.MonthlyFinanceSummary
+import com.example.data.model.IncomeSource
+import com.example.data.model.isActualCreditCardTransaction
 import com.example.ui.FinMoneyViewModel
 import com.example.ui.components.*
 import com.example.ui.theme.*
@@ -56,29 +62,95 @@ fun DashboardScreen(
     var showAddDebitDialog by remember { mutableStateOf(false) }
     var showImportStatementDialog by remember { mutableStateOf(false) }
     var editingDebitItem by remember { mutableStateOf<DebitItem?>(null) }
+    var editingCreditSource by remember { mutableStateOf<IncomeSource?>(null) }
 
     val selectedSpecificDay by viewModel.selectedSpecificDay.collectAsStateWithLifecycle()
 
+    var mainLedgerTab by remember { mutableStateOf("DEBITS") } // "DEBITS" or "CREDITS"
+
+    // Debits State
     var selectedStatusFilter by remember { mutableStateOf("ALL") } // "ALL", "YET_TO_PAY", "ALREADY_PAID"
     var creditCardOnlyFilter by remember { mutableStateOf(false) }
+    var recurringOnlyFilter by remember { mutableStateOf(false) }
     var selectedCategoryFilter by remember { mutableStateOf("ALL") }
     var dashboardViewMode by remember { mutableStateOf("GROUP_BY_CATEGORY") } // "GROUP_BY_CATEGORY" or "LIST"
+    var selectedCategoryForDrillDown by remember { mutableStateOf<CategorySummary?>(null) }
+    var expandedCategoryKeys by remember { mutableStateOf(setOf<String>()) }
 
-    val filteredDebits = remember(currentDebits, selectedStatusFilter, creditCardOnlyFilter, selectedCategoryFilter, selectedSpecificDay) {
-        currentDebits.filter { item ->
+    // Credits State
+    var selectedCreditStatusFilter by remember { mutableStateOf("ALL") } // "ALL", "RECEIVED", "PENDING"
+    var selectedCreditCategoryFilter by remember { mutableStateOf("ALL") }
+    var creditsViewMode by remember { mutableStateOf("GROUP_BY_CATEGORY") } // "GROUP_BY_CATEGORY" or "LIST"
+    var expandedCreditCategoryKeys by remember { mutableStateOf(setOf<String>()) }
+
+    val currentIncomeSources = summary.incomeSources
+    val filteredCredits = remember(currentIncomeSources, selectedCreditStatusFilter, selectedCreditCategoryFilter, creditsViewMode) {
+        val list = currentIncomeSources.filter { item ->
+            val matchesStatus = when (selectedCreditStatusFilter) {
+                "RECEIVED" -> item.isReceived
+                "PENDING" -> !item.isReceived
+                else -> true
+            }
+            val matchesCategory = if (selectedCreditCategoryFilter == "ALL") {
+                true
+            } else {
+                item.category.equals(selectedCreditCategoryFilter, true)
+            }
+            matchesStatus && matchesCategory
+        }
+
+        if (creditsViewMode == "LIST") {
+            // Most recent credit first
+            list.sortedByDescending { it.receivedDateTimestamp ?: 0L }
+        } else {
+            list
+        }
+    }
+
+    val totalFilteredCredits = remember(filteredCredits) { filteredCredits.sumOf { it.amount } }
+
+    val creditsCategorySummaries = remember(filteredCredits, totalFilteredCredits) {
+        filteredCredits
+            .groupBy { it.category.ifBlank { "OTHER" } }
+            .map { (catName, items) ->
+                val catTotal = items.sumOf { it.amount }
+                val catReceived = items.filter { it.isReceived }.sumOf { it.amount }
+                val yetToReceive = catTotal - catReceived
+                val pct = if (totalFilteredCredits > 0) (catTotal / totalFilteredCredits).toFloat() else 0f
+                CategorySummary(
+                    categoryName = catName,
+                    categoryKey = catName.uppercase(),
+                    iconKey = catName,
+                    totalAmount = catTotal,
+                    paidAmount = catReceived,
+                    yetToPayAmount = yetToReceive,
+                    itemCount = items.size,
+                    paidCount = items.count { it.isReceived },
+                    percentage = pct,
+                    colorHex = "#16A34A"
+                )
+            }
+            .sortedByDescending { it.totalAmount } // Highest total credit category at top
+    }
+
+    val filteredDebits = remember(currentDebits, selectedStatusFilter, creditCardOnlyFilter, recurringOnlyFilter, selectedCategoryFilter, selectedSpecificDay, dashboardViewMode) {
+        val list = currentDebits.filter { item ->
             val matchesStatus = when (selectedStatusFilter) {
                 "YET_TO_PAY" -> !item.isPaid
                 "ALREADY_PAID" -> item.isPaid
                 else -> true
             }
             val matchesCreditCard = if (creditCardOnlyFilter) {
-                item.isPaidViaCreditCard || 
-                item.category.contains("CREDIT", true) || 
-                item.title.contains("CREDIT", true) || 
-                item.category.contains("BILL", true) || 
-                item.category.contains("CARD", true) ||
-                item.notes.contains("CREDIT", true) ||
-                item.notes.contains("CC", true)
+                item.isPaidViaCreditCard || item.category.equals("Credit Card", true)
+            } else {
+                true
+            }
+            val matchesRecurring = if (recurringOnlyFilter) {
+                item.isRecurring ||
+                item.category.contains("BILL", true) ||
+                item.category.contains("SUBSCRIPTION", true) ||
+                item.category.contains("UTILITY", true) ||
+                item.notes.contains("RECURRING", true)
             } else {
                 true
             }
@@ -92,8 +164,46 @@ fun DashboardScreen(
             } else {
                 true
             }
-            matchesStatus && matchesCreditCard && matchesCategory && matchesDay
+            matchesStatus && matchesCreditCard && matchesRecurring && matchesCategory && matchesDay
         }
+
+        if (dashboardViewMode == "LIST") {
+            // Most recent transaction at the top for List view
+            list.sortedWith(compareByDescending<DebitItem> { it.createdAt }.thenByDescending { it.id })
+        } else {
+            list
+        }
+    }
+
+    val totalFilteredDebits = remember(filteredDebits) { filteredDebits.sumOf { it.amount } }
+    val dashboardCategorySummaries = remember(filteredDebits, summary.categoryBreakdown, totalFilteredDebits) {
+        filteredDebits
+            .groupBy { it.category.ifBlank { "GENERAL" } }
+            .map { (catName, items) ->
+                val catTotal = items.sumOf { it.amount }
+                val catPaid = items.filter { it.isPaid }.sumOf { it.amount }
+                val yetToPay = catTotal - catPaid
+                val pct = if (totalFilteredDebits > 0) (catTotal / totalFilteredDebits).toFloat() else 0f
+                val matchingSummary = summary.categoryBreakdown.find {
+                    it.categoryKey.equals(catName, ignoreCase = true) ||
+                    it.categoryName.equals(catName, ignoreCase = true)
+                }
+                val colorHex = matchingSummary?.colorHex ?: "#00B386"
+                val iconKey = matchingSummary?.iconKey.takeIf { !it.isNullOrBlank() } ?: catName
+                CategorySummary(
+                    categoryName = catName,
+                    categoryKey = catName.uppercase(),
+                    iconKey = iconKey,
+                    totalAmount = catTotal,
+                    paidAmount = catPaid,
+                    yetToPayAmount = yetToPay,
+                    itemCount = items.size,
+                    paidCount = items.count { it.isPaid },
+                    percentage = pct,
+                    colorHex = colorHex
+                )
+            }
+            .sortedByDescending { it.totalAmount } // Highest total amount at top for Group By view
     }
 
     LazyColumn(
@@ -219,18 +329,11 @@ fun DashboardScreen(
                 ) {
                     Column(
                         modifier = Modifier
-                            .clickable { showManageIncomeDialog = true }
+                            .clickable { mainLedgerTab = "CREDITS" }
                             .testTag("edit_income_section")
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Total Income", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                imageVector = Icons.Filled.Edit,
-                                contentDescription = "Edit Income",
-                                tint = IndBlue,
-                                modifier = Modifier.size(13.dp)
-                            )
+                            Text("Total Income ▾", style = MaterialTheme.typography.labelSmall, color = IndGreenDark, fontWeight = FontWeight.Bold)
                         }
                         Text(
                             text = if (!isFinancialSafetyVisible) "$currencySymbol★★★★★★" else "$currencySymbol${"%,.0f".format(summary.totalIncome)}",
@@ -239,8 +342,10 @@ fun DashboardScreen(
                             color = IndGreenDark
                         )
                     }
-                    Column {
-                        Text("Total Outflow", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary)
+                    Column(
+                        modifier = Modifier.clickable { mainLedgerTab = "DEBITS" }
+                    ) {
+                        Text("Total Outflow ▾", style = MaterialTheme.typography.labelSmall, color = IndRed, fontWeight = FontWeight.Bold)
                         Text(
                             text = "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
                             style = MaterialTheme.typography.titleLarge,
@@ -458,8 +563,89 @@ fun DashboardScreen(
             }
         }
 
-        // Debit filters and category totals
+        // Main Segmented Tab Switcher Bar: Debits / Expenses vs Credits / Income
         item {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = IndSurface,
+                border = BorderStroke(1.dp, IndBorderSubtle),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(IndBackground),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val isDebits = mainLedgerTab == "DEBITS"
+                    val isCredits = mainLedgerTab == "CREDITS"
+
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { mainLedgerTab = "DEBITS" }
+                            .testTag("tab_debits_outflow"),
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isDebits) IndRed else Color.Transparent
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.ArrowUpward,
+                                contentDescription = "Debits",
+                                tint = if (isDebits) Color.White else IndRed,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Expenses / Debits",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDebits) Color.White else IndTextPrimary
+                            )
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { mainLedgerTab = "CREDITS" }
+                            .testTag("tab_credits_inflow"),
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isCredits) Color(0xFF16A34A) else Color.Transparent
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.ArrowDownward,
+                                contentDescription = "Credits",
+                                tint = if (isCredits) Color.White else Color(0xFF16A34A),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Credits / Income",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isCredits) Color.White else IndTextPrimary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (mainLedgerTab == "DEBITS") {
+            // Debit filters and category totals
+            item {
             val categoryTotals = remember(filteredDebits) {
                 filteredDebits
                     .groupBy { it.category.ifBlank { "GENERAL" } }
@@ -469,7 +655,7 @@ fun DashboardScreen(
                     .sortedByDescending { it.second }
             }
             val visibleTotal = filteredDebits.sumOf { it.amount }
-            val filtersActive = selectedStatusFilter != "ALL" || creditCardOnlyFilter ||
+            val filtersActive = selectedStatusFilter != "ALL" || creditCardOnlyFilter || recurringOnlyFilter ||
                 selectedCategoryFilter != "ALL" || selectedSpecificDay != null
 
             Column(
@@ -567,16 +753,31 @@ fun DashboardScreen(
                             }
                         }
 
-                        FilterChip(
-                            selected = creditCardOnlyFilter,
-                            onClick = { creditCardOnlyFilter = !creditCardOnlyFilter },
-                            label = { Text("Credit card & bills", fontSize = 12.sp) }
-                        )
+                        Text("Type Filters", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndTextSecondary)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(
+                                selected = creditCardOnlyFilter,
+                                onClick = { creditCardOnlyFilter = !creditCardOnlyFilter },
+                                label = { Text("Credit Card", fontSize = 12.sp) },
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            FilterChip(
+                                selected = recurringOnlyFilter,
+                                onClick = { recurringOnlyFilter = !recurringOnlyFilter },
+                                label = { Text("Recurring", fontSize = 12.sp) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
 
                         if (filtersActive) {
                             TextButton(onClick = {
                                 selectedStatusFilter = "ALL"
                                 creditCardOnlyFilter = false
+                                recurringOnlyFilter = false
                                 selectedCategoryFilter = "ALL"
                                 viewModel.setMonthYear(month, year, null)
                             }) {
@@ -650,84 +851,523 @@ fun DashboardScreen(
                     onSecondaryAction = { showImportStatementDialog = true }
                 )
             }
-        } else {
-            val dashboardRows = if (dashboardViewMode == "GROUP_BY_CATEGORY") {
-                val list = mutableListOf<DashboardRow>()
-                filteredDebits.groupBy { it.category }.forEach { (category, itemsList) ->
-                    list.add(DashboardRow.CategoryHeader(category, itemsList.sumOf { it.amount }, itemsList.size))
-                    itemsList.forEach { debit ->
-                        list.add(DashboardRow.Transaction(debit))
-                    }
+        } else if (dashboardViewMode == "GROUP_BY_CATEGORY") {
+            // Spend by Category Header identical to Analytics
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Spend by Category (${dashboardCategorySummaries.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = IndTextPrimary
+                    )
+                    Text(
+                        text = "Tap to inspect & edit items",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = IndTextMuted
+                    )
                 }
-                list
-            } else {
-                filteredDebits.map { DashboardRow.Transaction(it) }
             }
 
-            items(dashboardRows, key = { row ->
-                when (row) {
-                    is DashboardRow.CategoryHeader -> "header_${row.category}"
-                    is DashboardRow.Transaction -> "txn_${row.item.id}"
+            items(dashboardCategorySummaries, key = { "cat_${it.categoryKey}" }) { cat ->
+                val categoryShare = if (totalFilteredDebits > 0) (cat.totalAmount / totalFilteredDebits).toFloat() else 0f
+                val isExpanded = expandedCategoryKeys.contains(cat.categoryKey)
+                val categoryItems = remember(filteredDebits, cat.categoryKey) {
+                    filteredDebits.filter {
+                        it.category.equals(cat.categoryKey, ignoreCase = true) ||
+                        it.category.equals(cat.categoryName, ignoreCase = true) ||
+                        it.customCategoryName.equals(cat.categoryName, ignoreCase = true)
+                    }
                 }
-            }) { row ->
-                when (row) {
-                    is DashboardRow.CategoryHeader -> {
-                        Surface(
+
+                IndCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("dashboard_category_${cat.categoryKey}"),
+                    onClick = { selectedCategoryForDrillDown = cat }
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp),
-                            color = IndBlueLight,
-                            border = BorderStroke(1.dp, IndBlue.copy(alpha = 0.18f))
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                CategoryIconBadge(categoryKey = cat.iconKey)
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            prettyCategory(cat.categoryName),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            color = IndTextPrimary
+                                        )
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                            contentDescription = "Drill down",
+                                            tint = IndTextMuted,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = "${cat.itemCount} items • ${cat.paidCount} paid • ${(categoryShare * 100).toInt()}% of outflow",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = IndTextSecondary
+                                    )
+                                }
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = "$currencySymbol${"%,.0f".format(cat.totalAmount)}",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = IndNavyHeader
+                                    )
+                                    if (cat.yetToPayAmount > 0) {
+                                        Text(
+                                            text = "$currencySymbol${"%,.0f".format(cat.yetToPayAmount)} pending",
+                                            fontSize = 10.sp,
+                                            color = IndRed,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "All Paid ✓",
+                                            fontSize = 10.sp,
+                                            color = IndGreenDark,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        expandedCategoryKeys = if (isExpanded) {
+                                            expandedCategoryKeys - cat.categoryKey
+                                        } else {
+                                            expandedCategoryKeys + cat.categoryKey
+                                        }
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                        contentDescription = if (isExpanded) "Collapse" else "Expand inline",
+                                        tint = IndTextSecondary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        LinearProgressIndicator(
+                            progress = { categoryShare.coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                            color = try { Color(android.graphics.Color.parseColor(cat.colorHex)) } catch (e: Exception) { IndBlue },
+                            trackColor = IndCardSecondary
+                        )
+
+                        if (isExpanded) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            HorizontalDivider(color = IndBorderSubtle, thickness = 0.5.dp)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                categoryItems.forEach { item ->
+                                    DebitItemCard(
+                                        item = item,
+                                        currencySymbol = currencySymbol,
+                                        onTogglePaid = { viewModel.toggleDebitPaid(item) },
+                                        onToggleCreditCard = { viewModel.toggleDebitCreditCardStatus(item) },
+                                        onToggleRecurring = { viewModel.toggleDebitRecurring(item) },
+                                        onEdit = { editingDebitItem = item },
+                                        onDelete = { viewModel.deleteDebit(item) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            items(filteredDebits, key = { it.id }) { item ->
+                DebitItemCard(
+                    item = item,
+                    currencySymbol = currencySymbol,
+                    onTogglePaid = { viewModel.toggleDebitPaid(item) },
+                    onToggleCreditCard = { viewModel.toggleDebitCreditCardStatus(item) },
+                    onToggleRecurring = { viewModel.toggleDebitRecurring(item) },
+                    onEdit = { editingDebitItem = item },
+                    onDelete = { viewModel.deleteDebit(item) }
+                )
+            }
+        }
+    } else {
+            // Credits / Income Section View (Same View Structure as Expenses)
+            item {
+                val creditCategoryTotals = remember(filteredCredits) {
+                    filteredCredits
+                        .groupBy { it.category.ifBlank { "OTHER" } }
+                        .map { (category, items) ->
+                            Triple(category, items.sumOf { it.amount }, items.size)
+                        }
+                        .sortedByDescending { it.second }
+                }
+                val visibleCreditTotal = filteredCredits.sumOf { it.amount }
+                val creditFiltersActive = selectedCreditStatusFilter != "ALL" || selectedCreditCategoryFilter != "ALL"
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Income & Credits Inflow",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = IndNavyHeader
+                            )
+                            Text(
+                                text = "${filteredCredits.size} of ${currentIncomeSources.size} credit sources",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = IndTextSecondary
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "+$currencySymbol${"%,.0f".format(visibleCreditTotal)}",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 20.sp,
+                                color = Color(0xFF16A34A)
+                            )
+                            Text("Filtered total", fontSize = 11.sp, color = IndTextSecondary)
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = IndSurface,
+                        border = BorderStroke(1.dp, IndBorderSubtle),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text("View", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndTextSecondary)
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(IndBackground)
+                                    .padding(4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                listOf(
+                                    "GROUP_BY_CATEGORY" to "By category",
+                                    "LIST" to "All items"
+                                ).forEach { (mode, label) ->
+                                    val selected = creditsViewMode == mode
+                                    Surface(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { creditsViewMode = mode },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (selected) Color(0xFF16A34A) else Color.Transparent
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            modifier = Modifier.padding(vertical = 8.dp),
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (selected) Color.White else IndTextSecondary
+                                        )
+                                    }
+                                }
+                            }
+
+                            Text("Status", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndTextSecondary)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    "ALL" to "All",
+                                    "RECEIVED" to "Received",
+                                    "PENDING" to "Pending"
+                                ).forEach { (key, label) ->
+                                    FilterChip(
+                                        selected = selectedCreditStatusFilter == key,
+                                        onClick = { selectedCreditStatusFilter = key },
+                                        label = { Text(label, fontSize = 12.sp) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+
+                            if (creditFiltersActive) {
+                                TextButton(onClick = {
+                                    selectedCreditStatusFilter = "ALL"
+                                    selectedCreditCategoryFilter = "ALL"
+                                }) {
+                                    Text("Clear filters")
+                                }
+                            }
+                        }
+                    }
+
+                    if (creditCategoryTotals.isNotEmpty()) {
+                        Text(
+                            "Totals by category",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndTextSecondary
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            creditCategoryTotals.forEach { (category, total, count) ->
+                                val selected = selectedCreditCategoryFilter.equals(category, true)
+                                Surface(
+                                    modifier = Modifier
+                                        .width(148.dp)
+                                        .clickable {
+                                            selectedCreditCategoryFilter = if (selected) "ALL" else category
+                                        },
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = if (selected) Color(0xFF16A34A) else IndSurface,
+                                    border = BorderStroke(1.dp, if (selected) Color(0xFF16A34A) else IndBorderSubtle)
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(
+                                            prettyCategory(category),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (selected) Color.White.copy(alpha = 0.8f) else IndTextSecondary,
+                                            maxLines = 1
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            "+$currencySymbol${"%,.0f".format(total)}",
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = if (selected) Color.White else Color(0xFF16A34A)
+                                        )
+                                        Text(
+                                            "$count items",
+                                            fontSize = 11.sp,
+                                            color = if (selected) Color.White.copy(alpha = 0.8f) else IndTextMuted
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (filteredCredits.isEmpty()) {
+                item {
+                    EmptyState(
+                        title = "No Credits / Income Found for $monthName $year",
+                        subtitle = "Add your primary salary, freelance earnings, or additional credit entries to track your inflows.",
+                        primaryButtonText = "Add Credit",
+                        secondaryButtonText = "Manage Base Salary",
+                        onPrimaryAction = { showAddCreditDialog = true },
+                        onSecondaryAction = { showManageIncomeDialog = true }
+                    )
+                }
+            } else if (creditsViewMode == "GROUP_BY_CATEGORY") {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Inflow by Category (${creditsCategorySummaries.size})",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = IndTextPrimary
+                        )
+                        Text(
+                            text = "Tap to expand category items",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = IndTextMuted
+                        )
+                    }
+                }
+
+                items(creditsCategorySummaries, key = { "credit_cat_${it.categoryKey}" }) { cat ->
+                    val isExpanded = expandedCreditCategoryKeys.contains(cat.categoryKey)
+                    val categoryItems = remember(filteredCredits, cat.categoryKey) {
+                        filteredCredits.filter {
+                            it.category.equals(cat.categoryKey, ignoreCase = true) ||
+                            it.category.equals(cat.categoryName, ignoreCase = true)
+                        }
+                    }
+
+                    IndCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            expandedCreditCategoryKeys = if (isExpanded) {
+                                expandedCreditCategoryKeys - cat.categoryKey
+                            } else {
+                                expandedCreditCategoryKeys + cat.categoryKey
+                            }
+                        }
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    CategoryIconBadge(categoryKey = row.category, badgeSize = 28.dp, iconSize = 16.dp)
+                                    CategoryIconBadge(categoryKey = cat.iconKey)
                                     Column {
                                         Text(
-                                            text = prettyCategory(row.category),
-                                            style = MaterialTheme.typography.titleSmall,
+                                            prettyCategory(cat.categoryName),
+                                            style = MaterialTheme.typography.bodyLarge,
                                             fontWeight = FontWeight.Bold,
-                                            color = IndNavyHeader
+                                            color = IndTextPrimary
                                         )
                                         Text(
-                                            text = "${row.count} items",
-                                            fontSize = 11.sp,
+                                            text = "${cat.itemCount} items • ${cat.paidCount} received",
+                                            style = MaterialTheme.typography.labelSmall,
                                             color = IndTextSecondary
                                         )
                                     }
                                 }
-                                Text(
-                                    text = "$currencySymbol${"%,.0f".format(row.total)}",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = IndBlueDark
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "+$currencySymbol${"%,.0f".format(cat.totalAmount)}",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF16A34A)
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            expandedCreditCategoryKeys = if (isExpanded) {
+                                                expandedCreditCategoryKeys - cat.categoryKey
+                                            } else {
+                                                expandedCreditCategoryKeys + cat.categoryKey
+                                            }
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                            contentDescription = "Expand",
+                                            tint = IndTextSecondary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (isExpanded) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                HorizontalDivider(color = IndBorderSubtle, thickness = 0.5.dp)
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    categoryItems.sortedByDescending { it.receivedDateTimestamp ?: 0L }.forEach { item ->
+                                        CreditItemCard(
+                                            item = item,
+                                            currencySymbol = currencySymbol,
+                                            onToggleReceived = { viewModel.toggleIncomeReceived(item.id, month, year) },
+                                            onEdit = { editingCreditSource = item },
+                                            onDelete = { viewModel.deleteIncomeSource(item.id, month, year) }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
-                    is DashboardRow.Transaction -> {
-                        DebitItemCard(
-                            item = row.item,
-                            currencySymbol = currencySymbol,
-                            onTogglePaid = { viewModel.toggleDebitPaid(row.item) },
-                            onToggleCreditCard = { viewModel.toggleDebitCreditCardStatus(row.item) },
-                            onToggleRecurring = { viewModel.toggleDebitRecurring(row.item) },
-                            onEdit = { editingDebitItem = row.item },
-                            onDelete = { viewModel.deleteDebit(row.item) }
-                        )
-                    }
-
+                }
+            } else {
+                items(filteredCredits, key = { "credit_${it.id}" }) { item ->
+                    CreditItemCard(
+                        item = item,
+                        currencySymbol = currencySymbol,
+                        onToggleReceived = { viewModel.toggleIncomeReceived(item.id, month, year) },
+                        onEdit = { editingCreditSource = item },
+                        onDelete = { viewModel.deleteIncomeSource(item.id, month, year) }
+                    )
                 }
             }
         }
+    }
+
+    // Category Drill-Down Dialog with full edit, delete, and payment toggle support
+    selectedCategoryForDrillDown?.let { cat ->
+        val matchingDebits = remember(currentDebits, cat, selectedStatusFilter, creditCardOnlyFilter, selectedSpecificDay) {
+            filteredDebits.filter {
+                it.category.equals(cat.categoryKey, ignoreCase = true) ||
+                it.category.equals(cat.categoryName, ignoreCase = true) ||
+                it.customCategoryName.equals(cat.categoryName, ignoreCase = true)
+            }
+        }
+
+        val updatedCat = remember(matchingDebits, cat) {
+            val total = matchingDebits.sumOf { it.amount }
+            val paid = matchingDebits.filter { it.isPaid }.sumOf { it.amount }
+            cat.copy(
+                totalAmount = total,
+                paidAmount = paid,
+                yetToPayAmount = total - paid,
+                itemCount = matchingDebits.size,
+                paidCount = matchingDebits.count { it.isPaid }
+            )
+        }
+
+        CategoryDrillDownDialog(
+            categorySummary = updatedCat,
+            debitItems = matchingDebits,
+            monthName = monthName,
+            year = year,
+            currencySymbol = currencySymbol,
+            onDismiss = { selectedCategoryForDrillDown = null },
+            onEditItem = { item -> editingDebitItem = item },
+            onDeleteItem = { item -> viewModel.deleteDebit(item) },
+            onTogglePaid = { item -> viewModel.toggleDebitPaid(item) },
+            onToggleCreditCard = { item -> viewModel.toggleDebitCreditCardStatus(item) },
+            onToggleRecurring = { item -> viewModel.toggleDebitRecurring(item) }
+        )
     }
 
     // Manage Income & Credit Dialog
@@ -823,6 +1463,48 @@ fun DashboardScreen(
         )
     }
 
+    // Edit Credit Dialog
+    if (editingCreditSource != null) {
+        val src = editingCreditSource!!
+        var editTitle by remember { mutableStateOf(src.title.ifBlank { src.name }) }
+        var editAmountStr by remember { mutableStateOf(if (src.amount > 0) (if (src.amount % 1.0 == 0.0) src.amount.toInt().toString() else src.amount.toString()) else "") }
+        var editCategory by remember { mutableStateOf(src.category) }
+
+        IndDialog(
+            onDismiss = { editingCreditSource = null },
+            title = "Edit Credit Entry",
+            subtitle = "Modify income or credit details",
+            icon = Icons.Filled.Payments,
+            iconTint = Color(0xFF16A34A),
+            confirmButtonText = "Save Changes",
+            onConfirm = {
+                val amt = editAmountStr.toDoubleOrNull() ?: src.amount
+                viewModel.updateIncomeSource(src.id, editTitle, amt, editCategory, null, month, year)
+                editingCreditSource = null
+            }
+        ) {
+            IndOutlinedTextField(
+                value = editTitle,
+                onValueChange = { editTitle = it },
+                label = "Title / Source Payee",
+                leadingIcon = Icons.Filled.Payments
+            )
+            IndOutlinedTextField(
+                value = editAmountStr,
+                onValueChange = { editAmountStr = it },
+                label = "Amount (₹)",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                leadingIcon = Icons.Filled.CurrencyRupee
+            )
+            IndCategoryDropdown(
+                selectedCategory = editCategory,
+                onCategorySelected = { editCategory = it },
+                categories = com.example.data.model.IncomeCategory.entries.map { it.name },
+                label = "Category"
+            )
+        }
+    }
+
     // Statement Import Dialog (PhonePe, GPay, Bank Statement, Super Money)
     if (showImportStatementDialog) {
         StatementImportDialog(
@@ -887,10 +1569,11 @@ fun DebitItemCard(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
+                            val isCcItem = item.isActualCreditCardTransaction()
                             Text(
-                                text = "${item.category} • Due Day ${item.dueDateDay}" + if (item.isPaidViaCreditCard) " • 💳 CC" else "",
+                                text = "${item.category} • Due Day ${item.dueDateDay}" + if (isCcItem) " • 💳 CC" else "",
                                 fontSize = 11.sp,
-                                color = if (item.isPaidViaCreditCard) Color(0xFF7C3AED) else IndTextSecondary
+                                color = if (isCcItem) Color(0xFF7C3AED) else IndTextSecondary
                             )
                             if (item.isRecurring) {
                                 Surface(
@@ -931,21 +1614,6 @@ fun DebitItemCard(
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
                             color = if (item.isPaid) IndGreenDark else IndRed
-                        )
-                    }
-
-                    // Prominent Top-Right Edit Icon
-                    IconButton(
-                        onClick = onEdit,
-                        modifier = Modifier
-                            .size(30.dp)
-                            .testTag("edit_debit_top_${item.id}")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Edit,
-                            contentDescription = "Edit Debit",
-                            tint = IndBlue,
-                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }
@@ -1030,10 +1698,11 @@ fun DebitItemCard(
                     }
 
                     // Quick Credit Card Toggle Button
+                    val isCc = item.isActualCreditCardTransaction()
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = if (item.isPaidViaCreditCard) Color(0xFFEDE9FE) else IndSurface,
-                        border = BorderStroke(0.5.dp, if (item.isPaidViaCreditCard) Color(0xFF7C3AED) else IndBorder),
+                        color = if (isCc) Color(0xFFEDE9FE) else IndSurface,
+                        border = BorderStroke(0.5.dp, if (isCc) Color(0xFF7C3AED) else IndBorder),
                         modifier = Modifier
                             .clickable(onClick = onToggleCreditCard)
                             .testTag("toggle_cc_${item.id}")
@@ -1046,14 +1715,14 @@ fun DebitItemCard(
                             Icon(
                                 imageVector = Icons.Filled.CreditCard,
                                 contentDescription = "CC Toggle",
-                                tint = if (item.isPaidViaCreditCard) Color(0xFF7C3AED) else IndTextSecondary,
+                                tint = if (isCc) Color(0xFF7C3AED) else IndTextSecondary,
                                 modifier = Modifier.size(12.dp)
                             )
                             Text(
-                                text = if (item.isPaidViaCreditCard) "CC" else "No CC",
+                                text = if (isCc) "CC" else "No CC",
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (item.isPaidViaCreditCard) Color(0xFF7C3AED) else IndTextSecondary
+                                color = if (isCc) Color(0xFF7C3AED) else IndTextSecondary
                             )
                         }
                     }
@@ -1142,7 +1811,139 @@ private fun prettyCategory(raw: String): String {
         .joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }
 }
 
-private sealed class DashboardRow {
-    data class CategoryHeader(val category: String, val total: Double, val count: Int) : DashboardRow()
-    data class Transaction(val item: DebitItem) : DashboardRow()
+@Composable
+fun CreditItemCard(
+    item: IncomeSource,
+    currencySymbol: String,
+    onToggleReceived: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    IndCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onEdit() }
+    ) {
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    CategoryIconBadge(categoryKey = item.category)
+                    Column(modifier = Modifier.clickable { onEdit() }) {
+                        Text(item.title.ifBlank { item.name }, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = IndTextPrimary)
+                        Text(
+                            text = item.category,
+                            fontSize = 11.sp,
+                            color = IndTextSecondary
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "+$currencySymbol${"%,.0f".format(item.amount)}",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = Color(0xFF16A34A)
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // Received Radio / Toggle Button
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (item.isReceived) IndGreenLight else IndAmberLight,
+                        modifier = Modifier
+                            .clickable(onClick = onToggleReceived)
+                            .testTag("toggle_received_${item.id}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            RadioButton(
+                                selected = item.isReceived,
+                                onClick = onToggleReceived,
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = IndGreenDark,
+                                    unselectedColor = Color(0xFFB45309)
+                                ),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = if (item.isReceived) "Received ✓" else "Pending Inflow",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (item.isReceived) IndGreenDark else Color(0xFFB45309)
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    // Explicit Labeled Edit Chip
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFFEFF6FF),
+                        border = BorderStroke(0.5.dp, IndBlue),
+                        modifier = Modifier
+                            .clickable(onClick = onEdit)
+                            .testTag("edit_credit_chip_${item.id}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Edit,
+                                contentDescription = "Edit",
+                                tint = IndBlue,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Text(
+                                text = "Edit",
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = IndBlue
+                            )
+                        }
+                    }
+
+                    // Delete Button
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(28.dp).testTag("delete_credit_${item.id}")
+                    ) {
+                        Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = IndTextMuted, modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
+        }
+    }
 }

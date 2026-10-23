@@ -1,6 +1,10 @@
 package com.example
 
 import com.example.model.DefaultDebitCategories
+import com.example.data.model.DebitItem
+import com.example.data.model.BankTransactionRecord
+import com.example.data.model.isActualCreditCardTransaction
+import com.example.data.model.isCreditCardRecord
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -287,5 +291,142 @@ class FinMoneyUnitTest {
         val rewardJson = parser.parseToJson(rewardMsg, "Google Pay")
         assertTrue(rewardJson.contains("\"is_financial_transaction\": false"))
         assertTrue(rewardJson.contains("\"debug_reason\": \"Matches scratch card/reward promotional pattern\""))
+    }
+
+    @Test
+    fun testDebitCardNotClassifiedAsCreditCard() {
+        // Negative Scenario 1: Explicit Debit Card spend
+        val debitCardSms = "Dear Customer, INR 1,250.00 spent on your Debit Card ending 4321 at Reliance Fresh. Avail Bal: INR 24,000."
+        val label1 = com.example.data.bank.TransactionClassificationEngine.classifyLabel(
+            text = debitCardSms,
+            senderOrTitle = "AD-HDFCBK"
+        )
+        assertNotEquals("Credit Card", label1)
+
+        // Negative Scenario 2: Card swipe on bank account (card ending 9876 linked to A/c)
+        val cardBankSms = "INR 450 debited from A/c XX1234 via Card ending 9876. Avail Bal: INR 15,200."
+        val label2 = com.example.data.bank.TransactionClassificationEngine.classifyLabel(
+            text = cardBankSms,
+            senderOrTitle = "AD-HDFCBK"
+        )
+        assertNotEquals("Credit Card", label2)
+
+        // Negative Scenario 3: ATM Cash withdrawal with card
+        val atmSms = "INR 2,000 withdrawn at ATM using Card ending 1122. Avl Bal: INR 8,000."
+        val label3 = com.example.data.bank.TransactionClassificationEngine.classifyLabel(
+            text = atmSms,
+            senderOrTitle = "VK-SBIINB"
+        )
+        assertEquals("Bank", label3)
+        assertNotEquals("Credit Card", label3)
+    }
+
+    @Test
+    fun testCreditCardFilterPositiveAndNegativeScenarios() {
+        // POSITIVE 1: Explicitly marked isPaidViaCreditCard = true
+        val ccExpense = DebitItem(
+            id = 1,
+            title = "Amazon Gadget Purchase",
+            amount = 4500.0,
+            category = "SHOPPING",
+            isPaidViaCreditCard = true,
+            isPaidViaDebitCard = false
+        )
+        assertTrue(ccExpense.isActualCreditCardTransaction())
+
+        // POSITIVE 2: Explicit Credit Card in title
+        val ccTitleExpense = DebitItem(
+            id = 2,
+            title = "HDFC Credit Card Bill",
+            amount = 12000.0,
+            category = "Credit Card",
+            isPaidViaCreditCard = false,
+            isPaidViaDebitCard = false
+        )
+        assertTrue(ccTitleExpense.isActualCreditCardTransaction())
+
+        // NEGATIVE 1: Regular bank expense with "account" in notes (contains substring "cc"!)
+        val bankExpenseWithAccountNote = DebitItem(
+            id = 3,
+            title = "Electricity Bill",
+            amount = 1200.0,
+            category = "UTILITIES",
+            isPaidViaCreditCard = false,
+            isPaidViaDebitCard = false,
+            notes = "Debited from account ending in 1234. Success"
+        )
+        assertFalse("Should not match credit card just because notes contain 'account' or 'success'", bankExpenseWithAccountNote.isActualCreditCardTransaction())
+
+        // NEGATIVE 2: Debit Card transaction
+        val debitCardExpense = DebitItem(
+            id = 4,
+            title = "Debit Card Spend at DMART",
+            amount = 3200.0,
+            category = "GROCERIES",
+            isPaidViaCreditCard = false,
+            isPaidViaDebitCard = true
+        )
+        assertFalse("Debit card must never be a credit card", debitCardExpense.isActualCreditCardTransaction())
+
+        // NEGATIVE 3: Category with "CARD" like "Card Payment" or "Gift Card"
+        val giftCardExpense = DebitItem(
+            id = 5,
+            title = "Amazon Gift Card",
+            amount = 1000.0,
+            category = "CARD",
+            isPaidViaCreditCard = false,
+            isPaidViaDebitCard = false
+        )
+        assertFalse("Generic category CARD must not match Credit Card filter", giftCardExpense.isActualCreditCardTransaction())
+
+        // NEGATIVE 4: ATM cash withdrawal
+        val atmExpense = DebitItem(
+            id = 6,
+            title = "ATM Cash Withdrawal",
+            amount = 5000.0,
+            category = "GENERAL",
+            isPaidViaCreditCard = false,
+            isPaidViaDebitCard = false,
+            notes = "Cash withdrawal from ATM"
+        )
+        assertFalse("ATM withdrawal must never match Credit Card filter", atmExpense.isActualCreditCardTransaction())
+
+        // NEGATIVE 5: Salary or Loan Credit
+        val loanCredit = DebitItem(
+            id = 7,
+            title = "Personal Loan Credit",
+            amount = 50000.0,
+            category = "LOAN",
+            isPaidViaCreditCard = false,
+            isPaidViaDebitCard = false
+        )
+        assertFalse("Loan credit must not match Credit Card filter", loanCredit.isActualCreditCardTransaction())
+    }
+
+    @Test
+    fun testBankTransactionRecordCreditCardFiltering() {
+        val ccRecord = BankTransactionRecord(
+            id = 1,
+            bankName = "HDFC Bank Credit Card",
+            classification = "Credit Card",
+            originalText = "Alert: Rs. 3,450.00 spent on your HDFC Bank Credit Card ending 9821. Available Limit: Rs. 1,45,000.00."
+        )
+        assertTrue(ccRecord.isCreditCardRecord())
+
+        val debitRecord = BankTransactionRecord(
+            id = 2,
+            bankName = "HDFC Bank",
+            classification = "Bank",
+            originalText = "Dear Customer, INR 1,250.00 spent on your Debit Card ending 4321. Avail Bal: INR 24,000."
+        )
+        assertFalse(debitRecord.isCreditCardRecord())
+
+        val atmRecord = BankTransactionRecord(
+            id = 3,
+            bankName = "SBI Bank",
+            classification = "Bank",
+            originalText = "Cash withdrawal of Rs. 5,000.00 from ATM using A/C **5678."
+        )
+        assertFalse(atmRecord.isCreditCardRecord())
     }
 }

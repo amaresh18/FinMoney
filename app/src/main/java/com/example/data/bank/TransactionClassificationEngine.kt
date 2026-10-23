@@ -18,20 +18,25 @@ enum class TransactionClassification(val label: String, val badgeColorHex: Long)
  */
 object TransactionClassificationEngine {
 
-    // 1. Credit Card Regex and Keywords
+    // 1. Credit Card Regex and Keywords (Strict: Never matches Debit Card or ATM)
     private val CREDIT_CARD_REGEXES = listOf(
         Regex("""\b(?:credit\s*card|creditcard)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:spent|paid|charged)\s+(?:on|using|with)?\s*(?:your\s+)?card\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bcard\s*(?:ending(?:\s+with)?|no\.?|num\.?|xx|\*+)\s*[\*xX]{0,4}(\d{4})\b""", RegexOption.IGNORE_CASE),
         Regex("""\b(?:credit|avail(?:able)?|total)\s+limit\b""", RegexOption.IGNORE_CASE),
         Regex("""\b(?:min(?:imum)?\s+(?:amt|amount)?\s*due|total\s+(?:amt|amount)?\s*due)\b""", RegexOption.IGNORE_CASE),
         Regex("""\b(?:statement\s+(?:for|generated)|card\s*statement|billing\s*cycle)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:sbi\s*card|onecard|amex|american\s+express|diners\s+club|rupay\s+credit|mastercard\s+card|visa\s+(?:signature|platinum|infinite)|coral\s+card|rubyx|regalia|millennia|infinia|magnus)\b""", RegexOption.IGNORE_CASE)
+        Regex("""\b(?:sbi\s*card|onecard|amex|american\s+express|diners\s+club|rupay\s+credit|mastercard\s+credit|visa\s+credit|regalia|millennia|infinia|magnus|sapphiro|rubyx|coral\s+credit)\b""", RegexOption.IGNORE_CASE)
     )
 
+    // Dedicated Credit Card Sender Codes (Strict prefixes from Indian Banks/Card Issuers)
     private val CREDIT_CARD_SENDER_REGEX = Regex(
-        """^[A-Za-z]{2}-.*(?:CRD|CARD|CC|SBICRD|HDFCCC|ICICIC|AXISCC|BOBCRD|KOTAKC).*$""",
+        """^[A-Za-z]{2}-(?:HDFCCC|SBICRD|ICICIC|AXISCR|AXISCC|BOBCRD|KOTAKC|CITICR|AMEXIN|RBLCRD|ONECRD|AUCRD|YESCRD|INDUSC|STANCR|SCBCRD)\b""",
         RegexOption.IGNORE_CASE
+    )
+
+    // Explicit non-credit card patterns (Debit card, ATM withdrawals, bank transfers)
+    private val EXPLICIT_NON_CREDIT_PATTERNS = listOf(
+        Regex("""\b(?:debit\s*card|debitcard)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:atm\s*cash|cash\s*withdrawn?|atm\s*withdrawal)\b""", RegexOption.IGNORE_CASE)
     )
 
     // 2. High-Priority Merchants (like Swiggy, Zomato, Uber, Blinkit, etc.)
@@ -70,17 +75,17 @@ object TransactionClassificationEngine {
         val upperSender = senderOrTitle.uppercase()
         val upperMerchant = extractedMerchant.uppercase()
 
-        // Step 1: Detect Merchant Transactions (e.g. Swiggy, Zomato, Uber, Blinkit, etc.)
-        if (isMerchantTransaction(upperText, upperSender, upperMerchant, bankName)) {
-            return TransactionClassification.MERCHANT
-        }
-
-        // Step 2: Detect Credit Card Transactions (cards, limits, statements, card spend alerts)
+        // Step 1: Detect Credit Card Transactions first (if it's a credit card spend, CC classification takes precedence)
         if (isCreditCardTransaction(text, senderOrTitle)) {
             return TransactionClassification.CREDIT_CARD
         }
 
-        // Step 3: Default to Bank (Savings/Current account transfers, ATM, NEFT/IMPS, salary)
+        // Step 2: Detect Merchant Transactions (e.g. Swiggy, Zomato, Uber, Blinkit direct receipts)
+        if (isMerchantTransaction(upperText, upperSender, upperMerchant, bankName)) {
+            return TransactionClassification.MERCHANT
+        }
+
+        // Step 3: Default to Bank (Savings/Current account transfers, ATM, NEFT/IMPS, debit card, salary)
         return TransactionClassification.BANK
     }
 
@@ -129,9 +134,14 @@ object TransactionClassificationEngine {
     }
 
     private fun isCreditCardTransaction(text: String, senderOrTitle: String): Boolean {
-        if (CREDIT_CARD_SENDER_REGEX.matches(senderOrTitle)) {
-            return true
+        // Disqualify immediately if it explicitly mentions Debit Card or ATM
+        for (nonCcPattern in EXPLICIT_NON_CREDIT_PATTERNS) {
+            if (nonCcPattern.containsMatchIn(text)) {
+                return false
+            }
         }
+
+        val hasCreditCardSender = CREDIT_CARD_SENDER_REGEX.containsMatchIn(senderOrTitle)
 
         for (regex in CREDIT_CARD_REGEXES) {
             if (regex.containsMatchIn(text)) {
@@ -140,7 +150,11 @@ object TransactionClassificationEngine {
         }
 
         val lowerCombined = "$senderOrTitle $text".lowercase()
-        if (lowerCombined.contains("credit card") || lowerCombined.contains("cc alert") || lowerCombined.contains("spent on card")) {
+        if (lowerCombined.contains("credit card") || lowerCombined.contains("cc alert") || lowerCombined.contains("creditcard")) {
+            return true
+        }
+
+        if (hasCreditCardSender && (lowerCombined.contains("spent") || lowerCombined.contains("charged") || lowerCombined.contains("limit") || lowerCombined.contains("card"))) {
             return true
         }
 

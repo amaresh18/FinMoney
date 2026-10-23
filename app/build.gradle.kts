@@ -19,8 +19,8 @@ android {
     applicationId = "com.aistudio.finmoney.vqpz"
     minSdk = 24
     targetSdk = 36
-    versionCode = 197
-    versionName = "197.0"
+    versionCode = 207
+    versionName = "207.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -98,6 +98,14 @@ android {
     buildConfig = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
+  packaging {
+    resources {
+      excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
+    jniLibs {
+      useLegacyPackaging = false
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
@@ -117,17 +125,18 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
-    implementation(libs.androidx.biometric)
+  implementation(libs.androidx.biometric)
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
-  implementation("androidx.camera:camera-core:1.3.4")
-  implementation("androidx.camera:camera-camera2:1.3.4")
-  implementation("androidx.camera:camera-lifecycle:1.3.4")
-  implementation("androidx.camera:camera-view:1.3.4")
-  implementation(libs.guava)
-  implementation(libs.mlkit.barcode.scanning)
+  // Unused camera and mlkit dependencies commented out to prevent 4 KB unaligned native libraries (.so) and satisfy 16 KB page size requirement
+  // implementation("androidx.camera:camera-core:1.3.4")
+  // implementation("androidx.camera:camera-camera2:1.3.4")
+  // implementation("androidx.camera:camera-lifecycle:1.3.4")
+  // implementation("androidx.camera:camera-view:1.3.4")
+  // implementation(libs.guava)
+  // implementation(libs.mlkit.barcode.scanning)
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)

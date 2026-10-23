@@ -83,6 +83,7 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
+          ./gradlew clean --no-daemon
           ./gradlew :app:bundleRelease :app:assembleRelease --no-daemon --stacktrace
 
       - name: Upload Release AAB Artifact

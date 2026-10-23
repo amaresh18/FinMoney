@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.BankBalanceItem
 import com.example.data.model.MonthlyFinanceSummary
+import com.example.data.model.isActualCreditCardTransaction
 import com.example.data.repository.FinMoneyRepository
 import com.example.service.BankSyncManager
 import com.example.ui.FinMoneyViewModel
@@ -69,14 +70,14 @@ fun AccountReconciliationScreen(
     val totalCredits = reconciliationSummary.totalInflows
 
     // Read debits live
-    val bankDebits = remember(currentDebits) { currentDebits.filter { !it.isPaidViaCreditCard } }
-    val creditCardDebits = remember(currentDebits) { currentDebits.filter { it.isPaidViaCreditCard } }
+    val bankDebits = remember(currentDebits) { currentDebits.filter { !it.isActualCreditCardTransaction() } }
+    val creditCardDebits = remember(currentDebits) { currentDebits.filter { it.isActualCreditCardTransaction() } }
 
     val paidDebits = remember(currentDebits) { currentDebits.filter { it.isPaid } }
     val unpaidDebits = remember(currentDebits) { currentDebits.filter { !it.isPaid } }
 
-    val paidBankDebits = remember(paidDebits) { paidDebits.filter { !it.isPaidViaCreditCard } }
-    val paidCcDebits = remember(paidDebits) { paidDebits.filter { it.isPaidViaCreditCard } }
+    val paidBankDebits = remember(paidDebits) { paidDebits.filter { !it.isActualCreditCardTransaction() } }
+    val paidCcDebits = remember(paidDebits) { paidDebits.filter { it.isActualCreditCardTransaction() } }
 
     var countOnlyPaidDebits by remember { mutableStateOf(false) }
 

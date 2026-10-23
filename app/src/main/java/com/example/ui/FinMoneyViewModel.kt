@@ -157,6 +157,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             CategorySummary(
                 categoryName = cat,
                 categoryKey = cat.uppercase(),
+                iconKey = cat,
                 totalAmount = catTotal,
                 paidAmount = catPaid,
                 yetToPayAmount = catTotal - catPaid,
@@ -166,8 +167,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             )
         }.sortedByDescending { it.totalAmount }
 
-        val bankDebits = debits.filter { !it.isPaidViaCreditCard }
-        val ccDebits = debits.filter { it.isPaidViaCreditCard }
+        val bankDebits = debits.filter { !it.isActualCreditCardTransaction() }
+        val ccDebits = debits.filter { it.isActualCreditCardTransaction() }
         val paidBankDebits = bankDebits.filter { it.isPaid }
         val paidCcDebits = ccDebits.filter { it.isPaid }
 
@@ -197,8 +198,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         currentDebits
     ) { summary, debits ->
         val s = summary ?: MonthlyFinanceSummary()
-        val bankDebits = debits.filter { !it.isPaidViaCreditCard }
-        val ccDebits = debits.filter { it.isPaidViaCreditCard }
+        val bankDebits = debits.filter { !it.isActualCreditCardTransaction() }
+        val ccDebits = debits.filter { it.isActualCreditCardTransaction() }
         val paidBankDebits = bankDebits.filter { it.isPaid }
         val paidCcDebits = ccDebits.filter { it.isPaid }
 
@@ -549,7 +550,13 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun toggleDebitCreditCardStatus(item: DebitItem) {
         viewModelScope.launch {
-            repository.updateDebit(item.copy(isPaidViaCreditCard = !item.isPaidViaCreditCard))
+            val newCcStatus = !item.isActualCreditCardTransaction()
+            repository.updateDebit(
+                item.copy(
+                    isPaidViaCreditCard = newCcStatus,
+                    isPaidViaDebitCard = if (newCcStatus) false else item.isPaidViaDebitCard
+                )
+            )
         }
     }
 
@@ -677,6 +684,28 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                     amount = newAmount,
                     category = newCategory,
                     receivedDateTimestamp = timestamp
+                )
+                saveUpdatedIncomeSources(existing, currentSources, m, y)
+            }
+        }
+    }
+
+    fun toggleIncomeReceived(
+        id: String,
+        month: Int? = null,
+        year: Int? = null
+    ) {
+        val m = month ?: _currentMonth.value
+        val y = year ?: _currentYear.value
+
+        viewModelScope.launch {
+            val existing = dao.getSalaryRecordDirect(m, y)
+            val currentSources = getOrCreateIncomeSources(existing)
+            val index = currentSources.indexOfFirst { it.id == id }
+            if (index != -1) {
+                val old = currentSources[index]
+                currentSources[index] = old.copy(
+                    isReceived = !old.isReceived
                 )
                 saveUpdatedIncomeSources(existing, currentSources, m, y)
             }
@@ -888,18 +917,32 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         phoneNumber: String = "",
         profilePicUri: String? = null,
         isOtpVerified: Boolean = true,
-        isEmailVerified: Boolean = true
+        isEmailVerified: Boolean = true,
+        monthlyBudget: Double? = null,
+        currencySymbol: String? = null
     ) {
         viewModelScope.launch {
+            val existing = dao.getUserProfileDirect()
+            val cleanExistingName = if (existing?.name != null && existing.name != "Signed Out" && existing.name.isNotBlank()) existing.name else "FinMoney Member"
+            val finalName = if (name.isNotBlank() && name != "Signed Out") name else cleanExistingName
+            val finalEmail = if (email.isNotBlank()) email else (existing?.email ?: "")
+            val finalPhone = if (phoneNumber.isNotBlank()) phoneNumber else (existing?.phoneNumber ?: "")
+            val finalBudget = monthlyBudget ?: (existing?.monthlyBudget ?: 0.0)
+            val finalCurrency = currencySymbol ?: (existing?.currencySymbol ?: "₹")
+            val finalPic = profilePicUri ?: existing?.profilePicUri ?: existing?.profileImageUri
+
             dao.insertOrUpdateUserProfile(
                 UserProfile(
                     id = 1,
-                    name = name,
-                    email = email,
-                    phoneNumber = phoneNumber,
-                    profilePicUri = profilePicUri,
+                    name = finalName,
+                    email = finalEmail,
+                    phoneNumber = finalPhone,
+                    profilePicUri = finalPic,
                     isOtpVerified = isOtpVerified,
-                    isEmailVerified = isEmailVerified
+                    isEmailVerified = isEmailVerified,
+                    monthlyBudget = finalBudget,
+                    currencySymbol = finalCurrency,
+                    profileImageUri = finalPic
                 )
             )
         }
@@ -920,10 +963,38 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 )
                 try {
                     com.google.firebase.Firebase.auth.signOut()
-                } catch (e: Exception) {}
+                } catch (e: Exception) {
+                    Log.w("FinMoneyViewModel", "Firebase sign out notice: ${e.message}")
+                }
             } catch (e: Exception) {
                 Log.e("FinMoneyViewModel", "Error signing out", e)
             }
+        }
+    }
+
+    fun markUserLoggedIn(name: String? = null, email: String? = null, phone: String? = null) {
+        viewModelScope.launch {
+            val existing = dao.getUserProfileDirect()
+            val finalName = if (!name.isNullOrBlank() && name != "Signed Out") name
+                else if (existing?.name != null && existing.name != "Signed Out" && existing.name.isNotBlank()) existing.name
+                else "Amaresh"
+            val finalEmail = if (!email.isNullOrBlank()) email
+                else existing?.email?.takeIf { it.isNotBlank() }
+                ?: "g.amaresh18@gmail.com"
+            val finalPhone = if (!phone.isNullOrBlank()) phone
+                else existing?.phoneNumber?.takeIf { it.isNotBlank() }
+                ?: "9876543210"
+
+            dao.insertOrUpdateUserProfile(
+                UserProfile(
+                    id = 1,
+                    name = finalName,
+                    email = finalEmail,
+                    phoneNumber = finalPhone,
+                    isOtpVerified = true,
+                    isEmailVerified = true
+                )
+            )
         }
     }
 

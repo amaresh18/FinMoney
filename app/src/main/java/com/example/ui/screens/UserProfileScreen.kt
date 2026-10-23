@@ -65,6 +65,7 @@ fun UserProfileScreen(
 
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
+    var showDataSafetyDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = IndBackground,
@@ -96,6 +97,10 @@ fun UserProfileScreen(
                                 tint = IndNavyHeader
                             )
                         }
+                        com.example.ui.components.BrandLogo(
+                            name = "FinMoney",
+                            badgeSize = 28.dp
+                        )
                         Text(
                             text = "Profile & Settings",
                             style = MaterialTheme.typography.titleMedium,
@@ -104,7 +109,10 @@ fun UserProfileScreen(
                         )
                     }
 
-                    TextButton(onClick = { showSignOutDialog = true }) {
+                    TextButton(
+                        onClick = { showSignOutDialog = true },
+                        modifier = Modifier.testTag("top_sign_out_button")
+                    ) {
                         Text(
                             text = "Sign Out",
                             fontWeight = FontWeight.Bold,
@@ -165,7 +173,7 @@ fun UserProfileScreen(
                                     color = IndNavyHeader
                                 )
                                 Text(
-                                    text = userProfile?.email?.ifBlank { firebaseUser?.email ?: "g.amaresh18@gmail.com" } ?: "g.amaresh18@gmail.com",
+                                    text = userProfile?.email?.ifBlank { firebaseUser?.email ?: "Not provided" } ?: "Not provided",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = IndTextSecondary
                                 )
@@ -260,6 +268,7 @@ fun UserProfileScreen(
                                         phoneNumber = phoneInput
                                     )
                                     isEditProfileMode = false
+                                    android.widget.Toast.makeText(context, "Profile updated successfully!", android.widget.Toast.LENGTH_SHORT).show()
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = IndBlue),
                                 modifier = Modifier.fillMaxWidth()
@@ -414,7 +423,107 @@ fun UserProfileScreen(
                 }
             }
 
-            // 4. Sign Out Button
+            // 4. Account Deletion & Legal Policies Card
+            fun openUrlInBrowser(url: String) {
+                try {
+                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(context, "Could not open link", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            IndCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Filled.PrivacyTip, contentDescription = null, tint = IndBlue, modifier = Modifier.size(20.dp))
+                        Text(
+                            text = "ACCOUNT DELETION & LEGAL POLICIES",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = IndBlueDark
+                        )
+                    }
+
+                    // Account & Data Deletion Link
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                openUrlInBrowser("https://docs.google.com/forms/d/e/1FAIpQLScYFK0kYaruDdJjmtrwwh33q4wXq3M0RL2xH_Hq18ZRTuvZOg/viewform")
+                            }
+                            .testTag("request_account_deletion_link"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Request Account & Data Deletion", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndRed)
+                            Text("Permanently delete your account, phone number & financial records", fontSize = 11.sp, color = IndTextSecondary)
+                        }
+                        Icon(Icons.Filled.OpenInNew, contentDescription = "Open Form", tint = IndRed, modifier = Modifier.size(18.dp))
+                    }
+
+                    Divider(color = IndBorderSubtle)
+
+                    // Privacy Policy Link
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                openUrlInBrowser("https://gist.githubusercontent.com/amareshgajawada/raw/finmoney_privacy_policy.txt")
+                            }
+                            .testTag("privacy_policy_link"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Privacy Policy", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndNavyHeader)
+                            Text("Read our Google Play compliant Privacy Policy", fontSize = 11.sp, color = IndTextSecondary)
+                        }
+                        Icon(Icons.Filled.OpenInNew, contentDescription = "Open Privacy Policy", tint = IndBlue, modifier = Modifier.size(18.dp))
+                    }
+
+                    Divider(color = IndBorderSubtle)
+
+                    // Data Safety Disclosures Info
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showDataSafetyDialog = true }
+                            .testTag("data_safety_disclosures_link"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Data Safety & Disclosures", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndNavyHeader)
+                            Text("View how personal info & phone numbers are protected", fontSize = 11.sp, color = IndTextSecondary)
+                        }
+                        Icon(Icons.Filled.Info, contentDescription = "View Disclosures", tint = IndBlue, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+
+            // 5. Account Switch & Sign Out Buttons
+            OutlinedButton(
+                onClick = {
+                    viewModel.signOut()
+                    onBack()
+                },
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, IndBlue),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("switch_account_button")
+            ) {
+                Icon(Icons.Filled.SwitchAccount, contentDescription = null, tint = IndBlue, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Switch Google / Mobile Account", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndBlue)
+            }
+
             Button(
                 onClick = { showSignOutDialog = true },
                 colors = ButtonDefaults.buttonColors(containerColor = IndRed),
@@ -431,6 +540,32 @@ fun UserProfileScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
         }
+
+        if (showDataSafetyDialog) {
+            AlertDialog(
+                onDismissRequest = { showDataSafetyDialog = false },
+                title = { Text("Data Safety & Privacy Information", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("FinMoney collects user data strictly for core app functionality and account management:\n", fontSize = 12.sp)
+                        Text("• Phone Number: Collected for account identification and SMS bank sync verification.", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Name & Email Address: Collected for account creation, Google Sign-In, and personal ledger sync.", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Contacts: Optional permission used solely to select borrower/lender contacts when recording Lent & Borrowed Khaata entries. Contacts are never shared or uploaded to third parties.", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Encryption: All transmitted data is encrypted in transit using SSL/TLS protocols.", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Third-Party Sharing: We DO NOT share or sell personal data to any third parties.", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("• Right to Deletion: You can request complete deletion of your account and data at any time via the Account Deletion Form link.", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { showDataSafetyDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = IndBlue)
+                    ) {
+                        Text("Got It", color = Color.White)
+                    }
+                }
+            )
+        }
     }
 
     // Sign Out Confirmation Dialog
@@ -444,6 +579,7 @@ fun UserProfileScreen(
                     onClick = {
                         showSignOutDialog = false
                         viewModel.signOut()
+                        onBack()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = IndRed)
                 ) {

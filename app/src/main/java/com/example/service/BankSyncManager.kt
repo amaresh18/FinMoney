@@ -21,6 +21,7 @@ import com.example.data.model.BankBalanceItem
 import com.example.data.model.BankTransactionRecord
 import com.example.data.model.DebitCategory
 import com.example.data.model.DebitItem
+import com.example.data.model.isCreditCardRecord
 import com.example.data.model.IncomeCategory
 import com.example.data.model.IncomeSource
 import com.example.data.model.MonthlyReconciliation
@@ -529,21 +530,22 @@ object BankSyncManager {
                 val categoryToUse = customCategory ?: tx.category.ifBlank { DebitCategory.GENERAL.name }
                 val titleToUse = if (tx.merchant.isNotBlank()) tx.merchant else "${tx.bankName} Expense"
 
-                val debitItem = DebitItem(
-                    cloudId = UUID.randomUUID().toString(),
-                    month = txMonth,
-                    year = txYear,
-                    category = categoryToUse,
-                    title = titleToUse,
-                    amount = tx.amount,
-                    dueDateDay = txDay,
-                    dueDate = tx.timestamp,
-                    isPaid = true,
-                    isPaidViaDebitCard = tx.classification != "Credit Card",
-                    isPaidViaCreditCard = tx.classification == "Credit Card",
-                    notes = "Approved from ${tx.bankName} alert. Ref: ${tx.referenceNumber}",
-                    createdAt = tx.timestamp
-                )
+                    val isCc = tx.isCreditCardRecord()
+                    val debitItem = DebitItem(
+                        cloudId = UUID.randomUUID().toString(),
+                        month = txMonth,
+                        year = txYear,
+                        category = categoryToUse,
+                        title = titleToUse,
+                        amount = tx.amount,
+                        dueDateDay = txDay,
+                        dueDate = tx.timestamp,
+                        isPaid = true,
+                        isPaidViaDebitCard = !isCc,
+                        isPaidViaCreditCard = isCc,
+                        notes = "Approved from ${tx.bankName} alert. Ref: ${tx.referenceNumber}",
+                        createdAt = tx.timestamp
+                    )
 
                 val newDebitId = dao.insertDebit(debitItem)
                 val insertedDebit = debitItem.copy(id = newDebitId)
