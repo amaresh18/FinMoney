@@ -968,12 +968,31 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         currencySymbol: String? = null
     ) {
         viewModelScope.launch {
+            val cleanPhone = phoneNumber.filter { it.isDigit() }.takeLast(10)
+            val cleanEmail = email.trim().lowercase()
             val existing = dao.getUserProfileDirect()
-            val activeUid = existing?.userId ?: "user_${phoneNumber.filter { it.isDigit() }.takeLast(10).ifBlank { "default" }}"
+
+            if (cleanPhone.isNotBlank()) {
+                val byPhone = dao.getUserByPhone(cleanPhone)
+                if (byPhone != null && byPhone.userId != existing?.userId && cleanEmail.isNotBlank() && byPhone.email.isNotBlank() && byPhone.email.lowercase() != cleanEmail) {
+                    Log.w("FinMoneyViewModel", "Profile save collision: phone $cleanPhone already registered to ${byPhone.email}")
+                    return@launch
+                }
+            }
+
+            if (cleanEmail.isNotBlank()) {
+                val byEmail = dao.getUserByEmail(cleanEmail)
+                if (byEmail != null && byEmail.userId != existing?.userId && cleanPhone.isNotBlank() && byEmail.phoneNumber.isNotBlank() && byEmail.phoneNumber != cleanPhone) {
+                    Log.w("FinMoneyViewModel", "Profile save collision: email $cleanEmail already registered to phone ${byEmail.phoneNumber}")
+                    return@launch
+                }
+            }
+
+            val activeUid = existing?.userId ?: "user_${cleanPhone.ifBlank { cleanEmail.replace("@", "_").replace(".", "_") }}"
             val cleanExistingName = if (existing?.name != null && existing.name != "Signed Out" && existing.name.isNotBlank()) existing.name else "FinMoney Member"
             val finalName = if (name.isNotBlank() && name != "Signed Out") name else cleanExistingName
-            val finalEmail = if (email.isNotBlank()) email else (existing?.email ?: "")
-            val finalPhone = if (phoneNumber.isNotBlank()) phoneNumber.filter { it.isDigit() }.takeLast(10) else (existing?.phoneNumber ?: "")
+            val finalEmail = cleanEmail.ifBlank { existing?.email ?: "" }
+            val finalPhone = cleanPhone.ifBlank { existing?.phoneNumber ?: "" }
             val finalBudget = monthlyBudget ?: (existing?.monthlyBudget ?: 0.0)
             val finalCurrency = currencySymbol ?: (existing?.currencySymbol ?: "₹")
             val finalPic = profilePicUri ?: existing?.profilePicUri ?: existing?.profileImageUri
