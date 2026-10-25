@@ -60,6 +60,8 @@ import com.example.R
 import com.example.identity.UserIdentityBindingEngine.BindPhase
 import com.example.service.FinMoneyAuthService
 import com.example.ui.FinMoneyViewModel
+import com.example.ui.components.FinMoneyAppLogo
+import com.example.ui.components.FinMoneyWordmarkRow
 import com.example.ui.theme.*
 import com.example.util.SimDetectionHelper
 import com.example.util.launchCatching
@@ -133,6 +135,25 @@ private fun AuthScreenContent(
     // 4 = Email verification (Firebase)
     var currentStep by remember { mutableStateOf(0) }
     var termsAccepted by remember { mutableStateOf(true) }
+
+    fun skipToTestOtpStep() {
+        if (!BuildConfig.DEBUG) return
+        val digits = phoneInput.filter { it.isDigit() }.takeLast(10)
+        if (digits.length < 10) {
+            errorText = "Enter a 10-digit number first."
+            return
+        }
+        if (!termsAccepted) {
+            errorText = "Please accept the Terms of Service and Privacy Policy to continue."
+            return
+        }
+        errorText = null
+        otpInput = ""
+        phoneVerificationId = ""
+        statusMessage =
+            "Dev mode: use OTP 123456 only if this number is added as a Firebase test phone (Console → Phone → test numbers)."
+        currentStep = 2
+    }
 
     fun triggerOtpDispatch(phoneNumber: String, forceResend: Boolean = false) {
         val digits = phoneNumber.filter { it.isDigit() }.takeLast(10)
@@ -571,28 +592,10 @@ private fun AuthScreenContent(
                         Spacer(modifier = Modifier.width(38.dp))
                     }
 
-                    // FinMoney Wordmark Logo
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Brush.horizontalGradient(listOf(IndBlue, IndCyan))),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("F", fontWeight = FontWeight.Black, fontSize = 20.sp, color = Color.White)
-                        }
-                        Text(
-                            text = "FinMoney",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = FinAuthTextPrimary,
-                            letterSpacing = (-0.5).sp
-                        )
-                    }
+                    FinMoneyWordmarkRow(
+                        iconSize = 32.dp,
+                        titleColor = FinAuthTextPrimary
+                    )
 
                     // Step Indicator Pill
                     if (currentStep in 1..3) {
@@ -657,6 +660,7 @@ private fun AuthScreenContent(
                     )
 
                     1 -> FinAuthMobileInputStep(
+                        linkedGoogleEmail = Firebase.auth.currentUser?.email?.takeIf { it.isNotBlank() },
                         phoneInput = phoneInput,
                         onPhoneChange = { raw ->
                             val digits = raw.filter { it.isDigit() }
@@ -671,6 +675,7 @@ private fun AuthScreenContent(
                         onSendOtp = {
                             if (!isSendingOtp) triggerOtpDispatch(phoneInput)
                         },
+                        onDevTestOtp = { skipToTestOtpStep() },
                         isSendingOtp = isSendingOtp,
                         onGoogleSignIn = { performGoogleSignIn() },
                         isGoogleLoading = isGoogleLoading,
@@ -712,6 +717,11 @@ private fun AuthScreenContent(
                                     nameInput = "Play Store Reviewer"
                                     emailInput = "demo.reviewer@finmoney.app"
                                     currentStep = 3
+                                    return@launchCatching
+                                }
+                                if (BuildConfig.DEBUG && otpInput == "123456" && phoneVerificationId.isBlank()) {
+                                    errorText =
+                                        "Add +91 $cleanPhone as a test phone in Firebase Console, tap Get OTP again, then enter 123456."
                                     return@launchCatching
                                 }
                                 errorText = confirm.exceptionOrNull()?.localizedMessage
@@ -911,13 +921,7 @@ fun OnboardingScreen(
                         .fillMaxWidth()
                         .padding(top = AppTheme.dimensions.medium)
                 ) {
-                    androidx.compose.foundation.Image(
-                        painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.app_icon_logo),
-                        contentDescription = "FinMoney App Icon",
-                        modifier = Modifier
-                            .size(76.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                    )
+                    FinMoneyAppLogo(size = 76.dp, shape = RoundedCornerShape(18.dp))
 
                     // Brand Badge Pill
                     Box(
@@ -994,21 +998,14 @@ fun OnboardingScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(AppTheme.dimensions.medium)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(36.dp)
-                                                .clip(RoundedCornerShape(AppTheme.dimensions.chipCornerRadius + 2.dp))
-                                                .background(Brush.horizontalGradient(listOf(AppTheme.colors.primary, AppTheme.colors.accentCyan))),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("F", style = AppTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
-                                        }
-                                        Text("FinMoney", style = AppTheme.typography.titleLarge, color = Color.White)
-                                    }
+                                    FinMoneyWordmarkRow(
+                                        iconSize = 36.dp,
+                                        iconCornerRadius = AppTheme.dimensions.chipCornerRadius + 2.dp,
+                                        titleFontSize = AppTheme.typography.titleLarge.fontSize,
+                                        titleColor = Color.White,
+                                        titleFontWeight = FontWeight.Bold,
+                                        horizontalSpacing = AppTheme.dimensions.medium
+                                    )
                                     Text("PERSONAL FINANCE", style = AppTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = AppTheme.colors.accentCyan)
                                 }
 
@@ -1107,11 +1104,13 @@ fun OnboardingScreen(
 // ---------------------------------------------------------------------------
 @Composable
 private fun FinAuthMobileInputStep(
+    linkedGoogleEmail: String? = null,
     phoneInput: String,
     onPhoneChange: (String) -> Unit,
     isPickingPhoneHint: Boolean,
     onPickPhoneFromDevice: () -> Unit,
     onSendOtp: () -> Unit,
+    onDevTestOtp: () -> Unit = {},
     isSendingOtp: Boolean,
     onGoogleSignIn: () -> Unit,
     isGoogleLoading: Boolean,
@@ -1143,6 +1142,30 @@ private fun FinAuthMobileInputStep(
             color = FinAuthTextPrimary,
             textAlign = TextAlign.Center
         )
+
+        if (!linkedGoogleEmail.isNullOrBlank()) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = IndBlue.copy(alpha = 0.12f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, IndBlue.copy(alpha = 0.35f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = IndGreenDark, modifier = Modifier.size(18.dp))
+                    Text(
+                        text = "Signed in with $linkedGoogleEmail — verify mobile to finish.",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = FinAuthTextPrimary,
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+        }
 
         // Clean Big Phone Display Field (+91 00000 00000)
         OutlinedTextField(
@@ -1202,6 +1225,25 @@ private fun FinAuthMobileInputStep(
 
         if (errorText != null) {
             Text(errorText, color = IndRed, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        }
+
+        if (BuildConfig.DEBUG) {
+            OutlinedButton(
+                onClick = onDevTestOtp,
+                enabled = phoneInput.filter { it.isDigit() }.length >= 10,
+                shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, IndTextMuted.copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Filled.Lock, contentDescription = null, tint = IndTextMuted, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "Proceed with test OTP (123456) — dev only",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = FinAuthTextSecondary
+                )
+            }
         }
 
         // Clean Terms & Conditions Checkbox

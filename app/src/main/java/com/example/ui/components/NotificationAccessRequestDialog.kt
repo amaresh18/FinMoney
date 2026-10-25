@@ -340,6 +340,72 @@ fun NotificationAccessRequestDialog(
 }
 
 /**
+ * Compact strip shown under the main app header until auto expense tracking permissions are granted.
+ */
+@Composable
+fun AutoExpenseTrackingHeaderStrip(
+    missingStepLabel: String,
+    onEnableClicked: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onEnableClicked)
+            .testTag("auto_expense_tracking_header_strip"),
+        color = Color(0xFFFEF3C7),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCD34D))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(listOf(Color(0xFFFDE68A), Color(0xFFFBBF24)))
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Filled.AutoAwesome, null, tint = Color(0xFFB45309), modifier = Modifier.size(18.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Turn on auto expense tracking",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = Color(0xFF92400E)
+                )
+                Text(
+                    text = if (missingStepLabel.isNotBlank()) {
+                        "$missingStepLabel — HDFC, SBI, PhonePe, GPay & more logged for you."
+                    } else {
+                        "We read only bank & UPI payment alerts — no manual typing."
+                    },
+                    fontSize = 10.sp,
+                    color = Color(0xFFB45309),
+                    lineHeight = 13.sp,
+                    maxLines = 2
+                )
+            }
+            Text(
+                "Enable",
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 12.sp,
+                color = IndBlue,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.White)
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+        }
+    }
+}
+
+/**
  * Banner shown on home/salary screens when Notification Access is disabled or denied.
  * Offers a friendly, informative callout explaining why enabling it saves time.
  */

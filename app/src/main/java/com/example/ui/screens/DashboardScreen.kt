@@ -1,11 +1,11 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,7 +28,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import com.example.data.model.CategorySummary
 import com.example.data.model.DebitItem
 import com.example.data.model.BankTransactionRecord
@@ -53,6 +52,7 @@ fun DashboardScreen(
     val summaryRaw by viewModel.monthlySummary.collectAsStateWithLifecycle()
     val summary = summaryRaw ?: MonthlyFinanceSummary()
     val currentDebits by viewModel.currentDebits.collectAsStateWithLifecycle()
+    val customCategories by viewModel.customCategories.collectAsStateWithLifecycle()
     val currentSalaryRecord by viewModel.currentSalaryRecord.collectAsStateWithLifecycle()
     val pendingBankTransactions by viewModel.pendingBankTransactions.collectAsStateWithLifecycle()
 
@@ -62,6 +62,9 @@ fun DashboardScreen(
     var showManageIncomeDialog by remember { mutableStateOf(false) }
     var showAddDebitDialog by remember { mutableStateOf(false) }
     var showImportStatementDialog by remember { mutableStateOf(false) }
+    var showAddCustomCategoryDialog by remember { mutableStateOf(false) }
+    var expensePendingDelete by remember { mutableStateOf<DebitItem?>(null) }
+    var creditPendingDelete by remember { mutableStateOf<IncomeSource?>(null) }
     var editingDebitItem by remember { mutableStateOf<DebitItem?>(null) }
     var editingCreditSource by remember { mutableStateOf<IncomeSource?>(null) }
 
@@ -74,14 +77,13 @@ fun DashboardScreen(
     var creditCardOnlyFilter by remember { mutableStateOf(false) }
     var recurringOnlyFilter by remember { mutableStateOf(false) }
     var selectedCategoryFilter by remember { mutableStateOf("ALL") }
-    var dashboardViewMode by remember { mutableStateOf("GROUP_BY_CATEGORY") } // "GROUP_BY_CATEGORY" or "LIST"
-    var selectedCategoryForDrillDown by remember { mutableStateOf<CategorySummary?>(null) }
+    var dashboardViewMode by remember { mutableStateOf("LIST") } // "GROUP_BY_CATEGORY" or "LIST"
     var expandedCategoryKeys by remember { mutableStateOf(setOf<String>()) }
 
     // Credits State
     var selectedCreditStatusFilter by remember { mutableStateOf("ALL") } // "ALL", "RECEIVED", "PENDING"
     var selectedCreditCategoryFilter by remember { mutableStateOf("ALL") }
-    var creditsViewMode by remember { mutableStateOf("GROUP_BY_CATEGORY") } // "GROUP_BY_CATEGORY" or "LIST"
+    var creditsViewMode by remember { mutableStateOf("LIST") } // "GROUP_BY_CATEGORY" or "LIST"
     var expandedCreditCategoryKeys by remember { mutableStateOf(setOf<String>()) }
 
     val currentIncomeSources = summary.incomeSources
@@ -101,8 +103,7 @@ fun DashboardScreen(
         }
 
         if (creditsViewMode == "LIST") {
-            // Most recent credit first
-            list.sortedByDescending { it.receivedDateTimestamp ?: 0L }
+            list.sortedWith(compareCreditsByRecency())
         } else {
             list
         }
@@ -134,7 +135,17 @@ fun DashboardScreen(
             .sortedByDescending { it.totalAmount } // Highest total credit category at top
     }
 
-    val filteredDebits = remember(currentDebits, selectedStatusFilter, creditCardOnlyFilter, recurringOnlyFilter, selectedCategoryFilter, selectedSpecificDay, dashboardViewMode) {
+    val filteredDebits = remember(
+        currentDebits,
+        selectedStatusFilter,
+        creditCardOnlyFilter,
+        recurringOnlyFilter,
+        selectedCategoryFilter,
+        selectedSpecificDay,
+        dashboardViewMode,
+        month,
+        year
+    ) {
         val list = currentDebits.filter { item ->
             val matchesStatus = when (selectedStatusFilter) {
                 "YET_TO_PAY" -> !item.isPaid
@@ -155,11 +166,7 @@ fun DashboardScreen(
             } else {
                 true
             }
-            val matchesCategory = if (selectedCategoryFilter == "ALL") {
-                true
-            } else {
-                item.category.equals(selectedCategoryFilter, true)
-            }
+            val matchesCategory = matchesDebitCategoryFilter(item, selectedCategoryFilter)
             val matchesDay = if (selectedSpecificDay != null) {
                 item.dueDateDay == selectedSpecificDay
             } else {
@@ -169,8 +176,7 @@ fun DashboardScreen(
         }
 
         if (dashboardViewMode == "LIST") {
-            // Most recent transaction at the top for List view
-            list.sortedWith(compareByDescending<DebitItem> { it.createdAt }.thenByDescending { it.id })
+            list.sortedWith(compareDebitsByRecency(month, year))
         } else {
             list
         }
@@ -179,21 +185,22 @@ fun DashboardScreen(
     val totalFilteredDebits = remember(filteredDebits) { filteredDebits.sumOf { it.amount } }
     val dashboardCategorySummaries = remember(filteredDebits, summary.categoryBreakdown, totalFilteredDebits) {
         filteredDebits
-            .groupBy { it.category.ifBlank { "GENERAL" } }
-            .map { (catName, items) ->
+            .groupBy { debitCategoryFilterKey(it) }
+            .map { (filterKey, items) ->
+                val catName = debitCategoryDisplayLabel(items.first())
                 val catTotal = items.sumOf { it.amount }
                 val catPaid = items.filter { it.isPaid }.sumOf { it.amount }
                 val yetToPay = catTotal - catPaid
                 val pct = if (totalFilteredDebits > 0) (catTotal / totalFilteredDebits).toFloat() else 0f
                 val matchingSummary = summary.categoryBreakdown.find {
-                    it.categoryKey.equals(catName, ignoreCase = true) ||
+                    it.categoryKey.equals(filterKey, ignoreCase = true) ||
                     it.categoryName.equals(catName, ignoreCase = true)
                 }
                 val colorHex = matchingSummary?.colorHex ?: "#00B386"
-                val iconKey = matchingSummary?.iconKey.takeIf { !it.isNullOrBlank() } ?: catName
+                val iconKey = matchingSummary?.iconKey.takeIf { !it.isNullOrBlank() } ?: filterKey
                 CategorySummary(
                     categoryName = catName,
-                    categoryKey = catName.uppercase(),
+                    categoryKey = filterKey,
                     iconKey = iconKey,
                     totalAmount = catTotal,
                     paidAmount = catPaid,
@@ -269,7 +276,7 @@ fun DashboardScreen(
                         ) { mainLedgerTab = "CREDITS" }
                         CompactMetric(
                             "Out",
-                            "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
+                            if (!isFinancialSafetyVisible) "★★★★" else "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
                             IndRed,
                             Icons.Filled.NorthEast
                         ) { mainLedgerTab = "DEBITS" }
@@ -304,8 +311,8 @@ fun DashboardScreen(
                 MiniDashAction("Expense", Icons.Filled.Add, IndBlue, IndBlueLight, Modifier.weight(1f).testTag("add_debit_dashboard_button")) { onOpenAddDebit() }
                 MiniDashAction("Income", Icons.Filled.Add, IndGreenDark, IndGreenLight, Modifier.weight(1f).testTag("add_credit_dashboard_button")) { showAddCreditDialog = true }
                 MiniDashAction("Import", Icons.Filled.FileUpload, IndBlue, Color(0xFFEFF6FF), Modifier.weight(1f).testTag("import_statement_dashboard_button")) { showImportStatementDialog = true }
-                MiniDashAction("Recurring", Icons.Filled.Repeat, Color(0xFF16A34A), Color(0xFFF0FDF4), Modifier.weight(1f).testTag("prefill_recurring_dashboard_button")) {
-                    viewModel.prefillRecurringDebitsForMonth(month, year)
+                MiniDashAction("Prefill", Icons.Filled.Repeat, Color(0xFF16A34A), Color(0xFFF0FDF4), Modifier.weight(1f).testTag("prefill_recurring_dashboard_button")) {
+                    viewModel.prefillRecurringForMonth(month, year)
                 }
             }
         }
@@ -496,13 +503,25 @@ fun DashboardScreen(
         if (mainLedgerTab == "DEBITS") {
             // Debit filters and category totals
             item {
-            val categoryTotals = remember(filteredDebits) {
+            val categoryTotals = remember(filteredDebits, customCategories) {
                 filteredDebits
-                    .groupBy { it.category.ifBlank { "GENERAL" } }
-                    .map { (category, items) ->
-                        Triple(category, items.sumOf { it.amount }, items.size)
+                    .groupBy { debitCategoryFilterKey(it) }
+                    .map { (filterKey, items) ->
+                        val label = debitCategoryDisplayLabel(items.first())
+                        val iconName = iconKeyForDebitFilter(filterKey, customCategories)
+                        val storedIcon = iconName.takeIf {
+                            filterKey.startsWith(CUSTOM_CATEGORY_FILTER_PREFIX, ignoreCase = true) && it != filterKey
+                        }
+                        CategoryFilterChipData(
+                            filterKey = filterKey,
+                            label = label,
+                            stylingKey = if (storedIcon != null) label else filterKey,
+                            storedIconName = storedIcon,
+                            total = items.sumOf { it.amount },
+                            count = items.size
+                        )
                     }
-                    .sortedByDescending { it.second }
+                    .sortedByDescending { it.total }
             }
             val visibleTotal = filteredDebits.sumOf { it.amount }
             val filtersActive = selectedStatusFilter != "ALL" || creditCardOnlyFilter || recurringOnlyFilter ||
@@ -517,12 +536,21 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Spending · ${filteredDebits.size} items",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = IndNavyHeader
-                    )
+                    Column {
+                        Text(
+                            text = "Spending · ${filteredDebits.size} items",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndNavyHeader
+                        )
+                        if (dashboardViewMode == "LIST") {
+                            Text(
+                                text = "List view · newest first",
+                                fontSize = 10.sp,
+                                color = IndTextMuted
+                            )
+                        }
+                    }
                     Text(
                         text = "$currencySymbol${"%,.0f".format(visibleTotal)}",
                         fontWeight = FontWeight.ExtraBold,
@@ -541,12 +569,17 @@ fun DashboardScreen(
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
+                        Text(
+                            text = "Filters",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndTextMuted,
+                            modifier = Modifier.padding(start = 2.dp)
+                        )
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             DashIconChip("Category", Icons.Filled.GridView, dashboardViewMode == "GROUP_BY_CATEGORY", IndBlue) {
                                 dashboardViewMode = "GROUP_BY_CATEGORY"
@@ -581,22 +614,30 @@ fun DashboardScreen(
                         }
 
                         if (categoryTotals.isNotEmpty()) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            Text(
+                                text = "By category",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = IndTextMuted,
+                                modifier = Modifier.padding(start = 2.dp, top = 2.dp)
+                            )
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                categoryTotals.forEach { (category, total, count) ->
-                                    val selected = selectedCategoryFilter.equals(category, true)
+                                categoryTotals.forEach { chip ->
+                                    val selected = selectedCategoryFilter.equals(chip.filterKey, true)
                                     CategoryTotalPill(
-                                        category = category,
-                                        totalLabel = "$currencySymbol${"%,.0f".format(total)}",
-                                        count = count,
+                                        category = chip.label,
+                                        stylingKey = chip.stylingKey,
+                                        storedIconName = chip.storedIconName,
+                                        totalLabel = "$currencySymbol${"%,.0f".format(chip.total)}",
+                                        count = chip.count,
                                         selected = selected,
                                         selectedColor = IndNavyHeader
                                     ) {
-                                        selectedCategoryFilter = if (selected) "ALL" else category
+                                        selectedCategoryFilter = if (selected) "ALL" else chip.filterKey
                                     }
                                 }
                             }
@@ -621,19 +662,22 @@ fun DashboardScreen(
             items(dashboardCategorySummaries, key = { "cat_${it.categoryKey}" }) { cat ->
                 val categoryShare = if (totalFilteredDebits > 0) (cat.totalAmount / totalFilteredDebits).toFloat() else 0f
                 val isExpanded = expandedCategoryKeys.contains(cat.categoryKey)
-                val categoryItems = remember(filteredDebits, cat.categoryKey) {
-                    filteredDebits.filter {
-                        it.category.equals(cat.categoryKey, ignoreCase = true) ||
-                        it.category.equals(cat.categoryName, ignoreCase = true) ||
-                        it.customCategoryName.equals(cat.categoryName, ignoreCase = true)
-                    }
+                val categoryItems = remember(filteredDebits, cat.categoryKey, month, year) {
+                    filteredDebits.filter { debitMatchesCategorySummary(it, cat) }
+                        .sortedWith(compareDebitsByRecency(month, year))
                 }
 
                 IndCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("dashboard_category_${cat.categoryKey}"),
-                    onClick = { selectedCategoryForDrillDown = cat }
+                    onClick = {
+                        expandedCategoryKeys = if (isExpanded) {
+                            expandedCategoryKeys - cat.categoryKey
+                        } else {
+                            expandedCategoryKeys + cat.categoryKey
+                        }
+                    }
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
@@ -646,25 +690,18 @@ fun DashboardScreen(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                CategoryIconBadge(categoryKey = cat.iconKey)
+                                CategoryIconBadge(
+                                    categoryKey = cat.categoryName,
+                                    storedIconName = categorySummaryStoredIcon(cat),
+                                    customColor = customCategoryTint(cat.colorHex)
+                                )
                                 Column {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Text(
-                                            prettyCategory(cat.categoryName),
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = FontWeight.Bold,
-                                            color = IndTextPrimary
-                                        )
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.ArrowForwardIos,
-                                            contentDescription = "Drill down",
-                                            tint = IndTextMuted,
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                    }
+                                    Text(
+                                        prettyCategory(cat.categoryName),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = IndTextPrimary
+                                    )
                                     Text(
                                         text = "${cat.itemCount} items • ${cat.paidCount} paid • ${(categoryShare * 100).toInt()}% of outflow",
                                         style = MaterialTheme.typography.labelSmall,
@@ -742,7 +779,8 @@ fun DashboardScreen(
                                         onToggleCreditCard = { viewModel.toggleDebitCreditCardStatus(item) },
                                         onToggleRecurring = { viewModel.toggleDebitRecurring(item) },
                                         onEdit = { editingDebitItem = item },
-                                        onDelete = { viewModel.deleteDebit(item) }
+                                        onDelete = { expensePendingDelete = item },
+                                        customCategories = customCategories
                                     )
                                 }
                             }
@@ -759,7 +797,8 @@ fun DashboardScreen(
                     onToggleCreditCard = { viewModel.toggleDebitCreditCardStatus(item) },
                     onToggleRecurring = { viewModel.toggleDebitRecurring(item) },
                     onEdit = { editingDebitItem = item },
-                    onDelete = { viewModel.deleteDebit(item) }
+                    onDelete = { expensePendingDelete = item },
+                    customCategories = customCategories
                 )
             }
         }
@@ -786,12 +825,21 @@ fun DashboardScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Income · ${filteredCredits.size} items",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = IndNavyHeader
-                        )
+                        Column {
+                            Text(
+                                text = "Income · ${filteredCredits.size} items",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = IndNavyHeader
+                            )
+                            if (creditsViewMode == "LIST") {
+                                Text(
+                                    text = "List view · newest first",
+                                    fontSize = 10.sp,
+                                    color = IndTextMuted
+                                )
+                            }
+                        }
                         Text(
                             text = "+$currencySymbol${"%,.0f".format(visibleCreditTotal)}",
                             fontWeight = FontWeight.ExtraBold,
@@ -810,11 +858,17 @@ fun DashboardScreen(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            Text(
+                                text = "Filters",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = IndTextMuted,
+                                modifier = Modifier.padding(start = 2.dp)
+                            )
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 DashIconChip("Category", Icons.Filled.GridView, creditsViewMode == "GROUP_BY_CATEGORY", Color(0xFF16A34A)) {
                                     creditsViewMode = "GROUP_BY_CATEGORY"
@@ -840,11 +894,17 @@ fun DashboardScreen(
                             }
 
                             if (creditCategoryTotals.isNotEmpty()) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                Text(
+                                    text = "By category",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndTextMuted,
+                                    modifier = Modifier.padding(start = 2.dp, top = 2.dp)
+                                )
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     creditCategoryTotals.forEach { (category, total, count) ->
                                         val selected = selectedCreditCategoryFilter.equals(category, true)
@@ -883,7 +943,7 @@ fun DashboardScreen(
                         filteredCredits.filter {
                             it.category.equals(cat.categoryKey, ignoreCase = true) ||
                             it.category.equals(cat.categoryName, ignoreCase = true)
-                        }
+                        }.sortedWith(compareCreditsByRecency())
                     }
 
                     IndCard(
@@ -959,13 +1019,14 @@ fun DashboardScreen(
                                 Spacer(modifier = Modifier.height(4.dp))
                                 HorizontalDivider(color = IndBorderSubtle, thickness = 0.5.dp)
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    categoryItems.sortedByDescending { it.receivedDateTimestamp ?: 0L }.forEach { item ->
+                                    categoryItems.forEach { item ->
                                         CreditItemCard(
                                             item = item,
                                             currencySymbol = currencySymbol,
                                             onToggleReceived = { viewModel.toggleIncomeReceived(item.id, month, year) },
+                                            onToggleRecurring = { viewModel.toggleIncomeRecurring(item.id, month, year) },
                                             onEdit = { editingCreditSource = item },
-                                            onDelete = { viewModel.deleteIncomeSource(item.id, month, year) }
+                                            onDelete = { creditPendingDelete = item }
                                         )
                                     }
                                 }
@@ -979,69 +1040,37 @@ fun DashboardScreen(
                         item = item,
                         currencySymbol = currencySymbol,
                         onToggleReceived = { viewModel.toggleIncomeReceived(item.id, month, year) },
+                        onToggleRecurring = { viewModel.toggleIncomeRecurring(item.id, month, year) },
                         onEdit = { editingCreditSource = item },
-                        onDelete = { viewModel.deleteIncomeSource(item.id, month, year) }
+                        onDelete = { creditPendingDelete = item }
                     )
                 }
             }
         }
     }
 
-    // Category Drill-Down Dialog with full edit, delete, and payment toggle support
-    selectedCategoryForDrillDown?.let { cat ->
-        val matchingDebits = remember(currentDebits, cat, selectedStatusFilter, creditCardOnlyFilter, selectedSpecificDay) {
-            filteredDebits.filter {
-                it.category.equals(cat.categoryKey, ignoreCase = true) ||
-                it.category.equals(cat.categoryName, ignoreCase = true) ||
-                it.customCategoryName.equals(cat.categoryName, ignoreCase = true)
-            }
-        }
-
-        val updatedCat = remember(matchingDebits, cat) {
-            val total = matchingDebits.sumOf { it.amount }
-            val paid = matchingDebits.filter { it.isPaid }.sumOf { it.amount }
-            cat.copy(
-                totalAmount = total,
-                paidAmount = paid,
-                yetToPayAmount = total - paid,
-                itemCount = matchingDebits.size,
-                paidCount = matchingDebits.count { it.isPaid }
-            )
-        }
-
-        CategoryDrillDownDialog(
-            categorySummary = updatedCat,
-            debitItems = matchingDebits,
-            monthName = monthName,
-            year = year,
-            currencySymbol = currencySymbol,
-            onDismiss = { selectedCategoryForDrillDown = null },
-            onEditItem = { item -> editingDebitItem = item },
-            onDeleteItem = { item -> viewModel.deleteDebit(item) },
-            onTogglePaid = { item -> viewModel.toggleDebitPaid(item) },
-            onToggleCreditCard = { item -> viewModel.toggleDebitCreditCardStatus(item) },
-            onToggleRecurring = { item -> viewModel.toggleDebitRecurring(item) }
-        )
-    }
-
     // Manage Income & Credit Dialog
-    if (showManageIncomeDialog || showAddCreditDialog) {
+    if (showManageIncomeDialog || showAddCreditDialog || editingCreditSource != null) {
         ManageIncomeCreditDialog(
             incomeSources = summary.incomeSources,
             baseSalary = currentSalaryRecord?.baseSalary ?: (summary.incomeSources.find { it.category == "SALARY" || it.id == "1" }?.amount ?: 0.0),
+            startInEditCredit = editingCreditSource,
+            openOnAddCreditTab = showAddCreditDialog && editingCreditSource == null,
             onDismiss = {
                 showManageIncomeDialog = false
                 showAddCreditDialog = false
+                editingCreditSource = null
             },
-            onSaveNewCredit = { title, amount, category, dateString ->
-                viewModel.addIncomeCredit(title, amount, category, dateString, month, year)
+            onSaveNewCredit = { title, amount, category, dateString, isRecurring ->
+                viewModel.addIncomeCredit(title, amount, category, dateString, month, year, isRecurring)
                 showManageIncomeDialog = false
                 showAddCreditDialog = false
             },
-            onUpdateCredit = { id, title, amount, category, dateString ->
-                viewModel.updateIncomeSource(id, title, amount, category, dateString, month, year)
+            onUpdateCredit = { id, title, amount, category, dateString, isRecurring ->
+                viewModel.updateIncomeSource(id, title, amount, category, dateString, month, year, isRecurring)
                 showManageIncomeDialog = false
                 showAddCreditDialog = false
+                editingCreditSource = null
             },
             onDeleteCredit = { id ->
                 viewModel.deleteIncomeSource(id, month, year)
@@ -1062,101 +1091,71 @@ fun DashboardScreen(
             todayDay = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_MONTH),
             month = month,
             year = year,
-            customCategories = emptyList(),
+            customCategories = customCategories,
             allHistoricalDebits = allDebits,
             onDismiss = { showAddDebitDialog = false },
             onSaveBatch = { batch ->
                 viewModel.insertDebits(batch)
                 showAddDebitDialog = false
             },
-            onOpenAddCustomCategory = {}
+            onOpenAddCustomCategory = { showAddCustomCategoryDialog = true }
         )
     }
 
-    // Edit Debit Dialog
+    if (showAddCustomCategoryDialog) {
+        AddCustomCategoryDialog(
+            onDismiss = { showAddCustomCategoryDialog = false },
+            onSave = { name, icon, color ->
+                viewModel.addCustomCategory(name, icon, color)
+                showAddCustomCategoryDialog = false
+            }
+        )
+    }
+
     if (editingDebitItem != null) {
         val item = editingDebitItem!!
-        val amtStr = if (item.amount > 0) (if (item.amount % 1.0 == 0.0) item.amount.toInt().toString() else item.amount.toString()) else ""
-        val principalStr = if (item.principalAmount > 0) (if (item.principalAmount % 1.0 == 0.0) item.principalAmount.toInt().toString() else item.principalAmount.toString()) else ""
-        val rateStr = if (item.interestRate > 0) item.interestRate.toString() else ""
-        val totalTenureStr = if (item.totalTenureMonths > 0) item.totalTenureMonths.toString() else ""
-        val currentTenureStr = if (item.currentMonthTenure > 0) item.currentMonthTenure.toString() else "1"
-
-        AddEditDebitDialog(
-            initialTitle = item.title,
-            initialAmount = amtStr,
-            initialCategory = item.category,
-            initialDueDate = item.dueDateDay.toString(),
-            initialNotes = item.notes,
-            initialPrincipalAmount = principalStr,
-            initialInterestRate = rateStr,
-            initialTotalTenureMonths = totalTenureStr,
-            initialCurrentMonthTenure = currentTenureStr,
-            initialIsPaidViaCreditCard = item.isPaidViaCreditCard,
-            initialIsRecurring = item.isRecurring,
+        val allDebits by viewModel.allDebits.collectAsStateWithLifecycle()
+        QuickMultiAddSheet(
+            currencySymbol = currencySymbol,
+            todayDay = item.dueDateDay.coerceIn(1, 28),
+            month = month,
+            year = year,
+            customCategories = customCategories,
+            allHistoricalDebits = allDebits,
+            editingDebit = item,
             onDismiss = { editingDebitItem = null },
-            onSave = { title, amount, category, dueDate, notes, principalAmount, interestRate, totalTenureMonths, currentMonthTenure, isPaidViaCreditCard, isRecurring ->
-                val dayInt = dueDate.filter { it.isDigit() }.toIntOrNull() ?: item.dueDateDay
-                viewModel.updateDebit(
-                    item.copy(
-                        title = title,
-                        amount = amount,
-                        category = category,
-                        dueDateDay = dayInt,
-                        notes = notes,
-                        isPaidViaCreditCard = isPaidViaCreditCard,
-                        isRecurring = isRecurring,
-                        principalAmount = principalAmount,
-                        interestRate = interestRate,
-                        totalTenureMonths = totalTenureMonths,
-                        currentMonthTenure = currentMonthTenure
-                    )
-                )
+            onSaveBatch = { batch ->
+                batch.firstOrNull()?.let { viewModel.updateDebit(it) }
                 editingDebitItem = null
+            },
+            onOpenAddCustomCategory = { showAddCustomCategoryDialog = true }
+        )
+    }
+
+    expensePendingDelete?.let { item ->
+        ConfirmDeleteDialog(
+            title = "Delete expense?",
+            message = "Remove \"${item.title.ifBlank { debitCategoryDisplayLabel(item) }}\"? This cannot be undone.",
+            onDismiss = { expensePendingDelete = null },
+            onConfirm = {
+                viewModel.deleteDebit(item)
+                expensePendingDelete = null
+                if (editingDebitItem?.id == item.id) editingDebitItem = null
             }
         )
     }
 
-    // Edit Credit Dialog
-    if (editingCreditSource != null) {
-        val src = editingCreditSource!!
-        var editTitle by remember { mutableStateOf(src.title.ifBlank { src.name }) }
-        var editAmountStr by remember { mutableStateOf(if (src.amount > 0) (if (src.amount % 1.0 == 0.0) src.amount.toInt().toString() else src.amount.toString()) else "") }
-        var editCategory by remember { mutableStateOf(src.category) }
-
-        IndDialog(
-            onDismiss = { editingCreditSource = null },
-            title = "Edit Credit Entry",
-            subtitle = "Modify income or credit details",
-            icon = Icons.Filled.Payments,
-            iconTint = Color(0xFF16A34A),
-            confirmButtonText = "Save Changes",
+    creditPendingDelete?.let { src ->
+        ConfirmDeleteDialog(
+            title = "Delete credit?",
+            message = "Remove \"${src.title.ifBlank { src.name }}\" from this month? This cannot be undone.",
+            onDismiss = { creditPendingDelete = null },
             onConfirm = {
-                val amt = editAmountStr.toDoubleOrNull() ?: src.amount
-                viewModel.updateIncomeSource(src.id, editTitle, amt, editCategory, null, month, year)
-                editingCreditSource = null
+                viewModel.deleteIncomeSource(src.id, month, year)
+                creditPendingDelete = null
+                if (editingCreditSource?.id == src.id) editingCreditSource = null
             }
-        ) {
-            IndOutlinedTextField(
-                value = editTitle,
-                onValueChange = { editTitle = it },
-                label = "Title / Source Payee",
-                leadingIcon = Icons.Filled.Payments
-            )
-            IndOutlinedTextField(
-                value = editAmountStr,
-                onValueChange = { editAmountStr = it },
-                label = "Amount (₹)",
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                leadingIcon = Icons.Filled.CurrencyRupee
-            )
-            IndCategoryDropdown(
-                selectedCategory = editCategory,
-                onCategorySelected = { editCategory = it },
-                categories = com.example.data.model.IncomeCategory.entries.map { it.name },
-                label = "Category"
-            )
-        }
+        )
     }
 
     // Statement Import Dialog (PhonePe, GPay, Bank Statement, Super Money)
@@ -1178,8 +1177,11 @@ fun DebitItemCard(
     onToggleCreditCard: () -> Unit,
     onToggleRecurring: () -> Unit = {},
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    customCategories: List<com.example.data.model.CustomCategory> = emptyList()
 ) {
+    val categoryLabel = debitCategoryDisplayLabel(item)
+    val storedIcon = debitItemStoredIcon(item, customCategories)
     val isChit = item.category.equals("CHIT", ignoreCase = true) || item.title.contains("CHIT", ignoreCase = true)
     val isLoan = com.example.ui.components.isLoanOrEmi(item.category) || item.principalAmount > 0.0
 
@@ -1216,7 +1218,10 @@ fun DebitItemCard(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    CategoryIconBadge(categoryKey = item.category)
+                    CategoryIconBadge(
+                        categoryKey = categoryLabel,
+                        storedIconName = storedIcon
+                    )
                     Column(modifier = Modifier.clickable { onEdit() }) {
                         Text(item.title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = IndTextPrimary)
                         Row(
@@ -1225,7 +1230,7 @@ fun DebitItemCard(
                         ) {
                             val isCcItem = item.isActualCreditCardTransaction()
                             Text(
-                                text = "${item.category} • Due Day ${item.dueDateDay}" + if (isCcItem) " • 💳 CC" else "",
+                                text = "$categoryLabel • Due Day ${item.dueDateDay}" + if (isCcItem) " • 💳 CC" else "",
                                 fontSize = 11.sp,
                                 color = if (isCcItem) Color(0xFF7C3AED) else IndTextSecondary
                             )
@@ -1542,16 +1547,27 @@ private fun DashIconChip(
     }
 }
 
+private data class CategoryFilterChipData(
+    val filterKey: String,
+    val label: String,
+    val stylingKey: String,
+    val storedIconName: String?,
+    val total: Double,
+    val count: Int
+)
+
 @Composable
 private fun CategoryTotalPill(
     category: String,
+    stylingKey: String = category,
+    storedIconName: String? = null,
     totalLabel: String,
     count: Int,
     selected: Boolean,
     selectedColor: Color,
     onClick: () -> Unit
 ) {
-    val styling = getCategoryStyling(category)
+    val styling = getCategoryStyling(stylingKey, storedIconName = storedIconName)
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = if (selected) selectedColor else IndBackground,
@@ -1606,6 +1622,7 @@ fun CreditItemCard(
     item: IncomeSource,
     currencySymbol: String,
     onToggleReceived: () -> Unit,
+    onToggleRecurring: () -> Unit = {},
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -1628,11 +1645,41 @@ fun CreditItemCard(
                     CategoryIconBadge(categoryKey = item.category)
                     Column(modifier = Modifier.clickable { onEdit() }) {
                         Text(item.title.ifBlank { item.name }, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = IndTextPrimary)
-                        Text(
-                            text = item.category,
-                            fontSize = 11.sp,
-                            color = IndTextSecondary
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = item.category,
+                                fontSize = 11.sp,
+                                color = IndTextSecondary
+                            )
+                            if (item.isRecurring) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = IndGreenLight
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Repeat,
+                                            contentDescription = "Recurring",
+                                            tint = IndGreenDark,
+                                            modifier = Modifier.size(10.dp)
+                                        )
+                                        Text(
+                                            text = "Recurring",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = IndGreenDark
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1690,6 +1737,28 @@ fun CreditItemCard(
                             )
                         }
                     }
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (item.isRecurring) IndGreenLight else IndSurface,
+                        border = BorderStroke(0.5.dp, if (item.isRecurring) IndGreen else IndBorder),
+                        modifier = Modifier
+                            .clickable(onClick = onToggleRecurring)
+                            .testTag("toggle_recurring_credit_${item.id}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Repeat,
+                                contentDescription = "Recurring Toggle",
+                                tint = if (item.isRecurring) IndGreenDark else IndTextSecondary,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    }
                 }
 
                 Row(
@@ -1737,3 +1806,19 @@ fun CreditItemCard(
         }
     }
 }
+
+private fun debitRecencyMillis(item: DebitItem, month: Int, year: Int): Long {
+    if (item.createdAt > 0L) return item.createdAt
+    item.paidDateTimestamp?.takeIf { it > 0L }?.let { return it }
+    val day = item.dueDateDay.coerceIn(1, 28)
+    return java.util.Calendar.getInstance().apply {
+        set(year, month - 1, day, 12, 0, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }.timeInMillis
+}
+
+private fun compareDebitsByRecency(month: Int, year: Int): Comparator<DebitItem> =
+    compareByDescending<DebitItem> { debitRecencyMillis(it, month, year) }.thenByDescending { it.id }
+
+private fun compareCreditsByRecency(): Comparator<IncomeSource> =
+    compareByDescending<IncomeSource> { it.receivedDateTimestamp ?: 0L }.thenByDescending { it.id }

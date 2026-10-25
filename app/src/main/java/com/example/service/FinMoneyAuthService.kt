@@ -213,9 +213,25 @@ object FinMoneyAuthService {
 
     fun isEmailVerifiedOnFirebase(user: FirebaseUser?): Boolean = user?.isEmailVerified == true
 
+    fun isPhoneAuthQuotaError(error: Throwable?): Boolean {
+        val root = FirebaseProjectDiagnostics.rootCause(error) ?: error
+        val authEx = root as? FirebaseAuthException
+        if (authEx?.errorCode == "ERROR_QUOTA_EXCEEDED") return true
+        val msg = root?.message.orEmpty()
+        return msg.contains("quota", ignoreCase = true) &&
+            msg.contains("exceed", ignoreCase = true)
+    }
+
     fun userMessageForPhoneAuthError(error: Throwable?, context: Context? = null): String {
         val root = FirebaseProjectDiagnostics.rootCause(error) ?: error
         if (root == null) return "Could not send OTP. Please try again."
+        if (isPhoneAuthQuotaError(root)) {
+            return (
+                "SMS OTP limit reached for this Firebase project (daily quota). " +
+                    "Wait until the limit resets, upgrade billing in Firebase Console, or add your number under " +
+                    "Authentication → Sign-in method → Phone → Phone numbers for testing (fixed OTP, no SMS)."
+                )
+        }
         val authEx = root as? FirebaseAuthException
         val core = when (authEx?.errorCode) {
             "ERROR_OPERATION_NOT_ALLOWED" -> (

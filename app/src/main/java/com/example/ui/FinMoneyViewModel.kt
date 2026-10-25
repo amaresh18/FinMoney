@@ -39,6 +39,9 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
+import com.example.ui.components.CUSTOM_CATEGORY_FILTER_PREFIX
+import com.example.ui.components.debitCategoryDisplayLabel
+import com.example.ui.components.debitCategoryFilterKey
 import com.example.domain.usecase.LoanLedgerMath
 import com.example.domain.usecase.LoanPartyAuth
 import com.example.domain.usecase.ValidateLoanLifecycleUseCase.ValidationResult
@@ -189,9 +192,19 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    val customCategories: StateFlow<List<CustomCategory>> = userProfile
+        .flatMapLatest { u -> dao.getAllCustomCategories(u?.userId ?: getActiveUserId()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     val notifications: StateFlow<List<AppNotification>> = userProfile
         .flatMapLatest { u -> dao.getAllNotifications(u?.userId ?: getActiveUserId()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val unreadNotificationCount: StateFlow<Int> = userProfile
+        .flatMapLatest { u -> dao.getUnreadNotificationCount(u?.userId ?: getActiveUserId()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val bankTransactions: StateFlow<List<BankTransactionRecord>> = userProfile
@@ -199,12 +212,19 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val monthlySummary: StateFlow<MonthlyFinanceSummary?> = combine(
-        currentSalaryRecord,
-        currentDebits,
-        currentReconciliation,
-        _currentMonth,
-        _currentYear
-    ) { salary, debits, recon, m, y ->
+        combine(currentSalaryRecord, currentDebits, customCategories) { salary, debits, customCats ->
+            Triple(salary, debits, customCats)
+        },
+        combine(currentReconciliation, _currentMonth, _currentYear) { recon, m, y ->
+            Triple(recon, m, y)
+        }
+    ) { debitData, periodData ->
+        val salary = debitData.first
+        val debits = debitData.second
+        val customCats = debitData.third
+        val recon = periodData.first
+        val m = periodData.second
+        val y = periodData.third
         val incomeSources = if (salary != null && salary.incomeSourcesJson.isNotBlank() && salary.incomeSourcesJson != "[]") {
             FinMoneyRepository.parseIncomeSources(salary.incomeSourcesJson)
         } else if (salary != null && (salary.baseSalary > 0 || salary.additionalIncome > 0)) {
@@ -240,21 +260,27 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         val netFlexibleSpending = totalIncome - totalDebits
         val daysRemaining = 30
 
-        val categoryGroups = debits.groupBy { it.category }
-        val categorySummaries = categoryGroups.map { (cat, items) ->
+        val categoryGroups = debits.groupBy { debitCategoryFilterKey(it) }
+        val categorySummaries = categoryGroups.map { (filterKey, items) ->
             val catTotal = items.sumOf { it.amount }
             val catPaid = items.filter { it.isPaid }.sumOf { it.amount }
             val pct = if (totalDebits > 0) (catTotal / totalDebits).toFloat() else 0f
+            val displayName = debitCategoryDisplayLabel(items.first())
+            val customMeta = if (filterKey.startsWith(CUSTOM_CATEGORY_FILTER_PREFIX, ignoreCase = true)) {
+                val customName = filterKey.substring(CUSTOM_CATEGORY_FILTER_PREFIX.length)
+                customCats.find { it.name.equals(customName, ignoreCase = true) }
+            } else null
             CategorySummary(
-                categoryName = cat,
-                categoryKey = cat.uppercase(),
-                iconKey = cat,
+                categoryName = displayName,
+                categoryKey = filterKey,
+                iconKey = customMeta?.iconName?.takeIf { it.isNotBlank() } ?: filterKey,
                 totalAmount = catTotal,
                 paidAmount = catPaid,
                 yetToPayAmount = catTotal - catPaid,
                 itemCount = items.size,
                 paidCount = items.count { it.isPaid },
-                percentage = pct
+                percentage = pct,
+                colorHex = customMeta?.colorHex ?: "#00B386"
             )
         }.sortedByDescending { it.totalAmount }
 
@@ -312,10 +338,18 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ReconciliationSummary())
 
-    private val _isNotificationAccessGranted = MutableStateFlow(true)
+    private val _isNotificationAccessGranted = MutableStateFlow(false)
     val isNotificationAccessGranted: StateFlow<Boolean> = _isNotificationAccessGranted.asStateFlow()
 
-    fun checkNotificationAccess(context: Context) {}
+    private val _isAutoExpenseTrackingReady = MutableStateFlow(false)
+    val isAutoExpenseTrackingReady: StateFlow<Boolean> = _isAutoExpenseTrackingReady.asStateFlow()
+
+    fun checkNotificationAccess(context: Context) {
+        val listener = com.example.util.NotificationPermissionsHelper.hasNotificationListenerAccess(context)
+        val ready = com.example.util.NotificationPermissionsHelper.isAutoExpenseTrackingReady(context)
+        _isNotificationAccessGranted.value = listener
+        _isAutoExpenseTrackingReady.value = ready
+    }
 
     fun saveReconciliation(
         month: Int = 10,
@@ -627,6 +661,65 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun prefillRecurringCreditsForMonth(targetMonth: Int = _currentMonth.value, targetYear: Int = _currentYear.value) {
+        launchSafe {
+            try {
+                val activeUid = getActiveUserId()
+                val allRecords = dao.getAllSalaryRecordsDirect(activeUid)
+                val templates = linkedMapOf<String, IncomeSource>()
+                for (record in allRecords) {
+                    if (record.month == targetMonth && record.year == targetYear) continue
+                    val sources = FinMoneyRepository.parseIncomeSources(record.incomeSourcesJson)
+                    for (src in sources) {
+                        if (!src.isRecurring) continue
+                        val key = "${src.title.trim().lowercase()}|${src.category.trim().lowercase()}|${src.amount}"
+                        if (!templates.containsKey(key)) {
+                            templates[key] = src
+                        }
+                    }
+                }
+
+                if (templates.isEmpty()) return@launchSafe
+
+                val existing = dao.getSalaryRecordDirect(targetMonth, targetYear, activeUid)
+                val currentSources = getOrCreateIncomeSources(existing)
+                val toAdd = mutableListOf<IncomeSource>()
+
+                for (template in templates.values) {
+                    val alreadyPresent = currentSources.any { item ->
+                        item.title.equals(template.title, ignoreCase = true) &&
+                            item.category.equals(template.category, ignoreCase = true) &&
+                            kotlin.math.abs(item.amount - template.amount) < 0.01
+                    }
+                    if (!alreadyPresent) {
+                        toAdd.add(
+                            template.copy(
+                                id = java.util.UUID.randomUUID().toString(),
+                                isReceived = false,
+                                isRecurring = true,
+                                receivedDateTimestamp = System.currentTimeMillis()
+                            )
+                        )
+                    }
+                }
+
+                if (toAdd.isNotEmpty()) {
+                    currentSources.addAll(toAdd)
+                    saveUpdatedIncomeSources(existing, currentSources, targetMonth, targetYear)
+                    notifyUser("Added ${toAdd.size} recurring income line(s) for this month.")
+                    Log.i("FinMoneyViewModel", "Prefilled ${toAdd.size} recurring credits into $targetMonth/$targetYear")
+                }
+            } catch (e: Exception) {
+                Log.e("FinMoneyViewModel", "Failed to prefill recurring credits: ${e.message}", e)
+            }
+        }
+    }
+
+    fun prefillRecurringForMonth(targetMonth: Int = _currentMonth.value, targetYear: Int = _currentYear.value) {
+        prefillRecurringDebitsForMonth(targetMonth, targetYear)
+        prefillRecurringCreditsForMonth(targetMonth, targetYear)
+    }
+
     fun toggleDebitRecurring(item: DebitItem) {
         launchSafe {
             val updated = item.copy(isRecurring = !item.isRecurring)
@@ -649,6 +742,32 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 if (items.size == 1) "Expense saved on this device."
                 else "${items.size} expenses saved on this device."
             )
+        }
+    }
+
+    fun addCustomCategory(name: String, iconName: String, colorHex: String) {
+        launchSafe {
+            val trimmed = name.trim()
+            if (trimmed.isBlank()) {
+                notifyUser("Enter a category name.")
+                return@launchSafe
+            }
+            val uid = getActiveUserId()
+            val existing = dao.getCustomCategoryByName(trimmed, uid)
+            if (existing != null) {
+                notifyUser("A category with this name already exists.")
+                return@launchSafe
+            }
+            dao.insertCustomCategory(
+                CustomCategory(
+                    userId = uid,
+                    name = trimmed,
+                    displayName = trimmed,
+                    iconName = iconName.ifBlank { "Category" },
+                    colorHex = colorHex.ifBlank { "#00B386" }
+                )
+            )
+            notifyUser("Custom category \"$trimmed\" added.")
         }
     }
 
@@ -753,7 +872,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         category: String = "OTHER",
         dateString: String? = null,
         month: Int? = null,
-        year: Int? = null
+        year: Int? = null,
+        isRecurring: Boolean = false
     ) {
         val parsedTimestamp = if (!dateString.isNullOrBlank()) {
             try {
@@ -778,6 +898,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 amount = amount,
                 category = category,
                 isReceived = true,
+                isRecurring = isRecurring,
                 receivedDateTimestamp = timestamp
             )
             currentSources.add(newSource)
@@ -793,7 +914,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         newCategory: String = "OTHER",
         dateString: String? = null,
         month: Int? = null,
-        year: Int? = null
+        year: Int? = null,
+        isRecurring: Boolean? = null
     ) {
         val parsedTimestamp = if (!dateString.isNullOrBlank()) {
             try {
@@ -819,8 +941,30 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                     name = newTitle,
                     amount = newAmount,
                     category = newCategory,
+                    isRecurring = isRecurring ?: old.isRecurring,
                     receivedDateTimestamp = timestamp
                 )
+                saveUpdatedIncomeSources(existing, currentSources, m, y)
+            }
+        }
+    }
+
+    fun toggleIncomeRecurring(
+        id: String,
+        month: Int? = null,
+        year: Int? = null
+    ) {
+        val m = month ?: _currentMonth.value
+        val y = year ?: _currentYear.value
+
+        launchSafe {
+            val activeUid = getActiveUserId()
+            val existing = dao.getSalaryRecordDirect(m, y, activeUid)
+            val currentSources = getOrCreateIncomeSources(existing)
+            val index = currentSources.indexOfFirst { it.id == id }
+            if (index != -1) {
+                val old = currentSources[index]
+                currentSources[index] = old.copy(isRecurring = !old.isRecurring)
                 saveUpdatedIncomeSources(existing, currentSources, m, y)
             }
         }
@@ -1847,9 +1991,17 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         notifyUser(result)
     }
 
-    fun markLoanNotificationRead(notificationId: Long) {
+    fun markNotificationRead(notificationId: Long) {
         launchSafe {
             dao.markNotificationRead(notificationId)
+        }
+    }
+
+    fun markLoanNotificationRead(notificationId: Long) = markNotificationRead(notificationId)
+
+    fun markAllNotificationsRead() {
+        launchSafe {
+            dao.markAllNotificationsRead(getActiveUserId())
         }
     }
 

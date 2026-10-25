@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.speech.RecognizerIntent
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -27,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -102,8 +104,11 @@ fun KuberaGuruAvatar(
 @Composable
 fun KuberaAiScreen(
     viewModel: FinMoneyViewModel,
+    onClose: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    BackHandler(onBack = onClose)
+
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val coroutineScope = rememberCoroutineScope()
@@ -183,6 +188,18 @@ fun KuberaAiScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
+                            IconButton(
+                                onClick = onClose,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .testTag("kubera_close_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Close Kubera AI",
+                                    tint = KuberaGold
+                                )
+                            }
                             KuberaGuruAvatar(size = 42.dp)
 
                             Column {

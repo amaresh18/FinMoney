@@ -45,6 +45,9 @@ interface FinMoneyDao {
     @Query("SELECT * FROM salary_records WHERE (userId = :userId OR :userId = '') ORDER BY year DESC, month DESC")
     fun getAllSalaryRecords(userId: String = ""): Flow<List<SalaryRecord>>
 
+    @Query("SELECT * FROM salary_records WHERE (userId = :userId OR :userId = '') ORDER BY year DESC, month DESC")
+    suspend fun getAllSalaryRecordsDirect(userId: String = ""): List<SalaryRecord>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateSalary(record: SalaryRecord): Long
 
@@ -192,8 +195,8 @@ interface FinMoneyDao {
     @Query("SELECT * FROM app_notifications WHERE relatedLoanId = :loanId")
     suspend fun getNotificationsForLoan(loanId: Long): List<AppNotification>
 
-    @Query("UPDATE app_notifications SET isRead = 1")
-    suspend fun markAllNotificationsRead()
+    @Query("UPDATE app_notifications SET isRead = 1 WHERE (userId = :userId OR :userId = '') AND isRead = 0")
+    suspend fun markAllNotificationsRead(userId: String = "")
 
     @Query("UPDATE app_notifications SET isRead = 1, actionType = 'SYSTEM' WHERE relatedLoanId = :loanId")
     suspend fun markNotificationsReadForLoan(loanId: Long)

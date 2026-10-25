@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.bank.MerchantEnrichmentEngine
+import com.example.data.model.AppNotification
 import com.example.data.model.BankTransactionRecord
 import com.example.service.BankNotificationListenerService
 import com.example.service.BankSyncManager
@@ -56,8 +57,14 @@ fun PendingTransactionsScreen(
     val pendingTransactions by viewModel.pendingBankTransactions.collectAsStateWithLifecycle()
     val allTransactions by viewModel.bankTransactions.collectAsStateWithLifecycle()
     val notifications by viewModel.notifications.collectAsStateWithLifecycle()
-    val loanActions = remember(notifications) {
-        notifications.filter { it.type == "LOAN_ACTION" && !it.isRead }
+    val unreadNotifications = remember(notifications) {
+        notifications.filter { !it.isRead }
+    }
+    val loanActions = remember(unreadNotifications) {
+        unreadNotifications.filter { it.type == "LOAN_ACTION" }
+    }
+    val otherUnreadNotifications = remember(unreadNotifications) {
+        unreadNotifications.filter { it.type != "LOAN_ACTION" }
     }
 
     val context = LocalContext.current
@@ -145,6 +152,26 @@ fun PendingTransactionsScreen(
                     }
                 },
                 actions = {
+                    if (unreadNotifications.isNotEmpty()) {
+                        TextButton(
+                            onClick = { viewModel.markAllNotificationsRead() },
+                            modifier = Modifier.testTag("mark_all_notifications_read_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.DoneAll,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = AppTheme.colors.primary
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Mark all read",
+                                style = AppTheme.typography.labelSmall,
+                                color = AppTheme.colors.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                     if (pendingTransactions.isNotEmpty()) {
                         Button(
                             onClick = { viewModel.approveAllPendingTransactions() },
@@ -183,6 +210,24 @@ fun PendingTransactionsScreen(
         ) {
             Spacer(modifier = Modifier.height(AppTheme.dimensions.extraSmall))
 
+            if (otherUnreadNotifications.isNotEmpty()) {
+                Text(
+                    "Notifications",
+                    fontWeight = FontWeight.Bold,
+                    color = IndNavyHeader,
+                    fontSize = 14.sp
+                )
+                otherUnreadNotifications.forEach { note ->
+                    AppNotificationCard(
+                        notification = note,
+                        dateFormatted = dateFormatter.format(Date(note.timestamp)),
+                        onOpen = {
+                            viewModel.markNotificationRead(note.id)
+                        }
+                    )
+                }
+            }
+
             if (loanActions.isNotEmpty()) {
                 Text(
                     "Lent & borrowed actions",
@@ -195,6 +240,7 @@ fun PendingTransactionsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
+                                viewModel.markNotificationRead(note.id)
                                 onOpenLoan(note.relatedLoanId ?: 0L, "", note.id)
                             },
                         colors = CardDefaults.cardColors(containerColor = IndBlueLight),
@@ -402,6 +448,67 @@ fun PendingTransactionsScreen(
                 isPermissionGranted = BankSyncManager.isNotificationAccessGranted(context)
             }
         )
+    }
+}
+
+@Composable
+private fun AppNotificationCard(
+    notification: AppNotification,
+    dateFormatted: String,
+    onOpen: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
+        colors = CardDefaults.cardColors(containerColor = IndSurface),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, IndBorderSubtle)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(IndBlue)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = notification.title.ifBlank { "Notification" },
+                    fontWeight = FontWeight.Bold,
+                    color = IndNavyHeader,
+                    fontSize = 14.sp
+                )
+                if (notification.message.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = notification.message,
+                        fontSize = 12.sp,
+                        color = IndTextSecondary,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = dateFormatted,
+                    fontSize = 11.sp,
+                    color = IndTextMuted
+                )
+            }
+            Icon(
+                imageVector = Icons.Outlined.MarkEmailRead,
+                contentDescription = "Mark read",
+                tint = IndBlue,
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }
 

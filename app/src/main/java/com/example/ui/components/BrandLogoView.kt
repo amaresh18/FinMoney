@@ -313,11 +313,42 @@ fun BrandLogo(
 fun FinMoneyAppLogo(size: Dp, shape: Shape = RoundedCornerShape(10.dp)) {
     androidx.compose.foundation.Image(
         painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.app_icon_logo),
-        contentDescription = "FinMoney App Icon",
+        contentDescription = "FinMoney",
         modifier = Modifier
             .size(size)
             .clip(shape)
     )
+}
+
+/** App icon + optional "FinMoney" title for headers and onboarding. */
+@Composable
+fun FinMoneyWordmarkRow(
+    iconSize: Dp = 32.dp,
+    iconCornerRadius: Dp = 8.dp,
+    showTitle: Boolean = true,
+    titleFontSize: androidx.compose.ui.unit.TextUnit = 22.sp,
+    titleColor: Color = Color.Unspecified,
+    titleFontWeight: FontWeight = FontWeight.ExtraBold,
+    letterSpacing: androidx.compose.ui.unit.TextUnit = (-0.5).sp,
+    horizontalSpacing: Dp = 8.dp,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(horizontalSpacing)
+    ) {
+        FinMoneyAppLogo(iconSize, RoundedCornerShape(iconCornerRadius))
+        if (showTitle) {
+            Text(
+                text = "FinMoney",
+                fontSize = titleFontSize,
+                fontWeight = titleFontWeight,
+                color = if (titleColor == Color.Unspecified) Color.White else titleColor,
+                letterSpacing = letterSpacing
+            )
+        }
+    }
 }
 
 /**

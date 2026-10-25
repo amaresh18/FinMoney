@@ -46,7 +46,7 @@ import java.util.UUID
  */
 class MultiAddRowState(
     val id: String = UUID.randomUUID().toString(),
-    initialCategoryKey: String = DebitCategory.GROCERIES.name,
+    initialCategoryKey: String = "",
     initialCustomCategoryName: String = "",
     initialAmountText: String = "",
     initialIsPaid: Boolean = true,
@@ -84,12 +84,54 @@ data class CategoryMeta(
     val colorHex: String,
     val group: String = "DAILY", // ESSENTIALS, DAILY, BILLS, LIFESTYLE, CUSTOM
     val isCustom: Boolean = false,
-    val customName: String = ""
+    val customName: String = "",
+    val iconName: String = ""
 )
 
 /**
  * Returns contextual smart subcategory tags aligned to each specific category
  */
+private fun formatAmountForRowInput(amount: Double): String {
+    if (amount <= 0) return ""
+    return if (amount % 1.0 == 0.0) amount.toInt().toString() else amount.toString()
+}
+
+fun debitItemToMultiAddRowState(item: DebitItem, todayDay: Int): MultiAddRowState {
+    val isCustom = item.category.equals(DebitCategory.CUSTOM.name, ignoreCase = true)
+    val categoryKey = when {
+        isCustom -> DebitCategory.CUSTOM.name
+        item.category.isNotBlank() -> item.category
+        else -> DebitCategory.GENERAL.name
+    }
+    val customName = if (isCustom) item.customCategoryName else ""
+    val defaultLabel = if (isCustom) customName.ifBlank { "Custom" } else categoryKey
+    val tagForRow = if (
+        item.title.isNotBlank() &&
+            !item.title.equals(defaultLabel, ignoreCase = true) &&
+            !item.title.equals(categoryKey, ignoreCase = true)
+    ) {
+        item.title
+    } else {
+        ""
+    }
+    return MultiAddRowState(
+        initialCategoryKey = categoryKey,
+        initialCustomCategoryName = customName,
+        initialAmountText = formatAmountForRowInput(item.amount),
+        initialIsPaid = item.isPaid,
+        initialIsPaidViaCreditCard = item.isPaidViaCreditCard,
+        initialTag = tagForRow,
+        initialNotes = item.notes,
+        initialDay = item.dueDateDay.coerceIn(1, 28).takeIf { it > 0 } ?: todayDay,
+        initialShowNotesField = item.notes.isNotBlank(),
+        initialPrincipalAmountText = formatAmountForRowInput(item.principalAmount),
+        initialInterestRateText = if (item.interestRate > 0) item.interestRate.toString() else "",
+        initialTotalTenureMonthsText = if (item.totalTenureMonths > 0) item.totalTenureMonths.toString() else "",
+        initialCurrentMonthTenureText = if (item.currentMonthTenure > 0) item.currentMonthTenure.toString() else "1",
+        initialIsRecurring = item.isRecurring
+    )
+}
+
 fun getAlignedTagsForCategory(categoryKey: String): List<String> {
     return when (categoryKey.uppercase()) {
         DebitCategory.OUTSIDE_FOOD.name -> listOf("Dinner", "Lunch", "Breakfast", "Swiggy/Zomato", "Snacks", "Cafe & Coffee", "Party", "Drinks")
@@ -131,10 +173,12 @@ fun QuickMultiAddSheet(
     customCategories: List<CustomCategory>,
     allHistoricalDebits: List<DebitItem> = emptyList(),
     initialCategoryKey: String? = null,
+    editingDebit: DebitItem? = null,
     onDismiss: () -> Unit,
     onSaveBatch: (List<DebitItem>) -> Unit,
     onOpenAddCustomCategory: () -> Unit
 ) {
+    val isEditMode = editingDebit != null
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val focusManager = LocalFocusManager.current
 
@@ -176,7 +220,8 @@ fun QuickMultiAddSheet(
                 colorHex = it.colorHex,
                 group = "CUSTOM",
                 isCustom = true,
-                customName = it.name
+                customName = it.name,
+                iconName = it.iconName
             )
         }
         standard + custom
@@ -239,23 +284,17 @@ fun QuickMultiAddSheet(
         } else null
     }
 
-    val entryRows = remember(initialCategoryKey) {
-        if (resolvedInitialCat != null) {
-            mutableStateListOf(
+    val entryRows = remember(editingDebit?.id, initialCategoryKey) {
+        when {
+            editingDebit != null -> mutableStateListOf(debitItemToMultiAddRowState(editingDebit, todayDay))
+            resolvedInitialCat != null -> mutableStateListOf(
                 MultiAddRowState(
                     initialCategoryKey = resolvedInitialCat.key,
                     initialCustomCategoryName = resolvedInitialCat.customName,
                     initialDay = todayDay
                 )
             )
-        } else {
-            mutableStateListOf(
-                MultiAddRowState(
-                    initialCategoryKey = frequentCategories.firstOrNull()?.key ?: DebitCategory.GROCERIES.name,
-                    initialCustomCategoryName = frequentCategories.firstOrNull()?.customName ?: "",
-                    initialDay = todayDay
-                )
-            )
+            else -> mutableStateListOf()
         }
     }
 
@@ -299,11 +338,16 @@ fun QuickMultiAddSheet(
                             .background(IndBlueLight),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Filled.Bolt, contentDescription = null, tint = IndBlue, modifier = Modifier.size(20.dp))
+                        Icon(
+                            if (isEditMode) Icons.Filled.Edit else Icons.Filled.Bolt,
+                            contentDescription = null,
+                            tint = IndBlue,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                     Column {
                         Text(
-                            text = "⚡ Add Planned & Quick Entries",
+                            text = if (isEditMode) "Edit expense" else "⚡ Add Planned & Quick Entries",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = IndTextPrimary,
@@ -311,11 +355,15 @@ fun QuickMultiAddSheet(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "Add single or multiple entries • CC, EMI, Paid Status & Category Tags",
+                            text = if (isEditMode) {
+                                "Update category, amount, paid status, EMI fields & tags"
+                            } else {
+                                "Add single or multiple entries • CC, EMI, Paid Status & Category Tags"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = IndTextSecondary,
                             fontSize = 11.sp,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
@@ -331,6 +379,7 @@ fun QuickMultiAddSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            if (!isEditMode) {
             // Frequent Categories (30-day frequency quick-add bar)
             Column(
                 modifier = Modifier
@@ -358,12 +407,7 @@ fun QuickMultiAddSheet(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
                             .clickable {
-                                entryRows.add(
-                                    MultiAddRowState(
-                                        initialCategoryKey = DebitCategory.GROCERIES.name,
-                                        initialDay = todayDay
-                                    )
-                                )
+                                entryRows.add(MultiAddRowState(initialDay = todayDay))
                             }
                             .padding(horizontal = 4.dp, vertical = 2.dp)
                     )
@@ -417,6 +461,7 @@ fun QuickMultiAddSheet(
                     }
                 }
             }
+            }
 
             // Error banner if any
             if (validationError != null) {
@@ -453,6 +498,44 @@ fun QuickMultiAddSheet(
                     contentPadding = PaddingValues(bottom = 90.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
+                    if (entryRows.isEmpty()) {
+                        item(key = "empty_add_hint") {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = IndCardSecondary.copy(alpha = 0.6f),
+                                border = androidx.compose.foundation.BorderStroke(0.6.dp, IndBorderSubtle),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 28.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Category,
+                                        contentDescription = null,
+                                        tint = IndTextMuted,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                    Text(
+                                        text = "No entries yet",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = IndTextPrimary
+                                    )
+                                    Text(
+                                        text = "Tap a category above to add an expense row, or use + Row for a blank entry.",
+                                        fontSize = 12.sp,
+                                        color = IndTextSecondary,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     itemsIndexed(entryRows, key = { _, row -> row.id }) { index, rowState ->
                         MultiAddRowCard(
                             index = index + 1,
@@ -466,25 +549,26 @@ fun QuickMultiAddSheet(
                                 activeTagPickerRow = rowState
                             },
                             onDelete = {
-                                if (entryRows.size > 1) {
-                                    entryRows.removeAt(index)
-                                } else {
-                                    rowState.amountText = ""
-                                    rowState.tag = ""
-                                    rowState.notes = ""
+                                if (activeCategoryPickerRow?.id == rowState.id) {
+                                    activeCategoryPickerRow = null
                                 }
+                                if (activeTagPickerRow?.id == rowState.id) {
+                                    activeTagPickerRow = null
+                                }
+                                entryRows.removeAt(index)
                             },
-                            focusManager = focusManager
+                            focusManager = focusManager,
+                            allowDeleteRow = !isEditMode
                         )
                     }
 
                     // Add Row Button at bottom of list
-                    item {
+                    if (!isEditMode) item {
                         OutlinedButton(
                             onClick = {
                                 entryRows.add(
                                     MultiAddRowState(
-                                        initialCategoryKey = resolvedInitialCat?.key ?: DebitCategory.GROCERIES.name,
+                                        initialCategoryKey = resolvedInitialCat?.key ?: "",
                                         initialCustomCategoryName = resolvedInitialCat?.customName ?: "",
                                         initialDay = todayDay
                                     )
@@ -529,7 +613,12 @@ fun QuickMultiAddSheet(
                     ) {
                         Column {
                             Text(
-                                text = if (totalCount > 0) "$totalCount ${if (totalCount == 1) "Debit" else "Debits"} ready" else "Fill category & amount",
+                                text = when {
+                                    isEditMode && totalCount > 0 -> "Ready to update"
+                                    isEditMode -> "Fill category & amount"
+                                    totalCount > 0 -> "$totalCount ${if (totalCount == 1) "Debit" else "Debits"} ready"
+                                    else -> "Fill category & amount"
+                                },
                                 fontSize = 11.sp,
                                 color = Color.White.copy(alpha = 0.8f),
                                 fontWeight = FontWeight.SemiBold
@@ -555,7 +644,9 @@ fun QuickMultiAddSheet(
                                         break
                                     }
                                     if (amt > 0.0) {
-                                        if (row.categoryKey.isBlank() && row.customCategoryName.isBlank()) {
+                                        val categoryReady = row.categoryKey.isNotBlank() &&
+                                            (row.categoryKey != DebitCategory.CUSTOM.name || row.customCategoryName.isNotBlank())
+                                        if (!categoryReady) {
                                             validationError = "Row #${idx + 1} is missing a category. Category is mandatory."
                                             hasInvalidRow = true
                                             break
@@ -575,23 +666,33 @@ fun QuickMultiAddSheet(
                                         val isChitCat = row.categoryKey.equals("CHIT", ignoreCase = true) || finalTitle.contains("CHIT", ignoreCase = true)
                                         val isLoanCat = isLoanOrEmi(row.categoryKey)
 
+                                        val base = editingDebit
                                         itemsToSave.add(
                                             DebitItem(
-                                                month = month,
-                                                year = year,
+                                                id = base?.id ?: 0L,
+                                                userId = base?.userId ?: "",
+                                                cloudId = base?.cloudId ?: "",
+                                                month = base?.month ?: month,
+                                                year = base?.year ?: year,
+                                                monthYear = base?.monthYear ?: "$year-${if (month < 10) "0$month" else month}",
                                                 category = row.categoryKey,
                                                 customCategoryName = row.customCategoryName,
                                                 title = finalTitle,
                                                 amount = amt,
                                                 dueDateDay = row.day,
+                                                dueDate = base?.dueDate,
                                                 isPaid = row.isPaid,
                                                 isPaidViaCreditCard = row.isPaidViaCreditCard,
+                                                paidDateTimestamp = base?.paidDateTimestamp,
+                                                paidDate = base?.paidDate,
                                                 notes = row.notes.trim(),
                                                 principalAmount = row.principalAmountText.toDoubleOrNull() ?: 0.0,
                                                 interestRate = row.interestRateText.toDoubleOrNull() ?: 0.0,
+                                                interestRatePercent = base?.interestRatePercent ?: 0.0,
                                                 totalTenureMonths = row.totalTenureMonthsText.toIntOrNull() ?: 0,
                                                 currentMonthTenure = row.currentMonthTenureText.toIntOrNull() ?: 1,
-                                                isRecurring = row.isRecurring || isChitCat || isLoanCat
+                                                isRecurring = row.isRecurring || isChitCat || isLoanCat,
+                                                createdAt = base?.createdAt ?: System.currentTimeMillis()
                                             )
                                         )
                                     }
@@ -600,6 +701,8 @@ fun QuickMultiAddSheet(
                                 if (!hasInvalidRow) {
                                     if (itemsToSave.isEmpty()) {
                                         validationError = "Please enter an amount (> 0) for at least one debit."
+                                    } else if (isEditMode && itemsToSave.size != 1) {
+                                        validationError = "Edit mode supports one expense at a time."
                                     } else {
                                         onSaveBatch(itemsToSave)
                                         onDismiss()
@@ -619,7 +722,11 @@ fun QuickMultiAddSheet(
                             Icon(Icons.Filled.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (totalCount > 0) "⚡ Save $totalCount (1-Tap)" else "Save All",
+                                text = when {
+                                    isEditMode -> "Save changes"
+                                    totalCount > 0 -> "⚡ Save $totalCount (1-Tap)"
+                                    else -> "Save All"
+                                },
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp
                             )
@@ -679,10 +786,16 @@ private fun MultiAddRowCard(
     onOpenCategoryPicker: () -> Unit,
     onOpenTagPicker: () -> Unit,
     onDelete: () -> Unit,
-    focusManager: androidx.compose.ui.focus.FocusManager
+    focusManager: androidx.compose.ui.focus.FocusManager,
+    allowDeleteRow: Boolean = true
 ) {
+    val hasCategorySelected = rowState.categoryKey.isNotBlank() ||
+        (rowState.categoryKey == DebitCategory.CUSTOM.name && rowState.customCategoryName.isNotBlank())
+
     val currentMeta = remember(rowState.categoryKey, rowState.customCategoryName, allCategories) {
-        if (rowState.categoryKey == DebitCategory.CUSTOM.name) {
+        if (!hasCategorySelected) {
+            CategoryMeta("", "Select category", "#94A3B8", "DAILY")
+        } else if (rowState.categoryKey == DebitCategory.CUSTOM.name) {
             allCategories.find { it.isCustom && it.customName.equals(rowState.customCategoryName, ignoreCase = true) }
                 ?: CategoryMeta(DebitCategory.CUSTOM.name, rowState.customCategoryName.ifBlank { "Custom" }, "#00D09C", "CUSTOM", true, rowState.customCategoryName)
         } else {
@@ -752,16 +865,33 @@ private fun MultiAddRowCard(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            CategoryIconBadge(
-                                categoryKey = if (currentMeta.isCustom) currentMeta.customName else currentMeta.key,
-                                badgeSize = 28.dp,
-                                iconSize = 17.dp
-                            )
+                            if (hasCategorySelected) {
+                                CategoryIconBadge(
+                                    categoryKey = if (currentMeta.isCustom) currentMeta.customName else currentMeta.key,
+                                    badgeSize = 28.dp,
+                                    iconSize = 17.dp
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(IndBorderSubtle),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Category,
+                                        contentDescription = null,
+                                        tint = IndTextMuted,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+                            }
                             Text(
                                 text = currentMeta.displayName,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = IndTextPrimary,
+                                color = if (hasCategorySelected) IndTextPrimary else IndTextMuted,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -808,17 +938,18 @@ private fun MultiAddRowCard(
                     )
                 )
 
-                // Delete Row Button
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Delete,
-                        contentDescription = "Remove Row",
-                        tint = IndRed.copy(alpha = 0.8f),
-                        modifier = Modifier.size(20.dp)
-                    )
+                if (allowDeleteRow) {
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Delete,
+                            contentDescription = "Remove Row",
+                            tint = IndRed.copy(alpha = 0.8f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
 
@@ -1238,7 +1369,9 @@ private fun CategorySelectionModalDialog(
                                     CategoryIconBadge(
                                         categoryKey = if (cat.isCustom) cat.customName else cat.key,
                                         badgeSize = 32.dp,
-                                        iconSize = 19.dp
+                                        iconSize = 19.dp,
+                                        customColor = customCategoryTint(cat.colorHex),
+                                        storedIconName = cat.iconName.takeIf { it.isNotBlank() }
                                     )
                                     Text(
                                         text = cat.displayName,

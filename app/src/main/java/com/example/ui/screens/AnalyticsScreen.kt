@@ -11,7 +11,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -55,6 +54,9 @@ fun AnalyticsScreen(
     var showIncomeDrillDown by remember { mutableStateOf(false) }
 
     var editingDebitItem by remember { mutableStateOf<DebitItem?>(null) }
+    var expensePendingDelete by remember { mutableStateOf<DebitItem?>(null) }
+    var showAddCustomCategoryDialog by remember { mutableStateOf(false) }
+    val customCategories by viewModel.customCategories.collectAsStateWithLifecycle()
 
     val currentMonthDebits = remember(allDebits, month, year) {
         allDebits.filter { it.month == month && it.year == year }
@@ -163,7 +165,12 @@ fun AnalyticsScreen(
                     }
                     Column {
                         Text("Total Outflow", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary)
-                        Text("$currencySymbol${"%,.0f".format(summary.totalDebits)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = IndRed)
+                        Text(
+                            text = if (!isFinancialSafetyVisible) "$currencySymbol★★★★★★" else "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = IndRed
+                        )
                     }
                     Column {
                         Text("Net Savings", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary)
@@ -235,12 +242,13 @@ fun AnalyticsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                CategoryIconBadge(categoryKey = cat.iconKey)
+                                CategoryIconBadge(
+                                    categoryKey = cat.categoryName,
+                                    storedIconName = categorySummaryStoredIcon(cat),
+                                    customColor = customCategoryTint(cat.colorHex)
+                                )
                                 Column {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(cat.categoryName, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = IndTextPrimary)
-                                        Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = "Drill down", tint = IndTextMuted, modifier = Modifier.size(12.dp))
-                                    }
+                                    Text(cat.categoryName, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = IndTextPrimary)
                                     Text(
                                         text = "${cat.itemCount} items • ${cat.paidCount} paid • ${(categoryShare * 100).toInt()}% of outflow",
                                         style = MaterialTheme.typography.labelSmall,
@@ -250,14 +258,14 @@ fun AnalyticsScreen(
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    text = "$currencySymbol${"%,.0f".format(cat.totalAmount)}",
+                                    text = if (!isFinancialSafetyVisible) "$currencySymbol★★★★" else "$currencySymbol${"%,.0f".format(cat.totalAmount)}",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = IndNavyHeader
                                 )
                                 if (cat.yetToPayAmount > 0) {
                                     Text(
-                                        text = "$currencySymbol${"%,.0f".format(cat.yetToPayAmount)} pending",
+                                        text = if (!isFinancialSafetyVisible) "★★★★ pending" else "$currencySymbol${"%,.0f".format(cat.yetToPayAmount)} pending",
                                         fontSize = 10.sp,
                                         color = IndRed,
                                         fontWeight = FontWeight.SemiBold
@@ -288,11 +296,7 @@ fun AnalyticsScreen(
     // Category Drill-Down Dialog
     selectedCategoryForDrillDown?.let { cat ->
         val matchingDebits = remember(currentMonthDebits, cat) {
-            currentMonthDebits.filter {
-                it.category.equals(cat.categoryKey, ignoreCase = true) ||
-                it.customCategoryName.equals(cat.categoryName, ignoreCase = true) ||
-                it.category.equals(cat.categoryName, ignoreCase = true)
-            }
+            currentMonthDebits.filter { debitMatchesCategorySummary(it, cat) }
         }
 
         CategoryDrillDownDialog(
@@ -303,53 +307,51 @@ fun AnalyticsScreen(
             currencySymbol = currencySymbol,
             onDismiss = { selectedCategoryForDrillDown = null },
             onEditItem = { item -> editingDebitItem = item },
-            onDeleteItem = { item -> viewModel.deleteDebit(item) },
+            onDeleteItem = { item -> expensePendingDelete = item },
             onTogglePaid = { item -> viewModel.toggleDebitPaid(item) },
             onToggleCreditCard = { item -> viewModel.toggleDebitCreditCardStatus(item) },
             onToggleRecurring = { item -> viewModel.toggleDebitRecurring(item) }
         )
     }
 
-    // Edit Debit Dialog for Analytics
     if (editingDebitItem != null) {
         val item = editingDebitItem!!
-        val amtStr = if (item.amount > 0) (if (item.amount % 1.0 == 0.0) item.amount.toInt().toString() else item.amount.toString()) else ""
-        val principalStr = if (item.principalAmount > 0) (if (item.principalAmount % 1.0 == 0.0) item.principalAmount.toInt().toString() else item.principalAmount.toString()) else ""
-        val rateStr = if (item.interestRate > 0) item.interestRate.toString() else ""
-        val totalTenureStr = if (item.totalTenureMonths > 0) item.totalTenureMonths.toString() else ""
-        val currentTenureStr = if (item.currentMonthTenure > 0) item.currentMonthTenure.toString() else "1"
-
-        AddEditDebitDialog(
-            initialTitle = item.title,
-            initialAmount = amtStr,
-            initialCategory = item.category,
-            initialDueDate = item.dueDateDay.toString(),
-            initialNotes = item.notes,
-            initialPrincipalAmount = principalStr,
-            initialInterestRate = rateStr,
-            initialTotalTenureMonths = totalTenureStr,
-            initialCurrentMonthTenure = currentTenureStr,
-            initialIsPaidViaCreditCard = item.isPaidViaCreditCard,
-            initialIsRecurring = item.isRecurring,
+        QuickMultiAddSheet(
+            currencySymbol = currencySymbol,
+            todayDay = item.dueDateDay.coerceIn(1, 28),
+            month = month,
+            year = year,
+            customCategories = customCategories,
+            allHistoricalDebits = allDebits,
+            editingDebit = item,
             onDismiss = { editingDebitItem = null },
-            onSave = { title, amount, category, dueDate, notes, principalAmount, interestRate, totalTenureMonths, currentMonthTenure, isPaidViaCreditCard, isRecurring ->
-                val dayInt = dueDate.filter { it.isDigit() }.toIntOrNull() ?: item.dueDateDay
-                viewModel.updateDebit(
-                    item.copy(
-                        title = title,
-                        amount = amount,
-                        category = category,
-                        dueDateDay = dayInt,
-                        notes = notes,
-                        isPaidViaCreditCard = isPaidViaCreditCard,
-                        isRecurring = isRecurring,
-                        principalAmount = principalAmount,
-                        interestRate = interestRate,
-                        totalTenureMonths = totalTenureMonths,
-                        currentMonthTenure = currentMonthTenure
-                    )
-                )
+            onSaveBatch = { batch ->
+                batch.firstOrNull()?.let { viewModel.updateDebit(it) }
                 editingDebitItem = null
+            },
+            onOpenAddCustomCategory = { showAddCustomCategoryDialog = true }
+        )
+    }
+
+    if (showAddCustomCategoryDialog) {
+        AddCustomCategoryDialog(
+            onDismiss = { showAddCustomCategoryDialog = false },
+            onSave = { name, icon, color ->
+                viewModel.addCustomCategory(name, icon, color)
+                showAddCustomCategoryDialog = false
+            }
+        )
+    }
+
+    expensePendingDelete?.let { item ->
+        ConfirmDeleteDialog(
+            title = "Delete expense?",
+            message = "Remove \"${item.title.ifBlank { debitCategoryDisplayLabel(item) }}\"? This cannot be undone.",
+            onDismiss = { expensePendingDelete = null },
+            onConfirm = {
+                viewModel.deleteDebit(item)
+                expensePendingDelete = null
+                if (editingDebitItem?.id == item.id) editingDebitItem = null
             }
         )
     }
@@ -418,7 +420,7 @@ fun AnimatedIncomeVsExpenseAnalyticsCard(
                 Column(horizontalAlignment = Alignment.End) {
                     Text("Expense Outflow", fontSize = 11.sp, color = IndTextSecondary)
                     Text(
-                        text = "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
+                        text = if (!isPrivacyVisible) "$currencySymbol★★★★★★" else "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
                         color = IndRed
@@ -505,7 +507,11 @@ fun CategoryDrillDownDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            CategoryIconBadge(categoryKey = categorySummary.iconKey)
+                            CategoryIconBadge(
+                                categoryKey = categorySummary.categoryName,
+                                storedIconName = categorySummaryStoredIcon(categorySummary),
+                                customColor = customCategoryTint(categorySummary.colorHex)
+                            )
                             Column {
                                 Text(
                                     text = categorySummary.categoryName,

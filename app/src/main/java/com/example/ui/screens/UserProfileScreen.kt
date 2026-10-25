@@ -1,7 +1,13 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -42,9 +49,13 @@ import com.google.firebase.auth.auth
 @Composable
 fun UserProfileScreen(
     viewModel: FinMoneyViewModel,
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    /** When true, shows back + "Profile & Settings" + top Sign Out (standalone). Main tab uses false. */
+    showShellHeader: Boolean = true
 ) {
-    BackHandler { onBack() }
+    if (showShellHeader) {
+        BackHandler { onBack() }
+    }
 
     val context = LocalContext.current
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
@@ -79,10 +90,34 @@ fun UserProfileScreen(
     }
 
     var nameInput by remember(effectiveName) { mutableStateOf(effectiveName) }
-    var emailInput by remember(effectiveEmail) { mutableStateOf(effectiveEmail) }
-    var phoneInput by remember(effectivePhone) { mutableStateOf(effectivePhone) }
 
     var isEditProfileMode by remember { mutableStateOf(false) }
+
+    val storedProfilePicUri = remember(userProfile, firebaseUser) {
+        userProfile?.profilePicUri?.takeIf { it.isNotBlank() }
+            ?: userProfile?.profileImageUri?.takeIf { it.isNotBlank() }
+            ?: firebaseUser?.photoUrl?.toString()
+    }
+    var localProfilePicUri by remember { mutableStateOf<String?>(null) }
+    val displayProfilePicUri = localProfilePicUri ?: storedProfilePicUri
+
+    val profilePhotoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            val uriString = uri.toString()
+            localProfilePicUri = uriString
+            viewModel.saveUserProfile(
+                name = nameInput.ifBlank { effectiveName },
+                email = effectiveEmail,
+                phoneNumber = effectivePhone,
+                profilePicUri = uriString,
+                isOtpVerified = phoneVerified,
+                isEmailVerified = emailVerified
+            )
+            android.widget.Toast.makeText(context, "Profile photo updated", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Notification Settings States
     var enableSmsInterceptor by remember { mutableStateOf(true) }
@@ -96,55 +131,57 @@ fun UserProfileScreen(
     Scaffold(
         containerColor = IndBackground,
         topBar = {
-            Surface(
-                color = IndSurface,
-                shadowElevation = 2.dp,
-                border = BorderStroke(1.dp, IndBorderSubtle)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+            if (showShellHeader) {
+                Surface(
+                    color = IndSurface,
+                    shadowElevation = 2.dp,
+                    border = BorderStroke(1.dp, IndBorderSubtle)
                 ) {
                     Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        IconButton(
-                            onClick = onBack,
-                            modifier = Modifier.testTag("profile_back_button")
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = IndNavyHeader
+                            IconButton(
+                                onClick = onBack,
+                                modifier = Modifier.testTag("profile_back_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = IndNavyHeader
+                                )
+                            }
+                            com.example.ui.components.BrandLogo(
+                                name = "FinMoney",
+                                badgeSize = 28.dp
+                            )
+                            Text(
+                                text = "Profile & Settings",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = IndNavyHeader
                             )
                         }
-                        com.example.ui.components.BrandLogo(
-                            name = "FinMoney",
-                            badgeSize = 28.dp
-                        )
-                        Text(
-                            text = "Profile & Settings",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = IndNavyHeader
-                        )
-                    }
 
-                    TextButton(
-                        onClick = { showSignOutDialog = true },
-                        modifier = Modifier.testTag("top_sign_out_button")
-                    ) {
-                        Text(
-                            text = "Sign Out",
-                            fontWeight = FontWeight.Bold,
-                            color = IndRed,
-                            fontSize = 13.sp
-                        )
+                        TextButton(
+                            onClick = { showSignOutDialog = true },
+                            modifier = Modifier.testTag("top_sign_out_button")
+                        ) {
+                            Text(
+                                text = "Sign Out",
+                                fontWeight = FontWeight.Bold,
+                                color = IndRed,
+                                fontSize = 13.sp
+                            )
+                        }
                     }
                 }
             }
@@ -158,261 +195,226 @@ fun UserProfileScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // 1. Authenticated User Profile Summary Card
-            IndCard(modifier = Modifier.fillMaxWidth()) {
+            if (!showShellHeader) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(54.dp)
-                                    .clip(CircleShape)
-                                    .background(IndGreenLight)
-                                    .border(2.dp, IndGreen, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = (effectiveName.trim().take(1).takeIf { it.isNotBlank() } ?: "A").uppercase(),
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = IndGreenDark
-                                )
-                            }
+                    Text(
+                        text = "Profile",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = IndNavyHeader
+                    )
+                    Text(
+                        text = "Account, privacy & alerts",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = IndTextSecondary
+                    )
+                }
+            }
 
-                            Column {
-                                Text(
-                                    text = effectiveName,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = IndNavyHeader
+            // —— Profile hero ——
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = Color.Transparent,
+                shadowElevation = 4.dp
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.linearGradient(
+                                listOf(IndNavyHeader, IndBlue.copy(alpha = 0.92f))
+                            )
+                        )
+                        .padding(horizontal = 20.dp, vertical = 22.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        ProfileAvatarPicker(
+                            displayName = effectiveName,
+                            imageUri = displayProfilePicUri,
+                            onChangePhoto = {
+                                profilePhotoPicker.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                 )
-                                Text(
-                                    text = effectiveEmail,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = IndTextSecondary
-                                )
-                                if (effectivePhone.isNotBlank()) {
-                                    Text(
-                                        text = "+91 $effectivePhone",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = IndTextMuted
-                                    )
-                                }
-                            }
+                            },
+                            modifier = Modifier.testTag("profile_avatar_picker")
+                        )
+
+                        Text(
+                            text = effectiveName,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        if (effectiveEmail.isNotBlank()) {
+                            Text(
+                                text = effectiveEmail,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.85f)
+                            )
+                        }
+                        if (effectivePhone.isNotBlank()) {
+                            Text(
+                                text = "+91 ${effectivePhone.takeLast(10)}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White.copy(alpha = 0.75f)
+                            )
                         }
 
-                        IconButton(
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            ProfileVerificationChip(
+                                verified = phoneVerified,
+                                verifiedLabel = "Mobile verified",
+                                pendingLabel = "Mobile pending",
+                                iconVerified = Icons.Filled.Verified,
+                                iconPending = Icons.Outlined.PhoneAndroid
+                            )
+                            ProfileVerificationChip(
+                                verified = emailVerified,
+                                verifiedLabel = "Email verified",
+                                pendingLabel = "Email pending",
+                                iconVerified = Icons.Filled.MarkEmailRead,
+                                iconPending = Icons.Outlined.Email
+                            )
+                        }
+
+                        FilledTonalButton(
                             onClick = { isEditProfileMode = !isEditProfileMode },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Color.White.copy(alpha = 0.2f),
+                                contentColor = Color.White
+                            ),
                             modifier = Modifier.testTag("edit_profile_toggle")
                         ) {
                             Icon(
                                 imageVector = if (isEditProfileMode) Icons.Filled.Check else Icons.Outlined.Edit,
-                                contentDescription = "Edit Profile",
-                                tint = IndBlue
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
                             )
-                        }
-                    }
-
-                    // Security & Account Verification Badges
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = if (phoneVerified) IndGreenLight else IndSurface,
-                            border = BorderStroke(1.dp, if (phoneVerified) IndGreen.copy(alpha = 0.3f) else IndBorderSubtle)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    if (phoneVerified) Icons.Filled.Verified else Icons.Outlined.PhoneAndroid,
-                                    contentDescription = null,
-                                    tint = if (phoneVerified) IndGreenDark else IndTextSecondary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    if (phoneVerified) "Mobile verified" else "Mobile pending",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (phoneVerified) IndGreenDark else IndTextSecondary
-                                )
-                            }
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = if (emailVerified) IndGreenLight else IndSurface,
-                            border = BorderStroke(1.dp, if (emailVerified) IndGreen.copy(alpha = 0.3f) else IndBorderSubtle)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    if (emailVerified) Icons.Filled.MarkEmailRead else Icons.Outlined.Email,
-                                    contentDescription = null,
-                                    tint = if (emailVerified) IndGreenDark else IndTextSecondary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    if (emailVerified) "Email verified" else "Email pending",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (emailVerified) IndGreenDark else IndTextSecondary
-                                )
-                            }
-                        }
-                    }
-
-                    // Inline Edit Profile Fields
-                    if (isEditProfileMode) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedTextField(
-                                value = nameInput,
-                                onValueChange = { nameInput = it },
-                                label = { Text("Full Name") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            if (effectivePhone.isNotBlank()) {
-                                OutlinedTextField(
-                                    value = "+91 ${effectivePhone.takeLast(10)}",
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    enabled = false,
-                                    label = { Text("Mobile (OTP verified)") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                            if (effectiveEmail.isNotBlank()) {
-                                OutlinedTextField(
-                                    value = effectiveEmail,
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    enabled = false,
-                                    label = { Text("Email") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                "Phone and email can only be changed after re-verification. Sign out and complete onboarding to update.",
-                                fontSize = 11.sp,
-                                color = IndTextSecondary
+                                text = if (isEditProfileMode) "Done editing" else "Edit display name",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
                             )
-
-                            Button(
-                                onClick = {
-                                    viewModel.saveUserProfile(
-                                        name = nameInput,
-                                        email = effectiveEmail,
-                                        phoneNumber = effectivePhone,
-                                        isOtpVerified = phoneVerified,
-                                        isEmailVerified = emailVerified
-                                    )
-                                    isEditProfileMode = false
-                                    android.widget.Toast.makeText(context, "Profile updated successfully!", android.widget.Toast.LENGTH_SHORT).show()
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = IndBlue),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Save Profile Changes", fontWeight = FontWeight.Bold)
-                            }
                         }
                     }
                 }
             }
 
-            // 2. Notification & Transaction Interceptor Settings Card
-            IndCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(Icons.Filled.NotificationsActive, contentDescription = null, tint = IndBlue, modifier = Modifier.size(20.dp))
+            if (isEditProfileMode) {
+                IndCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ProfileSectionTitle(
+                            title = "Personal details",
+                            subtitle = "Name shown on your dashboard & agreements",
+                            icon = Icons.Outlined.Person
+                        )
+                        OutlinedTextField(
+                            value = nameInput,
+                            onValueChange = { nameInput = it },
+                            label = { Text("Full name") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        OutlinedTextField(
+                            value = if (effectivePhone.isNotBlank()) "+91 ${effectivePhone.takeLast(10)}" else "—",
+                            onValueChange = {},
+                            readOnly = true,
+                            enabled = false,
+                            label = { Text("Mobile") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        OutlinedTextField(
+                            value = effectiveEmail.ifBlank { "—" },
+                            onValueChange = {},
+                            readOnly = true,
+                            enabled = false,
+                            label = { Text("Email") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
                         Text(
-                            text = "NOTIFICATIONS & AUTO-SYNC",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = IndBlueDark
+                            text = "To change phone or email, sign out and complete verification again.",
+                            fontSize = 11.sp,
+                            color = IndTextSecondary,
+                            lineHeight = 15.sp
                         )
-                    }
-
-                    // Toggle 1: Notification Interceptor
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Bank SMS & UPI Interceptor", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndNavyHeader)
-                            Text("Auto-detect transactions from HDFC, SBI, PhonePe & Google Pay", fontSize = 11.sp, color = IndTextSecondary)
+                        Button(
+                            onClick = {
+                                viewModel.saveUserProfile(
+                                    name = nameInput,
+                                    email = effectiveEmail,
+                                    phoneNumber = effectivePhone,
+                                    profilePicUri = displayProfilePicUri,
+                                    isOtpVerified = phoneVerified,
+                                    isEmailVerified = emailVerified
+                                )
+                                isEditProfileMode = false
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Profile updated",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = IndBlue),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Save changes", fontWeight = FontWeight.Bold)
                         }
-                        Switch(
-                            checked = enableSmsInterceptor,
-                            onCheckedChange = { enableSmsInterceptor = it },
-                            colors = SwitchDefaults.colors(checkedThumbColor = IndBlue)
-                        )
                     }
+                }
+            }
 
-                    Divider(color = IndBorderSubtle)
+            IndCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ProfileSectionTitle(
+                        title = "Notifications & auto-sync",
+                        subtitle = "Bank alerts, approvals & due-date reminders",
+                        icon = Icons.Filled.NotificationsActive
+                    )
 
-                    // Toggle 2: Instant Approval Alerts
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Instant Approval Alerts", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndNavyHeader)
-                            Text("Show 1-tap Approve/Dismiss buttons in notification shade", fontSize = 11.sp, color = IndTextSecondary)
-                        }
-                        Switch(
-                            checked = enableInstantAlerts,
-                            onCheckedChange = { enableInstantAlerts = it },
-                            colors = SwitchDefaults.colors(checkedThumbColor = IndBlue)
-                        )
-                    }
+                    ProfileSettingsToggleRow(
+                        title = "Bank SMS & UPI interceptor",
+                        subtitle = "HDFC, SBI, PhonePe, GPay & more",
+                        checked = enableSmsInterceptor,
+                        onCheckedChange = { enableSmsInterceptor = it }
+                    )
 
-                    Divider(color = IndBorderSubtle)
+                    HorizontalDivider(color = IndBorderSubtle, modifier = Modifier.padding(vertical = 4.dp))
 
-                    // Toggle 3: EMI & Bill Dues Reminders
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Monthly Due Reminders", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndNavyHeader)
-                            Text("Receive alerts 2 days before EMI, Rent & Bill due dates", fontSize = 11.sp, color = IndTextSecondary)
-                        }
-                        Switch(
-                            checked = enableDueReminders,
-                            onCheckedChange = { enableDueReminders = it },
-                            colors = SwitchDefaults.colors(checkedThumbColor = IndBlue)
-                        )
-                    }
+                    ProfileSettingsToggleRow(
+                        title = "Instant approval alerts",
+                        subtitle = "1-tap approve or dismiss in notification shade",
+                        checked = enableInstantAlerts,
+                        onCheckedChange = { enableInstantAlerts = it }
+                    )
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    HorizontalDivider(color = IndBorderSubtle, modifier = Modifier.padding(vertical = 4.dp))
+
+                    ProfileSettingsToggleRow(
+                        title = "Monthly due reminders",
+                        subtitle = "EMI, rent & bills — 2 days before due",
+                        checked = enableDueReminders,
+                        onCheckedChange = { enableDueReminders = it }
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     OutlinedButton(
                         onClick = {
@@ -434,53 +436,64 @@ fun UserProfileScreen(
                 }
             }
 
-            // 3. Application Security & Preferences Card
             IndCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(Icons.Filled.Tune, contentDescription = null, tint = IndBlue, modifier = Modifier.size(20.dp))
-                        Text(
-                            text = "PREFERENCES & PRIVACY",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = IndBlueDark
-                        )
-                    }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ProfileSectionTitle(
+                        title = "Privacy & account",
+                        subtitle = "Control visibility and session",
+                        icon = Icons.Filled.Shield
+                    )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Financial Safety Privacy Mode", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndNavyHeader)
-                            Text("Mask sensitive balances and total income on dashboard", fontSize = 11.sp, color = IndTextSecondary)
-                        }
-                        Switch(
-                            checked = !isFinancialSafetyVisible,
-                            onCheckedChange = { viewModel.toggleFinancialSafetyVisible() },
-                            colors = SwitchDefaults.colors(checkedThumbColor = IndBlue)
-                        )
-                    }
+                    ProfileSettingsToggleRow(
+                        title = "Financial safety mode",
+                        subtitle = "Mask balances & income on dashboard",
+                        checked = !isFinancialSafetyVisible,
+                        onCheckedChange = { viewModel.toggleFinancialSafetyVisible() }
+                    )
 
-                    Divider(color = IndBorderSubtle)
+                    HorizontalDivider(color = IndBorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
 
-                    Row(
+                    OutlinedButton(
+                        onClick = { showSignOutDialog = true },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, IndRed.copy(alpha = 0.45f)),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { showResetDialog = true },
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .height(48.dp)
+                            .testTag("sign_out_profile_button")
                     ) {
-                        Column {
-                            Text("Reset Local Budget Data", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndRed)
-                            Text("Re-seed starter template dataset (October 2026)", fontSize = 11.sp, color = IndTextSecondary)
-                        }
-                        Icon(Icons.Filled.RestartAlt, contentDescription = null, tint = IndRed, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.Logout, contentDescription = null, tint = IndRed, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Sign out of FinMoney", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = IndRed)
                     }
+
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.signOut()
+                            onBack()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, IndBlue.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("switch_account_button")
+                    ) {
+                        Icon(Icons.Filled.SwitchAccount, contentDescription = null, tint = IndBlue, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Switch Google / mobile account", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = IndBlue)
+                    }
+
+                    HorizontalDivider(color = IndBorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+
+                    ProfileSettingsNavRow(
+                        title = "Reset local budget data",
+                        subtitle = "Re-seed October 2026 starter template",
+                        titleColor = IndRed,
+                        icon = Icons.Filled.RestartAlt,
+                        iconTint = IndRed,
+                        onClick = { showResetDialog = true }
+                    )
                 }
             }
 
@@ -495,111 +508,58 @@ fun UserProfileScreen(
             }
 
             IndCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(Icons.Filled.PrivacyTip, contentDescription = null, tint = IndBlue, modifier = Modifier.size(20.dp))
-                        Text(
-                            text = "ACCOUNT DELETION & LEGAL POLICIES",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = IndBlueDark
-                        )
-                    }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ProfileSectionTitle(
+                        title = "Legal & support",
+                        subtitle = "Policies and data rights",
+                        icon = Icons.Filled.PrivacyTip
+                    )
 
-                    // Account & Data Deletion Link
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                openUrlInBrowser("https://docs.google.com/forms/d/e/1FAIpQLScYFK0kYaruDdJjmtrwwh33q4wXq3M0RL2xH_Hq18ZRTuvZOg/viewform")
-                            }
-                            .testTag("request_account_deletion_link"),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Request Account & Data Deletion", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndRed)
-                            Text("Permanently delete your account, phone number & financial records", fontSize = 11.sp, color = IndTextSecondary)
-                        }
-                        Icon(Icons.Filled.OpenInNew, contentDescription = "Open Form", tint = IndRed, modifier = Modifier.size(18.dp))
-                    }
+                    ProfileSettingsNavRow(
+                        title = "Request account deletion",
+                        subtitle = "Permanently remove account & financial records",
+                        titleColor = IndRed,
+                        icon = Icons.Filled.DeleteForever,
+                        iconTint = IndRed,
+                        onClick = {
+                            openUrlInBrowser(
+                                "https://docs.google.com/forms/d/e/1FAIpQLScYFK0kYaruDdJjmtrwwh33q4wXq3M0RL2xH_Hq18ZRTuvZOg/viewform"
+                            )
+                        },
+                        testTag = "request_account_deletion_link"
+                    )
 
-                    Divider(color = IndBorderSubtle)
+                    HorizontalDivider(color = IndBorderSubtle, modifier = Modifier.padding(vertical = 4.dp))
 
-                    // Privacy Policy Link
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                openUrlInBrowser("https://gist.githubusercontent.com/amareshgajawada/raw/finmoney_privacy_policy.txt")
-                            }
-                            .testTag("privacy_policy_link"),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Privacy Policy", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndNavyHeader)
-                            Text("Read our Google Play compliant Privacy Policy", fontSize = 11.sp, color = IndTextSecondary)
-                        }
-                        Icon(Icons.Filled.OpenInNew, contentDescription = "Open Privacy Policy", tint = IndBlue, modifier = Modifier.size(18.dp))
-                    }
+                    ProfileSettingsNavRow(
+                        title = "Privacy policy",
+                        subtitle = "Google Play compliant policy",
+                        titleColor = IndNavyHeader,
+                        icon = Icons.Outlined.Description,
+                        iconTint = IndBlue,
+                        onClick = {
+                            openUrlInBrowser(
+                                "https://gist.githubusercontent.com/amareshgajawada/raw/finmoney_privacy_policy.txt"
+                            )
+                        },
+                        testTag = "privacy_policy_link"
+                    )
 
-                    Divider(color = IndBorderSubtle)
+                    HorizontalDivider(color = IndBorderSubtle, modifier = Modifier.padding(vertical = 4.dp))
 
-                    // Data Safety Disclosures Info
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showDataSafetyDialog = true }
-                            .testTag("data_safety_disclosures_link"),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Data Safety & Disclosures", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndNavyHeader)
-                            Text("View how personal info & phone numbers are protected", fontSize = 11.sp, color = IndTextSecondary)
-                        }
-                        Icon(Icons.Filled.Info, contentDescription = "View Disclosures", tint = IndBlue, modifier = Modifier.size(18.dp))
-                    }
+                    ProfileSettingsNavRow(
+                        title = "Data safety & disclosures",
+                        subtitle = "How we protect phone & personal data",
+                        titleColor = IndNavyHeader,
+                        icon = Icons.Filled.Info,
+                        iconTint = IndBlue,
+                        onClick = { showDataSafetyDialog = true },
+                        testTag = "data_safety_disclosures_link"
+                    )
                 }
             }
 
-            // 5. Account Switch & Sign Out Buttons
-            OutlinedButton(
-                onClick = {
-                    viewModel.signOut()
-                    onBack()
-                },
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, IndBlue),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("switch_account_button")
-            ) {
-                Icon(Icons.Filled.SwitchAccount, contentDescription = null, tint = IndBlue, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Switch Google / Mobile Account", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndBlue)
-            }
-
-            Button(
-                onClick = { showSignOutDialog = true },
-                colors = ButtonDefaults.buttonColors(containerColor = IndRed),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("sign_out_profile_button")
-            ) {
-                Icon(Icons.Filled.Logout, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Sign Out of FinMoney", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(28.dp))
         }
 
         if (showDataSafetyDialog) {
@@ -678,5 +638,205 @@ fun UserProfileScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun ProfileAvatarPicker(
+    displayName: String,
+    imageUri: String?,
+    onChangePhoto: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val initial = (displayName.trim().take(1).takeIf { it.isNotBlank() } ?: "A").uppercase()
+
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.BottomEnd
+    ) {
+        Box(
+            modifier = Modifier
+                .size(96.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.15f))
+                .border(3.dp, Color.White.copy(alpha = 0.85f), CircleShape)
+                .clickable(onClick = onChangePhoto),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!imageUri.isNullOrBlank()) {
+                AsyncImage(
+                    model = imageUri,
+                    contentDescription = "Profile photo",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Text(
+                    text = initial,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White
+                )
+            }
+        }
+        Surface(
+            onClick = onChangePhoto,
+            shape = CircleShape,
+            color = Color.White,
+            shadowElevation = 4.dp,
+            modifier = Modifier
+                .size(32.dp)
+                .offset(x = 4.dp, y = 4.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Icon(
+                    imageVector = Icons.Filled.PhotoCamera,
+                    contentDescription = "Change photo",
+                    tint = IndNavyHeader,
+                    modifier = Modifier.size(17.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileVerificationChip(
+    verified: Boolean,
+    verifiedLabel: String,
+    pendingLabel: String,
+    iconVerified: ImageVector,
+    iconPending: ImageVector
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = if (verified) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.1f),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = if (verified) 0.5f else 0.25f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = if (verified) iconVerified else iconPending,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                text = if (verified) verifiedLabel else pendingLabel,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileSectionTitle(
+    title: String,
+    subtitle: String,
+    icon: ImageVector
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(IndBlueLight),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = IndBlue, modifier = Modifier.size(20.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = IndNavyHeader
+            )
+            Text(
+                text = subtitle,
+                fontSize = 11.sp,
+                color = IndTextSecondary
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileSettingsToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = IndNavyHeader)
+            Text(subtitle, fontSize = 11.sp, color = IndTextSecondary, lineHeight = 14.sp)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(checkedThumbColor = IndBlue, checkedTrackColor = IndBlueLight)
+        )
+    }
+}
+
+@Composable
+private fun ProfileSettingsNavRow(
+    title: String,
+    subtitle: String,
+    titleColor: Color,
+    icon: ImageVector,
+    iconTint: Color,
+    onClick: () -> Unit,
+    testTag: String? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(iconTint.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(18.dp))
+            }
+            Column {
+                Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = titleColor)
+                Text(subtitle, fontSize = 11.sp, color = IndTextSecondary)
+            }
+        }
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = IndTextMuted, modifier = Modifier.size(22.dp))
     }
 }

@@ -61,7 +61,45 @@ fun IndCard(
     }
 }
 
-fun getCategoryStyling(categoryKey: String, customColor: Color? = null): Triple<ImageVector, Color, Color> {
+fun categoryIconFromStoredName(iconName: String): ImageVector {
+    return when (iconName) {
+        "Restaurant" -> Icons.Filled.Restaurant
+        "ShoppingCart" -> Icons.Filled.ShoppingCart
+        "ShoppingBag" -> Icons.Filled.ShoppingBag
+        "LocalGasStation" -> Icons.Filled.LocalGasStation
+        "DirectionsCar" -> Icons.Filled.DirectionsCar
+        "Flight" -> Icons.Filled.Flight
+        "Home" -> Icons.Filled.Home
+        "Bolt" -> Icons.Filled.Bolt
+        "Wifi" -> Icons.Filled.Wifi
+        "PhoneAndroid" -> Icons.Filled.PhoneAndroid
+        "Tv" -> Icons.Filled.Tv
+        "LocalHospital" -> Icons.Filled.LocalHospital
+        "School" -> Icons.Filled.School
+        "Savings" -> Icons.Filled.Savings
+        "Work" -> Icons.Filled.Work
+        "Pets" -> Icons.Filled.Pets
+        "FitnessCenter" -> Icons.Filled.FitnessCenter
+        "ChildCare" -> Icons.Filled.ChildCare
+        "Build" -> Icons.Filled.Build
+        "Coffee" -> Icons.Filled.Coffee
+        "SportsEsports" -> Icons.Filled.SportsEsports
+        "MusicNote" -> Icons.Filled.MusicNote
+        "CardGiftcard" -> Icons.Filled.CardGiftcard
+        "VolunteerActivism" -> Icons.Filled.VolunteerActivism
+        else -> Icons.Filled.Category
+    }
+}
+
+fun getCategoryStyling(
+    categoryKey: String,
+    customColor: Color? = null,
+    storedIconName: String? = null
+): Triple<ImageVector, Color, Color> {
+    if (!storedIconName.isNullOrBlank()) {
+        val tint = customColor ?: IndBlue
+        return Triple(categoryIconFromStoredName(storedIconName), tint.copy(alpha = 0.12f), tint)
+    }
     return when (categoryKey.lowercase()) {
         "rent", DebitCategory.RENT.name.lowercase(), "home", "house rent" -> Triple(Icons.Filled.Home, IndBlueLight, IndBlue)
         "emi", DebitCategory.EMI.name.lowercase(), "loan" -> Triple(Icons.Filled.CreditCard, IndRedLight, IndRed)
@@ -116,9 +154,10 @@ fun CategoryIconBadge(
     modifier: Modifier = Modifier,
     badgeSize: androidx.compose.ui.unit.Dp = 40.dp,
     iconSize: androidx.compose.ui.unit.Dp = 22.dp,
-    customColor: Color? = null
+    customColor: Color? = null,
+    storedIconName: String? = null
 ) {
-    val (icon, bgColor, tintColor) = getCategoryStyling(categoryKey, customColor)
+    val (icon, bgColor, tintColor) = getCategoryStyling(categoryKey, customColor, storedIconName)
 
     Box(
         modifier = modifier

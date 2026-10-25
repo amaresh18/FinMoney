@@ -1,6 +1,10 @@
 package com.example.ui
 
+import android.Manifest
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,12 +28,22 @@ import kotlinx.coroutines.flow.collectLatest
 import com.example.service.BankSyncManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.example.ui.components.AutoExpenseTrackingHeaderStrip
 import com.example.ui.components.BrandLogo
 import com.example.ui.components.BrandType
+import com.example.ui.components.NotificationAccessRequestDialog
+import com.example.ui.components.AddCustomCategoryDialog
 import com.example.ui.components.QuickMultiAddSheet
+import com.example.util.FinMoneyPrefs
+import com.example.util.NotificationPermissionsHelper
 import com.example.ui.screens.*
 import com.example.ui.theme.*
 
@@ -64,13 +78,14 @@ fun MainScreen(
         }
     }
 
-    val notifications by viewModel.notifications.collectAsStateWithLifecycle()
+    val unreadNotificationCount by viewModel.unreadNotificationCount.collectAsStateWithLifecycle()
     val pendingTransactions by viewModel.pendingBankTransactions.collectAsStateWithLifecycle()
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val currencySymbol by viewModel.currencySymbol.collectAsStateWithLifecycle()
     val currentMonth by viewModel.currentMonth.collectAsStateWithLifecycle()
     val currentYear by viewModel.currentYear.collectAsStateWithLifecycle()
     val allDebits by viewModel.allDebits.collectAsStateWithLifecycle()
+    val customCategories by viewModel.customCategories.collectAsStateWithLifecycle()
 
     var focusLoanCloudId by remember { mutableStateOf(initialLoanCloudId) }
     var focusLoanId by remember { mutableStateOf(initialLoanId) }
@@ -86,11 +101,74 @@ fun MainScreen(
     }
     LaunchedEffect(Unit) {
         viewModel.pullLoanInboxAsync()
+        viewModel.checkNotificationAccess(context)
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.checkNotificationAccess(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val isAutoExpenseTrackingReady by viewModel.isAutoExpenseTrackingReady.collectAsStateWithLifecycle()
+    var showAutoTrackPermissionDialog by remember { mutableStateOf(false) }
+
+    val postNotificationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) {
+        viewModel.checkNotificationAccess(context)
+        if (!NotificationPermissionsHelper.hasNotificationListenerAccess(context)) {
+            showAutoTrackPermissionDialog = true
+        }
+    }
+
+    fun beginAutoTrackPermissionFlow() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !NotificationPermissionsHelper.hasPostNotifications(context)
+        ) {
+            postNotificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else if (!NotificationPermissionsHelper.hasNotificationListenerAccess(context)) {
+            showAutoTrackPermissionDialog = true
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (!NotificationPermissionsHelper.isAutoExpenseTrackingReady(context) &&
+            FinMoneyPrefs.shouldShowAutoTrackOnboarding(context)
+        ) {
+            FinMoneyPrefs.markAutoTrackOnboardingSeen(context)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                !NotificationPermissionsHelper.hasPostNotifications(context)
+            ) {
+                postNotificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else if (!NotificationPermissionsHelper.hasNotificationListenerAccess(context)) {
+                showAutoTrackPermissionDialog = true
+            }
+        }
     }
 
     var showQuickMultiAddSheet by remember { mutableStateOf(false) }
+    var showAddCustomCategoryDialog by remember { mutableStateOf(false) }
     var showAnalytics by remember { mutableStateOf(false) }
     var showKuberaAi by remember { mutableStateOf(false) }
+
+    fun dismissFullScreenOverlays() {
+        showPendingTransactions = false
+        showKuberaAi = false
+        showAnalytics = false
+    }
+
+    fun navigateToTab(tab: Int) {
+        dismissFullScreenOverlays()
+        selectedTab = tab
+    }
+
+    val overlayObscuresMainContent = showPendingTransactions || showKuberaAi
 
     // Intercept back button on secondary views or tabs to navigate back safely
     if (showPendingTransactions) {
@@ -111,14 +189,12 @@ fun MainScreen(
         }
     }
 
-    val unreadNotifications = remember(notifications) {
-        notifications.count { !it.isRead }
-    }
     val pendingAlertsCount = pendingTransactions.size
 
     Scaffold(
         containerColor = IndBackground,
         topBar = {
+            Column(modifier = Modifier.fillMaxWidth()) {
             Surface(
                 color = IndSurface,
                 shadowElevation = 2.dp,
@@ -164,8 +240,13 @@ fun MainScreen(
                         // Kubera AI Quick Action
                         IconButton(
                             onClick = {
-                                showPendingTransactions = false
-                                showKuberaAi = true
+                                if (showKuberaAi) {
+                                    showKuberaAi = false
+                                } else {
+                                    showPendingTransactions = false
+                                    showAnalytics = false
+                                    showKuberaAi = true
+                                }
                             },
                             modifier = Modifier
                                 .testTag("top_ai_button")
@@ -197,21 +278,39 @@ fun MainScreen(
 
                         // Notifications / Approvals
                         IconButton(
-                            onClick = { showPendingTransactions = true },
+                            onClick = {
+                                if (!isAutoExpenseTrackingReady) {
+                                    beginAutoTrackPermissionFlow()
+                                } else if (showPendingTransactions) {
+                                    showPendingTransactions = false
+                                } else {
+                                    showKuberaAi = false
+                                    showAnalytics = false
+                                    showPendingTransactions = true
+                                }
+                            },
                             modifier = Modifier
                                 .testTag("notifications_button")
                                 .clip(CircleShape)
-                                .background(if (pendingAlertsCount > 0 || unreadNotifications > 0) Color(0xFFFEF3C7) else IndBlueLight)
+                                .background(
+                                    when {
+                                        !isAutoExpenseTrackingReady -> Color(0xFFFEF3C7)
+                                        pendingAlertsCount > 0 || unreadNotificationCount > 0 -> Color(0xFFFEF3C7)
+                                        else -> IndBlueLight
+                                    }
+                                )
                         ) {
                             BadgedBox(
                                 badge = {
-                                    val count = unreadNotifications + pendingAlertsCount
-                                    if (count > 0) {
+                                    if (unreadNotificationCount > 0) {
                                         Badge(
                                             containerColor = IndRed,
                                             contentColor = Color.White
                                         ) {
-                                            Text(if (count > 99) "99+" else "$count")
+                                            Text(
+                                                if (unreadNotificationCount > 99) "99+"
+                                                else "$unreadNotificationCount"
+                                            )
                                         }
                                     }
                                 }
@@ -225,6 +324,8 @@ fun MainScreen(
                         }
 
                         // Profile Avatar
+                        val headerProfilePic = userProfile?.profilePicUri?.takeIf { it.isNotBlank() }
+                            ?: userProfile?.profileImageUri?.takeIf { it.isNotBlank() }
                         Box(
                             modifier = Modifier
                                 .testTag("top_profile_button")
@@ -232,23 +333,34 @@ fun MainScreen(
                                 .clip(CircleShape)
                                 .background(if (selectedTab == 4 && !showKuberaAi) IndGreen else IndGreenLight)
                                 .border(1.5.dp, if (selectedTab == 4 && !showKuberaAi) IndGreenDark else IndGreen, CircleShape)
-                                .clickable {
-                                    showPendingTransactions = false
-                                    showKuberaAi = false
-                                    showAnalytics = false
-                                    selectedTab = 4
-                                },
+                                .clickable { navigateToTab(4) },
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = (userProfile?.name?.takeIf { it != "Signed Out" && it.isNotBlank() }?.trim()?.take(1) ?: "A").uppercase(),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = if (selectedTab == 4 && !showKuberaAi) Color.White else IndGreenDark
-                            )
+                            if (!headerProfilePic.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = headerProfilePic,
+                                    contentDescription = "Profile",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Text(
+                                    text = (userProfile?.name?.takeIf { it != "Signed Out" && it.isNotBlank() }?.trim()?.take(1) ?: "A").uppercase(),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (selectedTab == 4 && !showKuberaAi) Color.White else IndGreenDark
+                                )
+                            }
                         }
                     }
                 }
+            }
+            if (!isAutoExpenseTrackingReady) {
+                AutoExpenseTrackingHeaderStrip(
+                    missingStepLabel = NotificationPermissionsHelper.missingStepLabel(context),
+                    onEnableClicked = { beginAutoTrackPermissionFlow() }
+                )
+            }
             }
         },
         bottomBar = {
@@ -265,8 +377,8 @@ fun MainScreen(
                         )
                     },
                     label = { Text("Dashboard", style = MaterialTheme.typography.labelSmall) },
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
+                    selected = selectedTab == 0 && !overlayObscuresMainContent && !showAnalytics,
+                    onClick = { navigateToTab(0) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = IndBlue,
                         selectedTextColor = IndBlue,
@@ -282,8 +394,8 @@ fun MainScreen(
                         )
                     },
                     label = { Text("Lent/Borrowed", style = MaterialTheme.typography.labelSmall) },
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
+                    selected = selectedTab == 1 && !overlayObscuresMainContent,
+                    onClick = { navigateToTab(1) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = IndBlue,
                         selectedTextColor = IndBlue,
@@ -299,8 +411,8 @@ fun MainScreen(
                         )
                     },
                     label = { Text("Analytics", style = MaterialTheme.typography.labelSmall) },
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
+                    selected = selectedTab == 2 && !overlayObscuresMainContent,
+                    onClick = { navigateToTab(2) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = IndBlue,
                         selectedTextColor = IndBlue,
@@ -316,8 +428,8 @@ fun MainScreen(
                         )
                     },
                     label = { Text("Reconcile", style = MaterialTheme.typography.labelSmall) },
-                    selected = selectedTab == 3,
-                    onClick = { selectedTab = 3 },
+                    selected = selectedTab == 3 && !overlayObscuresMainContent,
+                    onClick = { navigateToTab(3) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = IndBlue,
                         selectedTextColor = IndBlue,
@@ -333,13 +445,8 @@ fun MainScreen(
                         )
                     },
                     label = { Text("Profile", style = MaterialTheme.typography.labelSmall) },
-                    selected = selectedTab == 4 && !showKuberaAi,
-                    onClick = {
-                        showPendingTransactions = false
-                        showKuberaAi = false
-                        showAnalytics = false
-                        selectedTab = 4
-                    },
+                    selected = selectedTab == 4 && !overlayObscuresMainContent,
+                    onClick = { navigateToTab(4) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = IndBlue,
                         selectedTextColor = IndBlue,
@@ -369,7 +476,10 @@ fun MainScreen(
                     }
                 )
             } else if (showKuberaAi) {
-                KuberaAiScreen(viewModel = viewModel)
+                KuberaAiScreen(
+                    viewModel = viewModel,
+                    onClose = { showKuberaAi = false }
+                )
             } else {
                 Crossfade(
                     targetState = selectedTab,
@@ -386,7 +496,11 @@ fun MainScreen(
                                 DashboardScreen(
                                     viewModel = viewModel,
                                     onOpenAnalytics = { showAnalytics = true },
-                                    onOpenPending = { showPendingTransactions = true },
+                                    onOpenPending = {
+                                        showKuberaAi = false
+                                        showAnalytics = false
+                                        showPendingTransactions = true
+                                    },
                                     onOpenAddDebit = { showQuickMultiAddSheet = true }
                                 )
                             }
@@ -411,13 +525,14 @@ fun MainScreen(
                     )
                     4 -> UserProfileScreen(
                         viewModel = viewModel,
-                        onBack = { selectedTab = 0 }
+                        onBack = { selectedTab = 0 },
+                        showShellHeader = false
                     )
                 }
             }
         }
+        }
     }
-}
 
     if (showQuickMultiAddSheet) {
         QuickMultiAddSheet(
@@ -425,15 +540,36 @@ fun MainScreen(
             todayDay = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_MONTH),
             month = currentMonth,
             year = currentYear,
-            customCategories = emptyList(),
+            customCategories = customCategories,
             allHistoricalDebits = allDebits,
             onDismiss = { showQuickMultiAddSheet = false },
             onSaveBatch = { batch ->
                 viewModel.insertDebits(batch)
                 showQuickMultiAddSheet = false
             },
-            onOpenAddCustomCategory = {}
+            onOpenAddCustomCategory = { showAddCustomCategoryDialog = true }
         )
     }
 
+    if (showAddCustomCategoryDialog) {
+        AddCustomCategoryDialog(
+            onDismiss = { showAddCustomCategoryDialog = false },
+            onSave = { name, icon, color ->
+                viewModel.addCustomCategory(name, icon, color)
+                showAddCustomCategoryDialog = false
+            }
+        )
+    }
+
+    if (showAutoTrackPermissionDialog) {
+        NotificationAccessRequestDialog(
+            onDismiss = {
+                showAutoTrackPermissionDialog = false
+                viewModel.checkNotificationAccess(context)
+            },
+            onGrantClicked = {
+                showAutoTrackPermissionDialog = false
+            }
+        )
+    }
 }
