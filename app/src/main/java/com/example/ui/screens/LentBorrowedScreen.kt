@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,18 +10,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
 import com.example.data.model.LoanApprovalStatus
@@ -70,6 +71,28 @@ fun LentBorrowedScreen(
     }
     val activeUserId = remember(userProfile) {
         userProfile?.userId?.takeIf { it.isNotBlank() } ?: viewModel.getActiveUserId()
+    }
+
+    val isPhoneVerified = userProfile?.isOtpVerified == true && !userProfile?.phoneNumber.isNullOrBlank()
+    var showPhoneVerifyDialog by remember { mutableStateOf(false) }
+
+    if (!isPhoneVerified) {
+        LentBorrowPhoneVerificationGate(
+            onBack = onBack,
+            onVerifyClicked = { showPhoneVerifyDialog = true }
+        )
+        if (showPhoneVerifyDialog) {
+            com.example.ui.components.PhoneVerificationDialog(
+                initialPhone = userProfile?.phoneNumber.orEmpty(),
+                viewModel = viewModel,
+                onDismiss = { showPhoneVerifyDialog = false },
+                onVerified = {
+                    showPhoneVerifyDialog = false
+                    viewModel.syncVerificationStatusFromFirebaseAsync()
+                }
+            )
+        }
+        return
     }
 
     if (openLoan != null) {
@@ -791,5 +814,225 @@ private fun loanStatusLabel(status: LoanApprovalStatus): String {
         LoanApprovalStatus.MUTUAL_APPROVED, LoanApprovalStatus.APPROVED -> "Mutual agreement"
         LoanApprovalStatus.SETTLED -> "Settled"
         LoanApprovalStatus.REJECTED -> "Rejected"
+    }
+}
+
+@Composable
+private fun LentBorrowPhoneVerificationGate(
+    onBack: () -> Unit,
+    onVerifyClicked: () -> Unit
+) {
+    Scaffold(
+        containerColor = IndBackground,
+        topBar = {
+            Surface(
+                color = IndSurface,
+                shadowElevation = 2.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, IndBorderSubtle)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.testTag("gate_back_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back to Dashboard",
+                                tint = IndNavyHeader
+                            )
+                        }
+                        com.example.ui.components.BrandLogo(name = "FinMoney", badgeSize = 28.dp)
+                        Text(
+                            text = "Lent & Borrow (Khaata)",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = IndNavyHeader
+                        )
+                    }
+                }
+            }
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+            ) {
+                // Lock Hero Badge
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(CircleShape)
+                        .background(IndBlueLight)
+                        .border(2.dp, IndBlue, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Lock,
+                        contentDescription = null,
+                        tint = IndBlue,
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFFEF3C7),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B))
+                ) {
+                    Text(
+                        text = "MOBILE VERIFICATION REQUIRED",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFB45309),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+
+                Text(
+                    text = "Unlock Lent & Borrow",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = IndNavyHeader,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+
+                Text(
+                    text = "To ensure mutual accountability, legal record validity, and peer UPI payment links, mobile verification is required for Khaata.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = IndTextSecondary,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    lineHeight = 22.sp,
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Feature Value Props
+                com.example.ui.components.IndCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        GateFeatureRow(
+                            icon = Icons.Filled.SwapHoriz,
+                            title = "Tamper-Proof Peer Ledger",
+                            description = "Binds loan and debt records to verified identities for undisputed clarity."
+                        )
+                        HorizontalDivider(color = IndBorderSubtle)
+                        GateFeatureRow(
+                            icon = Icons.Filled.QrCode,
+                            title = "Instant UPI Settle Links",
+                            description = "Send 1-tap WhatsApp and SMS payment reminders to borrowers."
+                        )
+                        HorizontalDivider(color = IndBorderSubtle)
+                        GateFeatureRow(
+                            icon = Icons.Filled.Security,
+                            title = "Multi-Device Khaata Sync",
+                            description = "Automatic cloud backup and cross-device sync for all your lent & borrowed accounts."
+                        )
+                    }
+                }
+            }
+
+            // Bottom CTAs
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Button(
+                    onClick = onVerifyClicked,
+                    colors = ButtonDefaults.buttonColors(containerColor = IndBlue),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .testTag("gate_verify_phone_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.PhoneAndroid,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Verify Mobile Number with OTP",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                }
+
+                TextButton(
+                    onClick = onBack,
+                    modifier = Modifier.testTag("gate_return_dashboard_button")
+                ) {
+                    Text(
+                        text = "Return to Dashboard",
+                        fontWeight = FontWeight.SemiBold,
+                        color = IndTextSecondary,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GateFeatureRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    description: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = IndBlueLight,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = IndBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = IndNavyHeader
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = IndTextSecondary,
+                lineHeight = 16.sp
+            )
+        }
     }
 }

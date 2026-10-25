@@ -29,6 +29,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.service.FinMoneyAuthService
 import com.example.service.BankSyncManager
 import com.example.ui.FinMoneyViewModel
 import com.example.ui.MainScreen
@@ -104,8 +105,7 @@ class MainActivity : FragmentActivity() {
                             !isPlaceholderProfile &&
                             profile.name != "Signed Out" &&
                             profile.name.isNotBlank() &&
-                            profile.isOtpVerified &&
-                            profile.isEmailVerified
+                            (profile.email.isNotBlank() || FinMoneyAuthService.currentFirebaseUser() != null)
 
                         Crossfade(
                             targetState = isLoggedIn,

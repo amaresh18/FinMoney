@@ -127,6 +127,7 @@ fun UserProfileScreen(
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
     var showDataSafetyDialog by remember { mutableStateOf(false) }
+    var showPhoneVerifyDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = IndBackground,
@@ -312,6 +313,105 @@ fun UserProfileScreen(
                 }
             }
 
+            // Mobile Verification Card (Required for Lent & Borrow / Khaata access)
+            IndCard(modifier = Modifier.fillMaxWidth().testTag("profile_mobile_verification_card")) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (phoneVerified) Icons.Filled.VerifiedUser else Icons.Filled.Security,
+                                contentDescription = null,
+                                tint = if (phoneVerified) IndGreen else IndRed,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "Mobile & Khaata Access",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndNavyHeader
+                                )
+                                Text(
+                                    text = if (phoneVerified) "Verified • Lent & Borrow Unlocked" else "Verification required for Lent & Borrow",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (phoneVerified) IndGreen else IndRed,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (phoneVerified) IndGreenLight else Color(0xFFFEF3C7),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (phoneVerified) IndGreen else Color(0xFFF59E0B))
+                        ) {
+                            Text(
+                                text = if (phoneVerified) "VERIFIED" else "PENDING",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (phoneVerified) IndGreenDark else Color(0xFFB45309),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    if (effectivePhone.isNotBlank()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Filled.PhoneAndroid, contentDescription = null, tint = IndNavyHeader, modifier = Modifier.size(16.dp))
+                            Text(
+                                text = "+91 ${effectivePhone.takeLast(10)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = IndNavyHeader
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = if (phoneVerified)
+                            "Your mobile number is verified with OTP. You have full access to Lent & Borrow (Khaata peer ledger)."
+                        else
+                            "FinMoney uses your verified mobile number to secure peer loan agreements and debt settlement receipts.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = IndTextSecondary,
+                        lineHeight = 17.sp
+                    )
+
+                    Button(
+                        onClick = { showPhoneVerifyDialog = true },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (phoneVerified) IndSurface else IndBlue,
+                            contentColor = if (phoneVerified) IndBlue else Color.White
+                        ),
+                        border = if (phoneVerified) androidx.compose.foundation.BorderStroke(1.dp, IndBlue) else null,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("profile_verify_phone_action")
+                    ) {
+                        Icon(
+                            imageVector = if (phoneVerified) Icons.Outlined.Edit else Icons.Filled.LockOpen,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (phoneVerified) "Update Phone Number" else "Verify Mobile Number with OTP",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+
             if (isEditProfileMode) {
                 IndCard(modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -349,7 +449,7 @@ fun UserProfileScreen(
                             shape = RoundedCornerShape(12.dp)
                         )
                         Text(
-                            text = "To change phone or email, sign out and complete verification again.",
+                            text = "To update and verify your mobile number, use the Mobile & Khaata Access card above.",
                             fontSize = 11.sp,
                             color = IndTextSecondary,
                             lineHeight = 15.sp
@@ -636,6 +736,19 @@ fun UserProfileScreen(
                 TextButton(onClick = { showResetDialog = false }) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+
+    // Mobile OTP Verification Dialog
+    if (showPhoneVerifyDialog) {
+        com.example.ui.components.PhoneVerificationDialog(
+            initialPhone = effectivePhone,
+            viewModel = viewModel,
+            onDismiss = { showPhoneVerifyDialog = false },
+            onVerified = {
+                showPhoneVerifyDialog = false
+                viewModel.syncVerificationStatusFromFirebaseAsync()
             }
         )
     }

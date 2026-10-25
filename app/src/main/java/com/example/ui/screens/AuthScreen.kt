@@ -245,51 +245,25 @@ private fun AuthScreenContent(
         val isPlaceholder = profile.userId == "user_default" &&
             profile.phoneNumber.isBlank() &&
             profile.email.isBlank()
-        if (isPlaceholder || (profile.isOtpVerified && profile.isEmailVerified)) return@LaunchedEffect
+        if (isPlaceholder) return@LaunchedEffect
 
-        if (profile.name.isNotBlank() && profile.name != "Signed Out") {
-            nameInput = profile.name
-        }
-        if (profile.phoneNumber.isNotBlank()) phoneInput = profile.phoneNumber
-        if (profile.email.isNotBlank()) emailInput = profile.email
-        isPhoneVerified = profile.isOtpVerified
-
-        statusMessage = "Complete mobile & email verification to access FinMoney."
-        when {
-            !profile.isOtpVerified -> currentStep = 1
-            !profile.isEmailVerified -> currentStep = if (profile.email.isBlank()) 3 else 4
+        if (profile.name.isNotBlank() && profile.name != "Signed Out" && (profile.email.isNotBlank() || Firebase.auth.currentUser != null)) {
+            onContinue()
+            return@LaunchedEffect
         }
     }
 
     fun routeAfterIdentityProviders(name: String, email: String, phoneDigits: String) {
-        val gUser = Firebase.auth.currentUser
-        val phoneLinked = FinMoneyAuthService.isPhoneLinkedOnFirebase(gUser)
-        val emailVerified = FinMoneyAuthService.isEmailVerifiedOnFirebase(gUser)
-        if (phoneDigits.isNotBlank()) phoneInput = phoneDigits
-        when {
-            !phoneLinked -> {
-                statusMessage = "Verify your mobile number with OTP (required)."
-                currentStep = 1
-            }
-            !emailVerified -> {
-                emailInput = email
-                isEmailVerificationPending = true
-                currentStep = if (email.isBlank()) 3 else 4
-                statusMessage = "Verify your email to activate FinMoney."
-            }
-            else -> {
-                coroutineScope.launchCatching(
+        coroutineScope.launchCatching(
             tag = "AuthScreen",
             onError = { e ->
                 Log.e("AuthScreen", "Auth flow error", e)
                 errorText = e.localizedMessage ?: e.message ?: "Something went wrong. Please try again."
             }
         ) {
-                    viewModel.syncVerificationStatusFromFirebase()
-                    statusMessage = "Signed in as $name ✓"
-                    onContinue()
-                }
-            }
+            viewModel.syncVerificationStatusFromFirebase()
+            statusMessage = "Signed in as $name ✓"
+            onContinue()
         }
     }
 
@@ -393,7 +367,8 @@ private fun AuthScreenContent(
                             isEmailVerified = FinMoneyAuthService.isEmailVerifiedOnFirebase(fbUser)
                         )
                         if (regResult.isSuccess) {
-                            routeAfterIdentityProviders(gName, gEmail, phoneDigits)
+                            statusMessage = "Signed in as $gName ✓"
+                            onContinue()
                         } else {
                             errorText = regResult.exceptionOrNull()?.message
                         }
@@ -454,7 +429,8 @@ private fun AuthScreenContent(
                     )
 
                     if (regResult.isSuccess) {
-                        routeAfterIdentityProviders(detectedName, detectedEmail, phoneDigits)
+                        statusMessage = "Signed in as $detectedName ✓"
+                        onContinue()
                     } else {
                         errorText = regResult.exceptionOrNull()?.message
                     }
@@ -890,7 +866,7 @@ private fun AuthScreenContent(
 @Composable
 fun OnboardingScreen(
     onGoogleSignIn: () -> Unit,
-    onMobileSignIn: () -> Unit,
+    onMobileSignIn: () -> Unit = {},
     isGoogleLoading: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -1065,24 +1041,6 @@ fun OnboardingScreen(
                                 }
                                 Text("Continue with Google", style = AppTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
                             }
-                        }
-                    }
-
-                    OutlinedButton(
-                        onClick = onMobileSignIn,
-                        shape = RoundedCornerShape(AppTheme.dimensions.buttonRadius),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.darkBorder),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AppTheme.colors.textPrimary),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(AppTheme.dimensions.small)
-                        ) {
-                            Icon(Icons.Filled.PhoneAndroid, contentDescription = null, tint = AppTheme.colors.accentCyan, modifier = Modifier.size(AppTheme.dimensions.iconSmall + 2.dp))
-                            Text("Sign In with Mobile Number", style = AppTheme.typography.labelLarge)
                         }
                     }
 
