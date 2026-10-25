@@ -58,3 +58,23 @@ fun customCategoryTint(hex: String): androidx.compose.ui.graphics.Color? {
         null
     }
 }
+
+fun customCategoryForName(name: String, customCategories: List<CustomCategory>): CustomCategory? {
+    val trimmed = name.trim()
+    if (trimmed.isBlank()) return null
+    return customCategories.find { it.name.equals(trimmed, ignoreCase = true) }
+}
+
+fun customCategoryForDebit(item: DebitItem, customCategories: List<CustomCategory>): CustomCategory? {
+    val cat = item.category.trim()
+    if (!cat.equals(DebitCategory.CUSTOM.name, ignoreCase = true) && !cat.equals("Custom", ignoreCase = true)) {
+        return null
+    }
+    return customCategoryForName(item.customCategoryName, customCategories)
+}
+
+fun customCategoryForFilterKey(filterKey: String, customCategories: List<CustomCategory>): CustomCategory? {
+    if (!filterKey.startsWith(CUSTOM_CATEGORY_FILTER_PREFIX, ignoreCase = true)) return null
+    val name = filterKey.substring(CUSTOM_CATEGORY_FILTER_PREFIX.length)
+    return customCategoryForName(name, customCategories)
+}

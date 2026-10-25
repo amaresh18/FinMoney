@@ -24,9 +24,10 @@ import kotlinx.coroutines.launch
         MonthlyReconciliation::class,
         BankTransactionRecord::class,
         RawNotificationRecord::class,
-        CloudSyncOutboxEntry::class
+        CloudSyncOutboxEntry::class,
+        CustomExpenseTag::class
     ],
-    version = 22,
+    version = 23,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -54,6 +55,22 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE UNIQUE INDEX IF NOT EXISTS index_user_profiles_email_unique " +
                         "ON user_profiles(email) WHERE email != ''"
+                )
+            }
+        }
+
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS custom_expense_tags (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        userId TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        iconName TEXT NOT NULL,
+                        colorHex TEXT NOT NULL
+                    )
+                    """.trimIndent()
                 )
             }
         }
@@ -185,7 +202,8 @@ abstract class AppDatabase : RoomDatabase() {
                             MIGRATION_18_19,
                             MIGRATION_19_20,
                             MIGRATION_20_21,
-                            MIGRATION_21_22
+                            MIGRATION_21_22,
+                            MIGRATION_22_23
                         )
                         .fallbackToDestructiveMigration()
                         .fallbackToDestructiveMigrationOnDowngrade()

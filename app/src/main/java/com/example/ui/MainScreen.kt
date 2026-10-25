@@ -41,6 +41,7 @@ import com.example.ui.components.BrandLogo
 import com.example.ui.components.BrandType
 import com.example.ui.components.NotificationAccessRequestDialog
 import com.example.ui.components.AddCustomCategoryDialog
+import com.example.ui.components.ManageCustomCategoriesDialog
 import com.example.ui.components.QuickMultiAddSheet
 import com.example.util.FinMoneyPrefs
 import com.example.util.NotificationPermissionsHelper
@@ -86,6 +87,7 @@ fun MainScreen(
     val currentYear by viewModel.currentYear.collectAsStateWithLifecycle()
     val allDebits by viewModel.allDebits.collectAsStateWithLifecycle()
     val customCategories by viewModel.customCategories.collectAsStateWithLifecycle()
+    val customExpenseTags by viewModel.customExpenseTags.collectAsStateWithLifecycle()
 
     var focusLoanCloudId by remember { mutableStateOf(initialLoanCloudId) }
     var focusLoanId by remember { mutableStateOf(initialLoanId) }
@@ -154,6 +156,11 @@ fun MainScreen(
 
     var showQuickMultiAddSheet by remember { mutableStateOf(false) }
     var showAddCustomCategoryDialog by remember { mutableStateOf(false) }
+    var showManageCustomCategoriesDialog by remember { mutableStateOf(false) }
+    var editingCustomCategory by remember { mutableStateOf<com.example.data.model.CustomCategory?>(null) }
+    var pendingCustomCategoryName by remember { mutableStateOf<String?>(null) }
+    var pendingCustomCategoryRowId by remember { mutableStateOf<String?>(null) }
+    var lastAddedCustomCategoryForEntry by remember { mutableStateOf<String?>(null) }
     var showAnalytics by remember { mutableStateOf(false) }
     var showKuberaAi by remember { mutableStateOf(false) }
 
@@ -541,23 +548,71 @@ fun MainScreen(
             month = currentMonth,
             year = currentYear,
             customCategories = customCategories,
+            customExpenseTags = customExpenseTags,
             allHistoricalDebits = allDebits,
-            onDismiss = { showQuickMultiAddSheet = false },
+            initialCategoryKey = lastAddedCustomCategoryForEntry,
+            onSaveCustomExpenseTag = { name, icon, color ->
+                viewModel.addCustomExpenseTag(name, icon, color)
+            },
+            pendingCustomCategoryName = pendingCustomCategoryName,
+            pendingCustomCategoryRowId = pendingCustomCategoryRowId,
+            onPendingCustomCategoryApplied = {
+                pendingCustomCategoryName = null
+                pendingCustomCategoryRowId = null
+            },
+            onDismiss = {
+                showQuickMultiAddSheet = false
+                lastAddedCustomCategoryForEntry = null
+            },
             onSaveBatch = { batch ->
                 viewModel.insertDebits(batch)
                 showQuickMultiAddSheet = false
+                lastAddedCustomCategoryForEntry = null
             },
-            onOpenAddCustomCategory = { showAddCustomCategoryDialog = true }
+            onOpenAddCustomCategory = { rowId ->
+                pendingCustomCategoryRowId = rowId
+                showAddCustomCategoryDialog = true
+            }
         )
     }
 
-    if (showAddCustomCategoryDialog) {
+    if (showAddCustomCategoryDialog || editingCustomCategory != null) {
         AddCustomCategoryDialog(
-            onDismiss = { showAddCustomCategoryDialog = false },
-            onSave = { name, icon, color ->
-                viewModel.addCustomCategory(name, icon, color)
+            onDismiss = {
                 showAddCustomCategoryDialog = false
+                editingCustomCategory = null
+            },
+            editing = editingCustomCategory,
+            onManageExisting = if (editingCustomCategory == null) {
+                {
+                    showAddCustomCategoryDialog = false
+                    showManageCustomCategoriesDialog = true
+                }
+            } else null,
+            onSave = { name, icon, color ->
+                if (editingCustomCategory != null) {
+                    viewModel.updateCustomCategory(editingCustomCategory!!.id, name, icon, color)
+                    editingCustomCategory = null
+                } else {
+                    viewModel.addCustomCategory(name, icon, color)
+                    pendingCustomCategoryName = name
+                    lastAddedCustomCategoryForEntry = name
+                    showAddCustomCategoryDialog = false
+                }
             }
+        )
+    }
+
+    if (showManageCustomCategoriesDialog) {
+        ManageCustomCategoriesDialog(
+            categories = customCategories,
+            onDismiss = { showManageCustomCategoriesDialog = false },
+            onEdit = { cat ->
+                showManageCustomCategoriesDialog = false
+                editingCustomCategory = cat
+            },
+            onDelete = { cat -> viewModel.deleteCustomCategory(cat) },
+            expenseCountForCategory = { name -> viewModel.countExpensesUsingCustomCategory(name) }
         )
     }
 

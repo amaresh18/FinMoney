@@ -1,0 +1,60 @@
+﻿OK   brand_air_india  853 bytes  simple-icons:airindia
+OK   brand_airtel  1270 bytes  simple-icons:airtel
+FAIL brand_ajio
+OK   brand_amazon  2275 bytes  simple-icons:amazon
+FAIL brand_apollo
+OK   brand_bigbasket  1620 bytes  simple-icons:bigbasket
+FAIL brand_blinkit
+FAIL brand_bpcl
+FAIL brand_bsnl
+OK   brand_byjus  1019 bytes  simple-icons:byjus
+FAIL brand_cred
+FAIL brand_croma
+FAIL brand_dmart
+FAIL brand_dominos
+OK   brand_dunzo  1051 bytes  simple-icons:dunzo
+OK   brand_flipkart  978 bytes  simple-icons:flipkart
+FAIL brand_goibibo
+OK   brand_googlepay  1557 bytes  simple-icons:googlepay
+FAIL brand_hotstar
+FAIL brand_hpcl
+OK   brand_indigo  1581 bytes  simple-icons:indigo
+FAIL brand_instamart
+FAIL brand_iocl
+FAIL brand_irctc
+FAIL brand_jio
+FAIL brand_jiomart
+OK   brand_kfc  1845 bytes  simple-icons:kfc
+FAIL brand_makemytrip
+OK   brand_mcdonalds  544 bytes  simple-icons:mcdonalds
+FAIL brand_meesho
+FAIL brand_metro
+FAIL brand_myntra
+FAIL brand_namma_yatri
+OK   brand_netflix  480 bytes  simple-icons:netflix
+FAIL brand_nykaa
+FAIL brand_ola
+OK   brand_paytm  2257 bytes  simple-icons:paytm
+FAIL brand_pharmeasy
+OK   brand_phonepe  884 bytes  simple-icons:phonepe
+OK   brand_prime_video  7306 bytes  simple-icons:amazonprime
+FAIL brand_rapido
+FAIL brand_redbus
+FAIL brand_reliance_digital
+FAIL brand_restaurant
+OK   brand_shell  1192 bytes  simple-icons:shell
+FAIL brand_sonyliv
+OK   brand_spotify  842 bytes  simple-icons:spotify
+OK   brand_starbucks  7851 bytes  simple-icons:starbucks
+OK   brand_swiggy  898 bytes  simple-icons:swiggy
+FAIL brand_tata_1mg
+FAIL brand_tatacliq
+OK   brand_uber  1081 bytes  simple-icons:uber
+OK   brand_unacademy  640 bytes  simple-icons:unacademy
+OK   brand_vi  598 bytes  simple-icons:vodafone
+OK   brand_youtube  604 bytes  simple-icons:youtube
+FAIL brand_zepto
+OK   brand_zomato  2398 bytes  simple-icons:zomato
+
+Success: 24 / 57
+Failed: brand_ajio, brand_apollo, brand_blinkit, brand_bpcl, brand_bsnl, brand_cred, brand_croma, brand_dmart, brand_dominos, brand_goibibo, brand_hotstar, brand_hpcl, brand_instamart, brand_iocl, brand_irctc, brand_jio, brand_jiomart, brand_makemytrip, brand_meesho, brand_metro, brand_myntra, brand_namma_yatri, brand_nykaa, brand_ola, brand_pharmeasy, brand_rapido, brand_redbus, brand_reliance_digital, brand_restaurant, brand_sonyliv, brand_tata_1mg, brand_tatacliq, brand_zepto

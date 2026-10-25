@@ -164,6 +164,16 @@ data class CustomCategory(
     val displayName: String = ""
 )
 
+/** User-defined expense tag / subcategory (stored in debit title when tagging). */
+@Entity(tableName = "custom_expense_tags")
+data class CustomExpenseTag(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val userId: String = "",
+    val name: String = "",
+    val iconName: String = "LocalOffer",
+    val colorHex: String = "#0066FF"
+)
+
 enum class LoanLedgerKind {
     /** Increases the outstanding balance (another lend or borrow on the same record). */
     ADDITIONAL,

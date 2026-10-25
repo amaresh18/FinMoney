@@ -197,6 +197,11 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    val customExpenseTags: StateFlow<List<CustomExpenseTag>> = userProfile
+        .flatMapLatest { u -> dao.getAllCustomExpenseTags(u?.userId ?: getActiveUserId()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     val notifications: StateFlow<List<AppNotification>> = userProfile
         .flatMapLatest { u -> dao.getAllNotifications(u?.userId ?: getActiveUserId()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -808,6 +813,119 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 )
             )
             notifyUser("Custom category \"$trimmed\" added.")
+        }
+    }
+
+    fun updateCustomCategory(
+        categoryId: Long,
+        name: String,
+        iconName: String,
+        colorHex: String
+    ) {
+        launchSafe {
+            val trimmed = name.trim()
+            if (trimmed.isBlank()) {
+                notifyUser("Enter a category name.")
+                return@launchSafe
+            }
+            val uid = getActiveUserId()
+            val all = dao.getAllCustomCategories(uid).first()
+            val existing = all.find { it.id == categoryId }
+            if (existing == null) {
+                notifyUser("Category not found.")
+                return@launchSafe
+            }
+            val duplicate = all.any {
+                it.id != categoryId && it.name.equals(trimmed, ignoreCase = true)
+            }
+            if (duplicate) {
+                notifyUser("A category with this name already exists.")
+                return@launchSafe
+            }
+            val oldName = existing.name
+            if (!oldName.equals(trimmed, ignoreCase = true)) {
+                dao.renameCustomCategoryOnDebits(oldName, trimmed, uid)
+            }
+            dao.updateCustomCategory(
+                existing.copy(
+                    name = trimmed,
+                    displayName = trimmed,
+                    iconName = iconName.ifBlank { "Category" },
+                    colorHex = colorHex.ifBlank { "#00B386" }
+                )
+            )
+            notifyUser("Category updated.")
+        }
+    }
+
+    fun deleteCustomCategory(category: CustomCategory) {
+        launchSafe {
+            val uid = getActiveUserId()
+            dao.deleteCustomCategory(category.copy(userId = category.userId.ifBlank { uid }))
+            notifyUser("Category \"${category.name}\" removed.")
+        }
+    }
+
+    suspend fun countExpensesUsingCustomCategory(name: String): Int {
+        return dao.countDebitsForCustomCategoryName(name.trim(), getActiveUserId())
+    }
+
+    fun addCustomExpenseTag(name: String, iconName: String, colorHex: String) {
+        launchSafe {
+            val trimmed = name.trim()
+            if (trimmed.isBlank()) {
+                notifyUser("Enter a tag name.")
+                return@launchSafe
+            }
+            val uid = getActiveUserId()
+            if (dao.getCustomExpenseTagByName(trimmed, uid) != null) {
+                notifyUser("This tag already exists.")
+                return@launchSafe
+            }
+            dao.insertCustomExpenseTag(
+                CustomExpenseTag(
+                    userId = uid,
+                    name = trimmed,
+                    iconName = iconName.ifBlank { "LocalOffer" },
+                    colorHex = colorHex.ifBlank { "#0066FF" }
+                )
+            )
+            notifyUser("Tag \"$trimmed\" saved.")
+        }
+    }
+
+    fun updateCustomExpenseTag(tagId: Long, name: String, iconName: String, colorHex: String) {
+        launchSafe {
+            val trimmed = name.trim()
+            if (trimmed.isBlank()) {
+                notifyUser("Enter a tag name.")
+                return@launchSafe
+            }
+            val uid = getActiveUserId()
+            val all = dao.getAllCustomExpenseTags(uid).first()
+            val existing = all.find { it.id == tagId } ?: run {
+                notifyUser("Tag not found.")
+                return@launchSafe
+            }
+            if (all.any { it.id != tagId && it.name.equals(trimmed, ignoreCase = true) }) {
+                notifyUser("This tag name already exists.")
+                return@launchSafe
+            }
+            dao.updateCustomExpenseTag(
+                existing.copy(
+                    name = trimmed,
+                    iconName = iconName.ifBlank { "LocalOffer" },
+                    colorHex = colorHex.ifBlank { "#0066FF" }
+                )
+            )
+            notifyUser("Tag updated.")
+        }
+    }
+
+    fun deleteCustomExpenseTag(tag: CustomExpenseTag) {
+        launchSafe {
+            dao.deleteCustomExpenseTag(tag)
+            notifyUser("Tag \"${tag.name}\" removed.")
         }
     }
 

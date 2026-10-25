@@ -56,7 +56,12 @@ fun AnalyticsScreen(
     var editingDebitItem by remember { mutableStateOf<DebitItem?>(null) }
     var expensePendingDelete by remember { mutableStateOf<DebitItem?>(null) }
     var showAddCustomCategoryDialog by remember { mutableStateOf(false) }
+    var showManageCustomCategoriesDialog by remember { mutableStateOf(false) }
+    var editingCustomCategory by remember { mutableStateOf<com.example.data.model.CustomCategory?>(null) }
+    var pendingCustomCategoryName by remember { mutableStateOf<String?>(null) }
+    var pendingCustomCategoryRowId by remember { mutableStateOf<String?>(null) }
     val customCategories by viewModel.customCategories.collectAsStateWithLifecycle()
+    val customExpenseTags by viewModel.customExpenseTags.collectAsStateWithLifecycle()
 
     val currentMonthDebits = remember(allDebits, month, year) {
         allDebits.filter { it.month == month && it.year == year }
@@ -322,24 +327,66 @@ fun AnalyticsScreen(
             month = month,
             year = year,
             customCategories = customCategories,
+            customExpenseTags = customExpenseTags,
             allHistoricalDebits = allDebits,
             editingDebit = item,
+            onSaveCustomExpenseTag = { name, icon, color ->
+                viewModel.addCustomExpenseTag(name, icon, color)
+            },
             onDismiss = { editingDebitItem = null },
             onSaveBatch = { batch ->
                 batch.firstOrNull()?.let { viewModel.updateDebit(it) }
                 editingDebitItem = null
             },
-            onOpenAddCustomCategory = { showAddCustomCategoryDialog = true }
+            pendingCustomCategoryName = pendingCustomCategoryName,
+            pendingCustomCategoryRowId = pendingCustomCategoryRowId,
+            onPendingCustomCategoryApplied = {
+                pendingCustomCategoryName = null
+                pendingCustomCategoryRowId = null
+            },
+            onOpenAddCustomCategory = { rowId ->
+                pendingCustomCategoryRowId = rowId
+                showAddCustomCategoryDialog = true
+            }
         )
     }
 
-    if (showAddCustomCategoryDialog) {
+    if (showAddCustomCategoryDialog || editingCustomCategory != null) {
         AddCustomCategoryDialog(
-            onDismiss = { showAddCustomCategoryDialog = false },
-            onSave = { name, icon, color ->
-                viewModel.addCustomCategory(name, icon, color)
+            onDismiss = {
                 showAddCustomCategoryDialog = false
+                editingCustomCategory = null
+            },
+            editing = editingCustomCategory,
+            onManageExisting = if (editingCustomCategory == null) {
+                {
+                    showAddCustomCategoryDialog = false
+                    showManageCustomCategoriesDialog = true
+                }
+            } else null,
+            onSave = { name, icon, color ->
+                if (editingCustomCategory != null) {
+                    viewModel.updateCustomCategory(editingCustomCategory!!.id, name, icon, color)
+                    editingCustomCategory = null
+                } else {
+                    viewModel.addCustomCategory(name, icon, color)
+                    pendingCustomCategoryName = name
+                    showAddCustomCategoryDialog = false
+                }
             }
+        )
+    }
+
+    if (showManageCustomCategoriesDialog) {
+        ManageCustomCategoriesDialog(
+            categories = customCategories,
+            onDismiss = { showManageCustomCategoriesDialog = false },
+            onEdit = { cat ->
+                showManageCustomCategoriesDialog = false
+                editingCustomCategory = cat
+            },
+            onDelete = { cat -> viewModel.deleteCustomCategory(cat) },
+            expenseCountForCategory = { name -> viewModel.countExpensesUsingCustomCategory(name) }
         )
     }
 

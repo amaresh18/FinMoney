@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CustomCategory
+import com.example.data.model.CustomExpenseTag
 import com.example.data.model.DebitCategory
 import com.example.data.model.DebitItem
 import com.example.ui.theme.*
@@ -134,11 +135,11 @@ fun debitItemToMultiAddRowState(item: DebitItem, todayDay: Int): MultiAddRowStat
 
 fun getAlignedTagsForCategory(categoryKey: String): List<String> {
     return when (categoryKey.uppercase()) {
-        DebitCategory.OUTSIDE_FOOD.name -> listOf("Dinner", "Lunch", "Breakfast", "Swiggy/Zomato", "Snacks", "Cafe & Coffee", "Party", "Drinks")
+        DebitCategory.OUTSIDE_FOOD.name -> listOf("Dinner", "Lunch", "Breakfast", "Snacks", "Party", "Drinks", "Cafe")
         DebitCategory.GROCERIES.name -> listOf("Supermarket", "Vegetables", "Fruits", "Dairy & Milk", "Provisions", "Blinkit/Zepto", "Organic")
         DebitCategory.FUEL.name -> listOf("Petrol", "Diesel", "EV Charging", "Car Fuel", "Bike Fuel", "Highway Toll")
-        DebitCategory.SHOPPING.name -> listOf("Clothing", "Electronics", "Footwear", "Home Decor", "Amazon/Flipkart", "Gifts", "Personal Care")
-        DebitCategory.TRAVEL.name -> listOf("Cab/Uber/Ola", "Metro/Train", "Auto Rickshaw", "Flight", "Bus Ticket", "Fuel/Parking")
+        DebitCategory.SHOPPING.name -> listOf("Clothing", "Electronics", "Footwear", "Home Decor", "Gifts", "Personal Care")
+        DebitCategory.TRAVEL.name -> listOf("Cab", "Auto", "Parking", "Toll", "Flight", "Bus Ticket")
         DebitCategory.TOURS.name -> listOf("Hotel Stay", "Sightseeing", "Flight/Train", "Holiday Package", "Resort")
         DebitCategory.PHARMACY.name -> listOf("Monthly Medicines", "Doctor Consultation", "Lab Tests", "First Aid", "Supplements")
         DebitCategory.ELECTRICITY.name -> listOf("Power Bill", "Water Bill", "Gas Cylinder")
@@ -163,6 +164,18 @@ fun getAlignedTagsForCategory(categoryKey: String): List<String> {
     }
 }
 
+private fun prependSessionCustomCategories(
+    base: List<CategoryMeta>,
+    sessionNames: List<String>,
+    allCategoryMetas: List<CategoryMeta>
+): List<CategoryMeta> {
+    if (sessionNames.isEmpty()) return base
+    val pinned = sessionNames.mapNotNull { name ->
+        allCategoryMetas.find { it.isCustom && it.customName.equals(name, ignoreCase = true) }
+    }
+    return (pinned + base).distinctBy { if (it.isCustom) it.customName.lowercase() else it.key }.take(10)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuickMultiAddSheet(
@@ -171,12 +184,17 @@ fun QuickMultiAddSheet(
     month: Int,
     year: Int,
     customCategories: List<CustomCategory>,
+    customExpenseTags: List<CustomExpenseTag> = emptyList(),
     allHistoricalDebits: List<DebitItem> = emptyList(),
     initialCategoryKey: String? = null,
+    pendingCustomCategoryName: String? = null,
+    pendingCustomCategoryRowId: String? = null,
+    onPendingCustomCategoryApplied: () -> Unit = {},
     editingDebit: DebitItem? = null,
     onDismiss: () -> Unit,
     onSaveBatch: (List<DebitItem>) -> Unit,
-    onOpenAddCustomCategory: () -> Unit
+    onOpenAddCustomCategory: (rowIdForSelection: String?) -> Unit = { _ -> },
+    onSaveCustomExpenseTag: (name: String, iconName: String, colorHex: String) -> Unit = { _, _, _ -> }
 ) {
     val isEditMode = editingDebit != null
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -227,8 +245,10 @@ fun QuickMultiAddSheet(
         standard + custom
     }
 
+    var sessionNewCustomNames by remember { mutableStateOf(listOf<String>()) }
+
     // Compute frequent categories used in the last 30 days
-    val frequentCategories = remember(allHistoricalDebits, allCategoryMetas) {
+    val frequentCategories = remember(allHistoricalDebits, allCategoryMetas, sessionNewCustomNames) {
         val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000L)
         val recentDebits = allHistoricalDebits.filter { it.createdAt >= thirtyDaysAgo }
 
@@ -249,7 +269,7 @@ fun QuickMultiAddSheet(
                 }
             }
 
-            if (resolved.size >= 4) {
+            val base = if (resolved.size >= 4) {
                 resolved.take(8)
             } else {
                 val defaults = listOf(
@@ -263,8 +283,9 @@ fun QuickMultiAddSheet(
                 ).mapNotNull { k -> allCategoryMetas.find { it.key == k } }
                 (resolved + defaults).distinctBy { if (it.isCustom) it.customName else it.key }.take(8)
             }
+            prependSessionCustomCategories(base, sessionNewCustomNames, allCategoryMetas)
         } else {
-            listOf(
+            val defaults = listOf(
                 DebitCategory.GROCERIES.name,
                 DebitCategory.OUTSIDE_FOOD.name,
                 DebitCategory.FUEL.name,
@@ -274,6 +295,7 @@ fun QuickMultiAddSheet(
                 DebitCategory.EMI.name,
                 DebitCategory.RENT.name
             ).mapNotNull { k -> allCategoryMetas.find { it.key == k } }
+            prependSessionCustomCategories(defaults, sessionNewCustomNames, allCategoryMetas)
         }
     }
 
@@ -301,6 +323,32 @@ fun QuickMultiAddSheet(
     var validationError by remember { mutableStateOf<String?>(null) }
     var activeTagPickerRow by remember { mutableStateOf<MultiAddRowState?>(null) }
     var activeCategoryPickerRow by remember { mutableStateOf<MultiAddRowState?>(null) }
+    var showAddCustomExpenseTagDialog by remember { mutableStateOf(false) }
+    var pendingNewTagForRow by remember { mutableStateOf<MultiAddRowState?>(null) }
+    var pendingCustomTagName by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(pendingCustomCategoryName, customCategories) {
+        val name = pendingCustomCategoryName?.trim()?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        val meta = customCategories.find { it.name.equals(name, ignoreCase = true) } ?: return@LaunchedEffect
+        sessionNewCustomNames = (listOf(meta.name) + sessionNewCustomNames).distinct().take(5)
+        val row = pendingCustomCategoryRowId?.let { id -> entryRows.find { it.id == id } }
+            ?: activeCategoryPickerRow
+            ?: entryRows.lastOrNull()
+        if (row != null) {
+            row.categoryKey = DebitCategory.CUSTOM.name
+            row.customCategoryName = meta.name
+        } else if (!isEditMode) {
+            entryRows.add(
+                MultiAddRowState(
+                    initialCategoryKey = DebitCategory.CUSTOM.name,
+                    initialCustomCategoryName = meta.name,
+                    initialDay = todayDay
+                )
+            )
+        }
+        validationError = null
+        onPendingCustomCategoryApplied()
+    }
 
     // Real-time calculation of total amount and valid item count
     val totalAmount = entryRows.sumOf { it.amountText.toDoubleOrNull() ?: 0.0 }
@@ -442,7 +490,9 @@ fun QuickMultiAddSheet(
                                 CategoryIconBadge(
                                     categoryKey = if (cat.isCustom) cat.customName else cat.key,
                                     badgeSize = 22.dp,
-                                    iconSize = 13.dp
+                                    iconSize = 13.dp,
+                                    customColor = customCategoryTint(cat.colorHex),
+                                    storedIconName = cat.iconName.takeIf { it.isNotBlank() }
                                 )
                                 Text(
                                     text = cat.displayName,
@@ -542,6 +592,7 @@ fun QuickMultiAddSheet(
                             rowState = rowState,
                             currencySymbol = currencySymbol,
                             allCategories = allCategoryMetas,
+                            customExpenseTags = customExpenseTags,
                             onOpenCategoryPicker = {
                                 activeCategoryPickerRow = rowState
                             },
@@ -752,8 +803,7 @@ fun QuickMultiAddSheet(
                 activeCategoryPickerRow = null
             },
             onOpenAddCustomCategory = {
-                activeCategoryPickerRow = null
-                onOpenAddCustomCategory()
+                onOpenAddCustomCategory(targetRow.id)
             }
         )
     }
@@ -764,10 +814,37 @@ fun QuickMultiAddSheet(
         SubcategoryTagPickerDialog(
             categoryKey = targetRow.categoryKey,
             currentTag = targetRow.tag,
+            customExpenseTags = customExpenseTags,
             onDismiss = { activeTagPickerRow = null },
             onTagSelected = { selectedTag ->
                 targetRow.tag = selectedTag
                 activeTagPickerRow = null
+            },
+            onOpenAddCustomTag = {
+                pendingNewTagForRow = targetRow
+                showAddCustomExpenseTagDialog = true
+            }
+        )
+    }
+
+    LaunchedEffect(pendingCustomTagName, customExpenseTags) {
+        val name = pendingCustomTagName?.trim()?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        if (customExpenseTags.none { it.name.equals(name, ignoreCase = true) }) return@LaunchedEffect
+        pendingNewTagForRow?.tag = name
+        pendingCustomTagName = null
+        pendingNewTagForRow = null
+        showAddCustomExpenseTagDialog = false
+    }
+
+    if (showAddCustomExpenseTagDialog) {
+        AddCustomExpenseTagDialog(
+            onDismiss = {
+                showAddCustomExpenseTagDialog = false
+                pendingNewTagForRow = null
+            },
+            onSave = { name, icon, color ->
+                pendingCustomTagName = name
+                onSaveCustomExpenseTag(name, icon, color)
             }
         )
     }
@@ -783,6 +860,7 @@ private fun MultiAddRowCard(
     rowState: MultiAddRowState,
     currencySymbol: String,
     allCategories: List<CategoryMeta>,
+    customExpenseTags: List<CustomExpenseTag> = emptyList(),
     onOpenCategoryPicker: () -> Unit,
     onOpenTagPicker: () -> Unit,
     onDelete: () -> Unit,
@@ -869,7 +947,9 @@ private fun MultiAddRowCard(
                                 CategoryIconBadge(
                                     categoryKey = if (currentMeta.isCustom) currentMeta.customName else currentMeta.key,
                                     badgeSize = 28.dp,
-                                    iconSize = 17.dp
+                                    iconSize = 17.dp,
+                                    customColor = customCategoryTint(currentMeta.colorHex),
+                                    storedIconName = currentMeta.iconName.takeIf { it.isNotBlank() }
                                 )
                             } else {
                                 Box(
@@ -1022,14 +1102,27 @@ private fun MultiAddRowCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.LocalOffer,
-                            contentDescription = null,
-                            tint = if (rowState.tag.isNotBlank()) IndBlue else IndTextMuted,
-                            modifier = Modifier.size(11.dp)
-                        )
+                        val tagLabel = rowState.tag.removePrefix("#").trim()
+                        val tagVisual = if (tagLabel.isNotBlank()) {
+                            resolveExpenseTagVisual(tagLabel, rowState.categoryKey, customExpenseTags)
+                        } else null
+                        if (tagVisual != null) {
+                            ExpenseTagBadge(
+                                visual = tagVisual,
+                                badgeSize = 18.dp,
+                                monogramSize = 8.sp,
+                                cornerRadius = 5.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Filled.LocalOffer,
+                                contentDescription = null,
+                                tint = if (rowState.tag.isNotBlank()) IndBlue else IndTextMuted,
+                                modifier = Modifier.size(11.dp)
+                            )
+                        }
                         Text(
-                            text = if (rowState.tag.isNotBlank()) "#${rowState.tag.removePrefix("#")}" else "+ Tag / Subcategory",
+                            text = if (rowState.tag.isNotBlank()) tagLabel else "+ Tag / Subcategory",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (rowState.tag.isNotBlank()) IndBlueDark else IndTextSecondary,
@@ -1417,11 +1510,18 @@ private fun CategorySelectionModalDialog(
 private fun SubcategoryTagPickerDialog(
     categoryKey: String,
     currentTag: String,
+    customExpenseTags: List<CustomExpenseTag> = emptyList(),
     onDismiss: () -> Unit,
-    onTagSelected: (String) -> Unit
+    onTagSelected: (String) -> Unit,
+    onOpenAddCustomTag: () -> Unit = {}
 ) {
     var customTagInput by remember { mutableStateOf(currentTag.removePrefix("#")) }
-    val alignedTags = remember(categoryKey) { getAlignedTagsForCategory(categoryKey) }
+    val alignedTags = remember(categoryKey, customExpenseTags) {
+        val curated = curatedTagSuggestionsForCategory(categoryKey)
+        val generic = getAlignedTagsForCategory(categoryKey)
+        val custom = customExpenseTags.map { it.name }
+        (curated + generic + custom).distinctBy { it.lowercase() }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1466,13 +1566,12 @@ private fun SubcategoryTagPickerDialog(
                 )
 
                 Text(
-                    text = "Aligned Tag Suggestions:",
+                    text = "Popular brands & tags:",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = IndNavyHeader
                 )
 
-                // Aligned Tags Grid / Flow
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1480,44 +1579,60 @@ private fun SubcategoryTagPickerDialog(
                 ) {
                     alignedTags.forEach { tag ->
                         val isSelected = customTagInput.equals(tag, ignoreCase = true)
+                        val visual = resolveExpenseTagVisual(tag, categoryKey, customExpenseTags)
                         Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = if (isSelected) IndBlue else IndCardSecondary,
-                            border = androidx.compose.foundation.BorderStroke(0.6.dp, if (isSelected) IndBlue else IndBorderSubtle),
-                            modifier = Modifier.clickable {
-                                customTagInput = tag
-                            }
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) IndBlueLight else IndSurface,
+                            border = androidx.compose.foundation.BorderStroke(
+                                0.8.dp,
+                                if (isSelected) IndBlue else IndBorderSubtle
+                            ),
+                            modifier = Modifier.clickable { customTagInput = tag }
                         ) {
-                            Text(
-                                text = "#$tag",
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color.White else IndTextPrimary,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                if (visual != null) {
+                                    ExpenseTagBadge(
+                                        visual = visual,
+                                        badgeSize = 24.dp,
+                                        monogramSize = 9.sp,
+                                        cornerRadius = 7.dp
+                                    )
+                                }
+                                Text(
+                                    text = tag,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                    color = if (isSelected) IndBlueDark else IndTextPrimary
+                                )
+                            }
                         }
                     }
                 }
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    onTagSelected(customTagInput.trim())
-                },
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = IndNavyHeader)
-            ) {
-                Text("Apply Tag", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onOpenAddCustomTag) {
+                    Icon(Icons.Filled.Add, null, modifier = Modifier.size(16.dp), tint = IndBlue)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Custom tag", color = IndBlue, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+                Button(
+                    onClick = { onTagSelected(customTagInput.trim()) },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = IndNavyHeader)
+                ) {
+                    Text("Apply", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
             }
         },
         dismissButton = {
-            TextButton(
-                onClick = {
-                    onTagSelected("") // Clear tag
-                }
-            ) {
-                Text("Clear Tag", color = IndRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            TextButton(onClick = { onTagSelected("") }) {
+                Text("Clear", color = IndRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
     )

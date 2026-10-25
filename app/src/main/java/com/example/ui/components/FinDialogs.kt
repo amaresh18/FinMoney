@@ -26,10 +26,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import com.example.data.model.CustomCategory
 import com.example.data.model.DebitCategory
 import com.example.data.model.IncomeCategory
 import com.example.data.model.IncomeSource
 import com.example.ui.theme.*
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -1071,17 +1075,35 @@ private val customCategoryColorChoices = listOf(
 @Composable
 fun AddCustomCategoryDialog(
     onDismiss: () -> Unit,
-    onSave: (name: String, iconName: String, colorHex: String) -> Unit
+    onSave: (name: String, iconName: String, colorHex: String) -> Unit,
+    editing: CustomCategory? = null,
+    onManageExisting: (() -> Unit)? = null,
+    titleNew: String = "New custom category",
+    titleEdit: String = "Edit custom category",
+    nameLabel: String = "Category name"
 ) {
-    var name by remember { mutableStateOf("") }
-    var selectedIcon by remember { mutableStateOf(customCategoryIconChoices.first().iconName) }
-    var selectedColor by remember { mutableStateOf(customCategoryColorChoices.first()) }
+    val isEdit = editing != null
+    var name by remember(editing?.id) { mutableStateOf(editing?.name ?: "") }
+    var selectedIcon by remember(editing?.id) {
+        mutableStateOf(editing?.iconName?.takeIf { it.isNotBlank() } ?: customCategoryIconChoices.first().iconName)
+    }
+    var selectedColor by remember(editing?.id) {
+        mutableStateOf(
+            editing?.colorHex?.takeIf { it.isNotBlank() && customCategoryColorChoices.contains(it) }
+                ?: editing?.colorHex?.takeIf { it.isNotBlank() }
+                ?: customCategoryColorChoices.first()
+        )
+    }
     var nameError by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text("New custom category", fontWeight = FontWeight.Bold, color = IndNavyHeader)
+            Text(
+                if (isEdit) titleEdit else titleNew,
+                fontWeight = FontWeight.Bold,
+                color = IndNavyHeader
+            )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1091,7 +1113,7 @@ fun AddCustomCategoryDialog(
                         name = it
                         nameError = false
                     },
-                    label = { Text("Category name") },
+                    label = { Text(nameLabel) },
                     singleLine = true,
                     isError = nameError,
                     modifier = Modifier.fillMaxWidth(),
@@ -1159,8 +1181,151 @@ fun AddCustomCategoryDialog(
             }
         },
         dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (!isEdit && onManageExisting != null) {
+                    TextButton(onClick = onManageExisting) {
+                        Text("Manage", color = IndTextSecondary, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel", color = IndTextMuted)
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun AddCustomExpenseTagDialog(
+    onDismiss: () -> Unit,
+    onSave: (name: String, iconName: String, colorHex: String) -> Unit,
+    editing: com.example.data.model.CustomExpenseTag? = null
+) {
+    AddCustomCategoryDialog(
+        onDismiss = onDismiss,
+        onSave = onSave,
+        editing = editing?.let {
+            CustomCategory(
+                id = it.id,
+                name = it.name,
+                iconName = it.iconName,
+                colorHex = it.colorHex
+            )
+        },
+        titleNew = "New subcategory tag",
+        titleEdit = "Edit subcategory tag",
+        nameLabel = "Tag name (e.g. Autumn Cafe)"
+    )
+}
+
+@Composable
+fun ManageCustomCategoriesDialog(
+    categories: List<CustomCategory>,
+    onDismiss: () -> Unit,
+    onEdit: (CustomCategory) -> Unit,
+    onDelete: (CustomCategory) -> Unit,
+    expenseCountForCategory: suspend (String) -> Int
+) {
+    var pendingDelete by remember { mutableStateOf<CustomCategory?>(null) }
+    var deleteExpenseCount by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
+
+    if (pendingDelete != null) {
+        val cat = pendingDelete!!
+        ConfirmDeleteDialog(
+            title = "Remove \"${cat.name}\"?",
+            message = if (deleteExpenseCount > 0) {
+                "$deleteExpenseCount expense(s) still use this label. They will keep the name but you can pick another category when editing. Remove this custom category?"
+            } else {
+                "This category will no longer appear in pickers. Existing expenses are unaffected."
+            },
+            confirmLabel = "Remove",
+            onConfirm = {
+                onDelete(cat)
+                pendingDelete = null
+            },
+            onDismiss = { pendingDelete = null }
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Custom categories", fontWeight = FontWeight.Bold, color = IndNavyHeader)
+        },
+        text = {
+            if (categories.isEmpty()) {
+                Text(
+                    "No custom categories yet. Create one when adding an expense or from the New category dialog.",
+                    color = IndTextSecondary,
+                    fontSize = 13.sp
+                )
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.heightIn(max = 320.dp)
+                ) {
+                    items(categories, key = { it.id }) { cat ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = IndCardSecondary,
+                            border = BorderStroke(1.dp, IndBorderSubtle),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    CategoryIconBadge(
+                                        categoryKey = cat.name,
+                                        badgeSize = 36.dp,
+                                        iconSize = 20.dp,
+                                        customColor = customCategoryTint(cat.colorHex),
+                                        storedIconName = cat.iconName
+                                    )
+                                    Text(
+                                        cat.name,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = IndTextPrimary,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    IconButton(
+                                        onClick = { onEdit(cat) },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Edit, "Edit", tint = IndBlue, modifier = Modifier.size(18.dp))
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            pendingDelete = cat
+                                            scope.launch {
+                                                deleteExpenseCount = expenseCountForCategory(cat.name)
+                                            }
+                                        },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Delete, "Delete", tint = IndRed, modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = IndTextMuted)
+                Text("Done", fontWeight = FontWeight.Bold, color = IndBlue)
             }
         }
     )

@@ -114,8 +114,47 @@ interface FinMoneyDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCustomCategory(category: CustomCategory): Long
 
+    @Update
+    suspend fun updateCustomCategory(category: CustomCategory)
+
     @Delete
     suspend fun deleteCustomCategory(category: CustomCategory)
+
+    // --- Custom expense tags (subcategories) ---
+    @Query("SELECT * FROM custom_expense_tags WHERE userId = :userId OR :userId = '' ORDER BY id DESC")
+    fun getAllCustomExpenseTags(userId: String = ""): Flow<List<CustomExpenseTag>>
+
+    @Query("SELECT * FROM custom_expense_tags WHERE (userId = :userId OR :userId = '') AND LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
+    suspend fun getCustomExpenseTagByName(name: String, userId: String = ""): CustomExpenseTag?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCustomExpenseTag(tag: CustomExpenseTag): Long
+
+    @Update
+    suspend fun updateCustomExpenseTag(tag: CustomExpenseTag)
+
+    @Delete
+    suspend fun deleteCustomExpenseTag(tag: CustomExpenseTag)
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM debit_items
+        WHERE (userId = :userId OR :userId = '')
+        AND (category = 'CUSTOM' OR category = 'Custom')
+        AND LOWER(TRIM(customCategoryName)) = LOWER(TRIM(:name))
+        """
+    )
+    suspend fun countDebitsForCustomCategoryName(name: String, userId: String = ""): Int
+
+    @Query(
+        """
+        UPDATE debit_items SET customCategoryName = :newName
+        WHERE (userId = :userId OR :userId = '')
+        AND (category = 'CUSTOM' OR category = 'Custom')
+        AND LOWER(TRIM(customCategoryName)) = LOWER(TRIM(:oldName))
+        """
+    )
+    suspend fun renameCustomCategoryOnDebits(oldName: String, newName: String, userId: String = "")
 
     // --- Loan Transactions (Lent & Borrowed) ---
     @Query("SELECT * FROM loan_transactions WHERE userId = :userId OR :userId = '' ORDER BY createdAt DESC")

@@ -53,6 +53,7 @@ fun DashboardScreen(
     val summary = summaryRaw ?: MonthlyFinanceSummary()
     val currentDebits by viewModel.currentDebits.collectAsStateWithLifecycle()
     val customCategories by viewModel.customCategories.collectAsStateWithLifecycle()
+    val customExpenseTags by viewModel.customExpenseTags.collectAsStateWithLifecycle()
     val currentSalaryRecord by viewModel.currentSalaryRecord.collectAsStateWithLifecycle()
     val pendingBankTransactions by viewModel.pendingBankTransactions.collectAsStateWithLifecycle()
 
@@ -63,6 +64,11 @@ fun DashboardScreen(
     var showAddDebitDialog by remember { mutableStateOf(false) }
     var showImportStatementDialog by remember { mutableStateOf(false) }
     var showAddCustomCategoryDialog by remember { mutableStateOf(false) }
+    var showManageCustomCategoriesDialog by remember { mutableStateOf(false) }
+    var editingCustomCategory by remember { mutableStateOf<com.example.data.model.CustomCategory?>(null) }
+    var pendingCustomCategoryName by remember { mutableStateOf<String?>(null) }
+    var pendingCustomCategoryRowId by remember { mutableStateOf<String?>(null) }
+    var lastAddedCustomCategoryForEntry by remember { mutableStateOf<String?>(null) }
     var expensePendingDelete by remember { mutableStateOf<DebitItem?>(null) }
     var creditPendingDelete by remember { mutableStateOf<IncomeSource?>(null) }
     var editingDebitItem by remember { mutableStateOf<DebitItem?>(null) }
@@ -512,11 +518,13 @@ fun DashboardScreen(
                         val storedIcon = iconName.takeIf {
                             filterKey.startsWith(CUSTOM_CATEGORY_FILTER_PREFIX, ignoreCase = true) && it != filterKey
                         }
+                        val customMeta = customCategoryForFilterKey(filterKey, customCategories)
                         CategoryFilterChipData(
                             filterKey = filterKey,
                             label = label,
                             stylingKey = if (storedIcon != null) label else filterKey,
                             storedIconName = storedIcon,
+                            colorHex = customMeta?.colorHex,
                             total = items.sumOf { it.amount },
                             count = items.size
                         )
@@ -543,13 +551,15 @@ fun DashboardScreen(
                             fontWeight = FontWeight.Bold,
                             color = IndNavyHeader
                         )
-                        if (dashboardViewMode == "LIST") {
-                            Text(
-                                text = "List view · newest first",
-                                fontSize = 10.sp,
-                                color = IndTextMuted
-                            )
-                        }
+                        Text(
+                            text = if (dashboardViewMode == "LIST") {
+                                "List view · newest first"
+                            } else {
+                                "Grouped by category"
+                            },
+                            fontSize = 10.sp,
+                            color = IndTextMuted
+                        )
                     }
                     Text(
                         text = "$currencySymbol${"%,.0f".format(visibleTotal)}",
@@ -581,22 +591,16 @@ fun DashboardScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            DashIconChip("Category", Icons.Filled.GridView, dashboardViewMode == "GROUP_BY_CATEGORY", IndBlue) {
-                                dashboardViewMode = "GROUP_BY_CATEGORY"
-                            }
-                            DashIconChip("List", Icons.Filled.ViewList, dashboardViewMode == "LIST", IndBlue) {
-                                dashboardViewMode = "LIST"
-                            }
                             DashIconChip("All", Icons.Filled.Apps, selectedStatusFilter == "ALL", IndNavyHeader) {
                                 selectedStatusFilter = "ALL"
                             }
                             DashIconChip("Unpaid", Icons.Filled.HourglassTop, selectedStatusFilter == "YET_TO_PAY", Color(0xFFD97706)) {
-                                selectedStatusFilter = "YET_TO_PAY"
+                                selectedStatusFilter = if (selectedStatusFilter == "YET_TO_PAY") "ALL" else "YET_TO_PAY"
                             }
                             DashIconChip("Paid", Icons.Filled.CheckCircle, selectedStatusFilter == "ALREADY_PAID", IndGreenDark) {
-                                selectedStatusFilter = "ALREADY_PAID"
+                                selectedStatusFilter = if (selectedStatusFilter == "ALREADY_PAID") "ALL" else "ALREADY_PAID"
                             }
-                            DashIconChip("Card", Icons.Filled.CreditCard, creditCardOnlyFilter, IndPurple) {
+                            DashIconChip("Credit card", Icons.Filled.CreditCard, creditCardOnlyFilter, IndPurple) {
                                 creditCardOnlyFilter = !creditCardOnlyFilter
                             }
                             DashIconChip("Repeat", Icons.Filled.Repeat, recurringOnlyFilter, Color(0xFF0284C7)) {
@@ -613,6 +617,22 @@ fun DashboardScreen(
                             }
                         }
 
+                        Text(
+                            text = "View",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndTextMuted,
+                            modifier = Modifier.padding(start = 2.dp, top = 4.dp)
+                        )
+                        DashboardViewModeSegmentedControl(
+                            isListView = dashboardViewMode == "LIST",
+                            accentColor = IndBlue,
+                            groupLabel = "Group by category",
+                            listLabel = "List view",
+                            onGroupBy = { dashboardViewMode = "GROUP_BY_CATEGORY" },
+                            onList = { dashboardViewMode = "LIST" }
+                        )
+
                         if (categoryTotals.isNotEmpty()) {
                             Text(
                                 text = "By category",
@@ -628,12 +648,11 @@ fun DashboardScreen(
                             ) {
                                 categoryTotals.forEach { chip ->
                                     val selected = selectedCategoryFilter.equals(chip.filterKey, true)
-                                    CategoryTotalPill(
+                                    CategoryFilterChip(
                                         category = chip.label,
                                         stylingKey = chip.stylingKey,
                                         storedIconName = chip.storedIconName,
-                                        totalLabel = "$currencySymbol${"%,.0f".format(chip.total)}",
-                                        count = chip.count,
+                                        customColor = chip.colorHex?.let { customCategoryTint(it) },
                                         selected = selected,
                                         selectedColor = IndNavyHeader
                                     ) {
@@ -780,7 +799,8 @@ fun DashboardScreen(
                                         onToggleRecurring = { viewModel.toggleDebitRecurring(item) },
                                         onEdit = { editingDebitItem = item },
                                         onDelete = { expensePendingDelete = item },
-                                        customCategories = customCategories
+                                        customCategories = customCategories,
+                                        customExpenseTags = customExpenseTags
                                     )
                                 }
                             }
@@ -798,7 +818,8 @@ fun DashboardScreen(
                     onToggleRecurring = { viewModel.toggleDebitRecurring(item) },
                     onEdit = { editingDebitItem = item },
                     onDelete = { expensePendingDelete = item },
-                    customCategories = customCategories
+                    customCategories = customCategories,
+                    customExpenseTags = customExpenseTags
                 )
             }
         }
@@ -832,13 +853,15 @@ fun DashboardScreen(
                                 fontWeight = FontWeight.Bold,
                                 color = IndNavyHeader
                             )
-                            if (creditsViewMode == "LIST") {
-                                Text(
-                                    text = "List view · newest first",
-                                    fontSize = 10.sp,
-                                    color = IndTextMuted
-                                )
-                            }
+                            Text(
+                                text = if (creditsViewMode == "LIST") {
+                                    "List view · newest first"
+                                } else {
+                                    "Grouped by category"
+                                },
+                                fontSize = 10.sp,
+                                color = IndTextMuted
+                            )
                         }
                         Text(
                             text = "+$currencySymbol${"%,.0f".format(visibleCreditTotal)}",
@@ -870,20 +893,14 @@ fun DashboardScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                DashIconChip("Category", Icons.Filled.GridView, creditsViewMode == "GROUP_BY_CATEGORY", Color(0xFF16A34A)) {
-                                    creditsViewMode = "GROUP_BY_CATEGORY"
-                                }
-                                DashIconChip("List", Icons.Filled.ViewList, creditsViewMode == "LIST", Color(0xFF16A34A)) {
-                                    creditsViewMode = "LIST"
-                                }
                                 DashIconChip("All", Icons.Filled.Apps, selectedCreditStatusFilter == "ALL", IndNavyHeader) {
                                     selectedCreditStatusFilter = "ALL"
                                 }
                                 DashIconChip("Received", Icons.Filled.CheckCircle, selectedCreditStatusFilter == "RECEIVED", IndGreenDark) {
-                                    selectedCreditStatusFilter = "RECEIVED"
+                                    selectedCreditStatusFilter = if (selectedCreditStatusFilter == "RECEIVED") "ALL" else "RECEIVED"
                                 }
                                 DashIconChip("Pending", Icons.Filled.HourglassTop, selectedCreditStatusFilter == "PENDING", Color(0xFFD97706)) {
-                                    selectedCreditStatusFilter = "PENDING"
+                                    selectedCreditStatusFilter = if (selectedCreditStatusFilter == "PENDING") "ALL" else "PENDING"
                                 }
                                 if (creditFiltersActive) {
                                     DashIconChip("Clear", Icons.Filled.Close, false, IndRed) {
@@ -892,6 +909,22 @@ fun DashboardScreen(
                                     }
                                 }
                             }
+
+                            Text(
+                                text = "View",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = IndTextMuted,
+                                modifier = Modifier.padding(start = 2.dp, top = 4.dp)
+                            )
+                            DashboardViewModeSegmentedControl(
+                                isListView = creditsViewMode == "LIST",
+                                accentColor = Color(0xFF16A34A),
+                                groupLabel = "Group by category",
+                                listLabel = "List view",
+                                onGroupBy = { creditsViewMode = "GROUP_BY_CATEGORY" },
+                                onList = { creditsViewMode = "LIST" }
+                            )
 
                             if (creditCategoryTotals.isNotEmpty()) {
                                 Text(
@@ -906,12 +939,11 @@ fun DashboardScreen(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    creditCategoryTotals.forEach { (category, total, count) ->
+                                    creditCategoryTotals.forEach { (category, _, _) ->
                                         val selected = selectedCreditCategoryFilter.equals(category, true)
-                                        CategoryTotalPill(
+                                        CategoryFilterChip(
                                             category = category,
-                                            totalLabel = "+$currencySymbol${"%,.0f".format(total)}",
-                                            count = count,
+                                            stylingKey = category,
                                             selected = selected,
                                             selectedColor = Color(0xFF16A34A)
                                         ) {
@@ -1092,23 +1124,73 @@ fun DashboardScreen(
             month = month,
             year = year,
             customCategories = customCategories,
+            customExpenseTags = customExpenseTags,
             allHistoricalDebits = allDebits,
-            onDismiss = { showAddDebitDialog = false },
+            initialCategoryKey = lastAddedCustomCategoryForEntry,
+            onSaveCustomExpenseTag = { name, icon, color ->
+                viewModel.addCustomExpenseTag(name, icon, color)
+            },
+            pendingCustomCategoryName = pendingCustomCategoryName,
+            pendingCustomCategoryRowId = pendingCustomCategoryRowId,
+            onPendingCustomCategoryApplied = {
+                pendingCustomCategoryName = null
+                pendingCustomCategoryRowId = null
+            },
+            onDismiss = {
+                showAddDebitDialog = false
+                lastAddedCustomCategoryForEntry = null
+            },
             onSaveBatch = { batch ->
                 viewModel.insertDebits(batch)
                 showAddDebitDialog = false
+                lastAddedCustomCategoryForEntry = null
             },
-            onOpenAddCustomCategory = { showAddCustomCategoryDialog = true }
+            onOpenAddCustomCategory = { rowId ->
+                pendingCustomCategoryRowId = rowId
+                showAddCustomCategoryDialog = true
+            }
         )
     }
 
-    if (showAddCustomCategoryDialog) {
+    if (showAddCustomCategoryDialog || editingCustomCategory != null) {
         AddCustomCategoryDialog(
-            onDismiss = { showAddCustomCategoryDialog = false },
-            onSave = { name, icon, color ->
-                viewModel.addCustomCategory(name, icon, color)
+            onDismiss = {
                 showAddCustomCategoryDialog = false
+                editingCustomCategory = null
+            },
+            editing = editingCustomCategory,
+            onManageExisting = if (editingCustomCategory == null) {
+                {
+                    showAddCustomCategoryDialog = false
+                    showManageCustomCategoriesDialog = true
+                }
+            } else null,
+            onSave = { name, icon, color ->
+                if (editingCustomCategory != null) {
+                    viewModel.updateCustomCategory(editingCustomCategory!!.id, name, icon, color)
+                    editingCustomCategory = null
+                } else {
+                    viewModel.addCustomCategory(name, icon, color)
+                    pendingCustomCategoryName = name
+                    lastAddedCustomCategoryForEntry = name
+                    showAddCustomCategoryDialog = false
+                }
             }
+        )
+    }
+
+    if (showManageCustomCategoriesDialog) {
+        ManageCustomCategoriesDialog(
+            categories = customCategories,
+            onDismiss = { showManageCustomCategoriesDialog = false },
+            onEdit = { cat ->
+                showManageCustomCategoriesDialog = false
+                editingCustomCategory = cat
+            },
+            onDelete = { cat ->
+                viewModel.deleteCustomCategory(cat)
+            },
+            expenseCountForCategory = { name -> viewModel.countExpensesUsingCustomCategory(name) }
         )
     }
 
@@ -1121,14 +1203,27 @@ fun DashboardScreen(
             month = month,
             year = year,
             customCategories = customCategories,
+            customExpenseTags = customExpenseTags,
             allHistoricalDebits = allDebits,
             editingDebit = item,
+            onSaveCustomExpenseTag = { name, icon, color ->
+                viewModel.addCustomExpenseTag(name, icon, color)
+            },
+            pendingCustomCategoryName = pendingCustomCategoryName,
+            pendingCustomCategoryRowId = pendingCustomCategoryRowId,
+            onPendingCustomCategoryApplied = {
+                pendingCustomCategoryName = null
+                pendingCustomCategoryRowId = null
+            },
             onDismiss = { editingDebitItem = null },
             onSaveBatch = { batch ->
                 batch.firstOrNull()?.let { viewModel.updateDebit(it) }
                 editingDebitItem = null
             },
-            onOpenAddCustomCategory = { showAddCustomCategoryDialog = true }
+            onOpenAddCustomCategory = { rowId ->
+                pendingCustomCategoryRowId = rowId
+                showAddCustomCategoryDialog = true
+            }
         )
     }
 
@@ -1178,10 +1273,11 @@ fun DebitItemCard(
     onToggleRecurring: () -> Unit = {},
     onEdit: () -> Unit,
     onDelete: () -> Unit,
-    customCategories: List<com.example.data.model.CustomCategory> = emptyList()
+    customCategories: List<com.example.data.model.CustomCategory> = emptyList(),
+    customExpenseTags: List<com.example.data.model.CustomExpenseTag> = emptyList()
 ) {
     val categoryLabel = debitCategoryDisplayLabel(item)
-    val storedIcon = debitItemStoredIcon(item, customCategories)
+    val subTitle = debitSubcategoryTitle(item)
     val isChit = item.category.equals("CHIT", ignoreCase = true) || item.title.contains("CHIT", ignoreCase = true)
     val isLoan = com.example.ui.components.isLoanOrEmi(item.category) || item.principalAmount > 0.0
 
@@ -1218,12 +1314,18 @@ fun DebitItemCard(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    CategoryIconBadge(
-                        categoryKey = categoryLabel,
-                        storedIconName = storedIcon
+                    DebitExpenseLeadingBadge(
+                        item = item,
+                        customCategories = customCategories,
+                        customExpenseTags = customExpenseTags
                     )
                     Column(modifier = Modifier.clickable { onEdit() }) {
-                        Text(item.title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = IndTextPrimary)
+                        Text(
+                            text = subTitle?.let { primaryTagLabel(it) } ?: item.title.ifBlank { categoryLabel },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = IndTextPrimary
+                        )
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -1517,6 +1619,84 @@ private fun MiniDashAction(
     }
 }
 
+/** Expenses/Income-style toggle for list vs group-by category layout. */
+@Composable
+private fun DashboardViewModeSegmentedControl(
+    isListView: Boolean,
+    accentColor: Color,
+    groupLabel: String,
+    listLabel: String,
+    onGroupBy: () -> Unit,
+    onList: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(IndBackground)
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Surface(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onGroupBy),
+            shape = RoundedCornerShape(10.dp),
+            color = if (!isListView) accentColor else Color.Transparent
+        ) {
+            Row(
+                modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Filled.GridView,
+                    contentDescription = groupLabel,
+                    tint = if (!isListView) Color.White else accentColor,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = groupLabel,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (!isListView) Color.White else IndTextPrimary,
+                    maxLines = 1
+                )
+            }
+        }
+        Surface(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onList),
+            shape = RoundedCornerShape(10.dp),
+            color = if (isListView) accentColor else Color.Transparent
+        ) {
+            Row(
+                modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Filled.ViewList,
+                    contentDescription = listLabel,
+                    tint = if (isListView) Color.White else accentColor,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = listLabel,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isListView) Color.White else IndTextPrimary,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun DashIconChip(
     label: String,
@@ -1552,67 +1732,54 @@ private data class CategoryFilterChipData(
     val label: String,
     val stylingKey: String,
     val storedIconName: String?,
+    val colorHex: String? = null,
     val total: Double,
     val count: Int
 )
 
 @Composable
-private fun CategoryTotalPill(
+private fun CategoryFilterChip(
     category: String,
     stylingKey: String = category,
     storedIconName: String? = null,
-    totalLabel: String,
-    count: Int,
+    customColor: Color? = null,
     selected: Boolean,
     selectedColor: Color,
     onClick: () -> Unit
 ) {
-    val styling = getCategoryStyling(stylingKey, storedIconName = storedIconName)
+    val styling = getCategoryStyling(stylingKey, customColor = customColor, storedIconName = storedIconName)
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(20.dp),
         color = if (selected) selectedColor else IndBackground,
         border = BorderStroke(1.dp, if (selected) selectedColor else IndBorderSubtle),
         modifier = Modifier.clickable(onClick = onClick)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(26.dp)
+                    .size(22.dp)
                     .clip(CircleShape)
-                    .background(if (selected) Color.White.copy(alpha = 0.18f) else styling.second),
+                    .background(if (selected) Color.White.copy(alpha = 0.2f) else styling.second),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     styling.first,
-                    null,
+                    contentDescription = category,
                     tint = if (selected) Color.White else styling.third,
-                    modifier = Modifier.size(14.dp)
+                    modifier = Modifier.size(12.dp)
                 )
             }
-            Column {
-                Text(
-                    prettyCategory(category),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (selected) Color.White.copy(alpha = 0.85f) else IndTextSecondary,
-                    maxLines = 1
-                )
-                Text(
-                    totalLabel,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = if (selected) Color.White else IndNavyHeader
-                )
-                Text(
-                    "$count",
-                    fontSize = 9.sp,
-                    color = if (selected) Color.White.copy(alpha = 0.7f) else IndTextMuted
-                )
-            }
+            Text(
+                text = prettyCategory(category),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (selected) Color.White else IndTextPrimary,
+                maxLines = 1
+            )
         }
     }
 }

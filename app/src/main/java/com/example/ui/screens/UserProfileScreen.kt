@@ -35,7 +35,10 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.service.BankSyncManager
 import com.example.ui.FinMoneyViewModel
+import com.example.data.model.CustomCategory
+import com.example.ui.components.AddCustomCategoryDialog
 import com.example.ui.components.IndCard
+import com.example.ui.components.ManageCustomCategoriesDialog
 import com.example.ui.theme.*
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
@@ -128,6 +131,9 @@ fun UserProfileScreen(
     var showResetDialog by remember { mutableStateOf(false) }
     var showDataSafetyDialog by remember { mutableStateOf(false) }
     var showPhoneVerifyDialog by remember { mutableStateOf(false) }
+    var showManageCustomCategoriesDialog by remember { mutableStateOf(false) }
+    var editingCustomCategory by remember { mutableStateOf<CustomCategory?>(null) }
+    val customCategories by viewModel.customCategories.collectAsStateWithLifecycle()
 
     Scaffold(
         containerColor = IndBackground,
@@ -584,6 +590,19 @@ fun UserProfileScreen(
                         Text("Switch Google / mobile account", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = IndBlue)
                     }
 
+                    ProfileSettingsNavRow(
+                        title = "Custom expense categories",
+                        subtitle = if (customCategories.isEmpty()) {
+                            "Create icons & colors for your spending"
+                        } else {
+                            "${customCategories.size} categories — edit or remove"
+                        },
+                        titleColor = IndNavyHeader,
+                        icon = Icons.Filled.Category,
+                        iconTint = IndBlue,
+                        onClick = { showManageCustomCategoriesDialog = true }
+                    )
+
                     HorizontalDivider(color = IndBorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
 
                     ProfileSettingsNavRow(
@@ -711,6 +730,30 @@ fun UserProfileScreen(
                 TextButton(onClick = { showSignOutDialog = false }) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+
+    if (showManageCustomCategoriesDialog) {
+        ManageCustomCategoriesDialog(
+            categories = customCategories,
+            onDismiss = { showManageCustomCategoriesDialog = false },
+            onEdit = { cat ->
+                showManageCustomCategoriesDialog = false
+                editingCustomCategory = cat
+            },
+            onDelete = { cat -> viewModel.deleteCustomCategory(cat) },
+            expenseCountForCategory = { name -> viewModel.countExpensesUsingCustomCategory(name) }
+        )
+    }
+
+    if (editingCustomCategory != null) {
+        AddCustomCategoryDialog(
+            onDismiss = { editingCustomCategory = null },
+            editing = editingCustomCategory,
+            onSave = { name, icon, color ->
+                viewModel.updateCustomCategory(editingCustomCategory!!.id, name, icon, color)
+                editingCustomCategory = null
             }
         )
     }

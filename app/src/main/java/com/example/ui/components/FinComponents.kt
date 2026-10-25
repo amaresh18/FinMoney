@@ -87,6 +87,7 @@ fun categoryIconFromStoredName(iconName: String): ImageVector {
         "MusicNote" -> Icons.Filled.MusicNote
         "CardGiftcard" -> Icons.Filled.CardGiftcard
         "VolunteerActivism" -> Icons.Filled.VolunteerActivism
+        "LocalOffer" -> Icons.Filled.LocalOffer
         else -> Icons.Filled.Category
     }
 }
