@@ -96,6 +96,20 @@ class UserCloudDataRepository(
         }
     }
 
+    suspend fun listUserSubcollection(userId: String, subcollection: String): List<Pair<String, Map<String, Any?>>> {
+        if (userId.isBlank()) return emptyList()
+        return try {
+            val snap = firestore.collection("users").document(userId)
+                .collection(subcollection)
+                .get()
+                .await()
+            snap.documents.map { doc -> doc.id to (doc.data ?: emptyMap()) }
+        } catch (e: Exception) {
+            Log.w(TAG, "List $subcollection failed: ${e.message}")
+            emptyList()
+        }
+    }
+
     suspend fun listPhoneInbox(phone10: String): List<Map<String, Any?>> {
         if (phone10.length != 10) return emptyList()
         return try {

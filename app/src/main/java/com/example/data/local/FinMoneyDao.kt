@@ -77,6 +77,9 @@ interface FinMoneyDao {
     @Query("SELECT * FROM debit_items WHERE (userId = :userId OR :userId = '') ORDER BY year DESC, month DESC")
     fun getAllDebits(userId: String = ""): Flow<List<DebitItem>>
 
+    @Query("SELECT * FROM debit_items WHERE (userId = :userId OR :userId = '') ORDER BY year DESC, month DESC")
+    suspend fun getAllDebitsDirect(userId: String = ""): List<DebitItem>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDebit(item: DebitItem): Long
 
@@ -108,6 +111,9 @@ interface FinMoneyDao {
     @Query("SELECT * FROM custom_categories WHERE userId = :userId OR :userId = '' ORDER BY id ASC")
     fun getAllCustomCategories(userId: String = ""): Flow<List<CustomCategory>>
 
+    @Query("SELECT * FROM custom_categories WHERE userId = :userId OR :userId = '' ORDER BY id ASC")
+    suspend fun getAllCustomCategoriesDirect(userId: String = ""): List<CustomCategory>
+
     @Query("SELECT * FROM custom_categories WHERE (userId = :userId OR :userId = '') AND LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
     suspend fun getCustomCategoryByName(name: String, userId: String = ""): CustomCategory?
 
@@ -123,6 +129,9 @@ interface FinMoneyDao {
     // --- Custom expense tags (subcategories) ---
     @Query("SELECT * FROM custom_expense_tags WHERE userId = :userId OR :userId = '' ORDER BY id DESC")
     fun getAllCustomExpenseTags(userId: String = ""): Flow<List<CustomExpenseTag>>
+
+    @Query("SELECT * FROM custom_expense_tags WHERE userId = :userId OR :userId = '' ORDER BY id DESC")
+    suspend fun getAllCustomExpenseTagsDirect(userId: String = ""): List<CustomExpenseTag>
 
     @Query("SELECT * FROM custom_expense_tags WHERE (userId = :userId OR :userId = '') AND LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
     suspend fun getCustomExpenseTagByName(name: String, userId: String = ""): CustomExpenseTag?
@@ -159,6 +168,9 @@ interface FinMoneyDao {
     // --- Loan Transactions (Lent & Borrowed) ---
     @Query("SELECT * FROM loan_transactions WHERE userId = :userId OR :userId = '' ORDER BY createdAt DESC")
     fun getAllLoans(userId: String = ""): Flow<List<LoanTransaction>>
+
+    @Query("SELECT * FROM loan_transactions WHERE userId = :userId OR :userId = '' ORDER BY createdAt DESC")
+    suspend fun getAllLoansDirect(userId: String = ""): List<LoanTransaction>
 
     @Query("SELECT * FROM loan_transactions WHERE (userId = :userId OR :userId = '') AND type = :type ORDER BY createdAt DESC")
     fun getLoansByType(type: String, userId: String = ""): Flow<List<LoanTransaction>>

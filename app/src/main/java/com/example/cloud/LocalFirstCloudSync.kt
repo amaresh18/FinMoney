@@ -73,6 +73,13 @@ object LocalFirstCloudSync {
                 "isPaidViaCreditCard" to item.isPaidViaCreditCard,
                 "isPaidViaDebitCard" to item.isPaidViaDebitCard,
                 "notes" to item.notes,
+                "customCategoryName" to item.customCategoryName,
+                "isRecurring" to item.isRecurring,
+                "principalAmount" to item.principalAmount,
+                "interestRate" to item.interestRate,
+                "totalTenureMonths" to item.totalTenureMonths,
+                "currentMonthTenure" to item.currentMonthTenure,
+                "createdAt" to item.createdAt,
                 "transactionType" to "EXPENSE",
                 "bankTxCloudId" to (bankTx?.cloudId ?: ""),
                 "sourceBank" to (bankTx?.bankName ?: ""),
@@ -142,6 +149,7 @@ object LocalFirstCloudSync {
             subcollection = "loans",
             documentId = docId,
             data = mapOf(
+                "cloudId" to docId,
                 "localLoanId" to loan.id,
                 "personName" to loan.personName,
                 "personContact" to loan.personContact,
@@ -176,6 +184,39 @@ object LocalFirstCloudSync {
                 "notes" to entry.notes,
                 "amendmentPending" to entry.amendmentPending,
                 "updatedAt" to entry.updatedAt
+            ),
+            legacyCollections = emptyList()
+        )
+    }
+
+    suspend fun queueCustomCategory(context: Context, cloudUser: CloudUserContext, category: com.example.data.model.CustomCategory) {
+        val docId = "cat_${category.id}_${category.name.trim().lowercase().replace(" ", "_")}"
+        CloudSyncOutboxManager.enqueueAndSchedule(
+            context = context,
+            cloudUser = cloudUser,
+            subcollection = "custom_categories",
+            documentId = docId,
+            data = mapOf(
+                "name" to category.name,
+                "displayName" to category.displayName,
+                "iconName" to category.iconName,
+                "colorHex" to category.colorHex
+            ),
+            legacyCollections = emptyList()
+        )
+    }
+
+    suspend fun queueCustomExpenseTag(context: Context, cloudUser: CloudUserContext, tag: com.example.data.model.CustomExpenseTag) {
+        val docId = "tag_${tag.id}_${tag.name.trim().lowercase().replace(" ", "_")}"
+        CloudSyncOutboxManager.enqueueAndSchedule(
+            context = context,
+            cloudUser = cloudUser,
+            subcollection = "custom_expense_tags",
+            documentId = docId,
+            data = mapOf(
+                "name" to tag.name,
+                "iconName" to tag.iconName,
+                "colorHex" to tag.colorHex
             ),
             legacyCollections = emptyList()
         )

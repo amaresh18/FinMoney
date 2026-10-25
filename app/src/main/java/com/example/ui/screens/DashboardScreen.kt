@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -586,33 +587,55 @@ fun DashboardScreen(
                             color = IndTextMuted,
                             modifier = Modifier.padding(start = 2.dp)
                         )
-                        FlowRow(
+                        LazyRow(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                            contentPadding = PaddingValues(horizontal = 2.dp)
                         ) {
-                            DashIconChip("All", Icons.Filled.Apps, selectedStatusFilter == "ALL", IndNavyHeader) {
-                                selectedStatusFilter = "ALL"
+                            item(key = "unpaid") {
+                                DashIconChip("Unpaid", Icons.Filled.HourglassTop, selectedStatusFilter == "YET_TO_PAY", Color(0xFFD97706)) {
+                                    selectedStatusFilter = if (selectedStatusFilter == "YET_TO_PAY") "ALL" else "YET_TO_PAY"
+                                }
                             }
-                            DashIconChip("Unpaid", Icons.Filled.HourglassTop, selectedStatusFilter == "YET_TO_PAY", Color(0xFFD97706)) {
-                                selectedStatusFilter = if (selectedStatusFilter == "YET_TO_PAY") "ALL" else "YET_TO_PAY"
+                            item(key = "paid") {
+                                DashIconChip("Paid", Icons.Filled.CheckCircle, selectedStatusFilter == "ALREADY_PAID", IndGreenDark) {
+                                    selectedStatusFilter = if (selectedStatusFilter == "ALREADY_PAID") "ALL" else "ALREADY_PAID"
+                                }
                             }
-                            DashIconChip("Paid", Icons.Filled.CheckCircle, selectedStatusFilter == "ALREADY_PAID", IndGreenDark) {
-                                selectedStatusFilter = if (selectedStatusFilter == "ALREADY_PAID") "ALL" else "ALREADY_PAID"
+                            item(key = "cc") {
+                                DashIconChip("Credit card", Icons.Filled.CreditCard, creditCardOnlyFilter, IndPurple) {
+                                    creditCardOnlyFilter = !creditCardOnlyFilter
+                                }
                             }
-                            DashIconChip("Credit card", Icons.Filled.CreditCard, creditCardOnlyFilter, IndPurple) {
-                                creditCardOnlyFilter = !creditCardOnlyFilter
-                            }
-                            DashIconChip("Repeat", Icons.Filled.Repeat, recurringOnlyFilter, Color(0xFF0284C7)) {
-                                recurringOnlyFilter = !recurringOnlyFilter
+                            item(key = "repeat") {
+                                DashIconChip("Repeat", Icons.Filled.Repeat, recurringOnlyFilter, Color(0xFF0284C7)) {
+                                    recurringOnlyFilter = !recurringOnlyFilter
+                                }
                             }
                             if (filtersActive) {
-                                DashIconChip("Clear", Icons.Filled.Close, false, IndRed) {
-                                    selectedStatusFilter = "ALL"
-                                    creditCardOnlyFilter = false
-                                    recurringOnlyFilter = false
-                                    selectedCategoryFilter = "ALL"
-                                    viewModel.setMonthYear(month, year, null)
+                                item(key = "clear") {
+                                    DashIconChip("Clear", Icons.Filled.Close, false, IndRed) {
+                                        selectedStatusFilter = "ALL"
+                                        creditCardOnlyFilter = false
+                                        recurringOnlyFilter = false
+                                        selectedCategoryFilter = "ALL"
+                                        viewModel.setMonthYear(month, year, null)
+                                    }
+                                }
+                            }
+                            categoryTotals.forEach { chip ->
+                                item(key = "cat_${chip.filterKey}") {
+                                    val selected = selectedCategoryFilter.equals(chip.filterKey, true)
+                                    CategoryFilterChip(
+                                        category = chip.label,
+                                        stylingKey = chip.stylingKey,
+                                        storedIconName = chip.storedIconName,
+                                        customColor = chip.colorHex?.let { customCategoryTint(it) },
+                                        selected = selected,
+                                        selectedColor = IndNavyHeader
+                                    ) {
+                                        selectedCategoryFilter = if (selected) "ALL" else chip.filterKey
+                                    }
                                 }
                             }
                         }
@@ -633,34 +656,6 @@ fun DashboardScreen(
                             onList = { dashboardViewMode = "LIST" }
                         )
 
-                        if (categoryTotals.isNotEmpty()) {
-                            Text(
-                                text = "By category",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = IndTextMuted,
-                                modifier = Modifier.padding(start = 2.dp, top = 2.dp)
-                            )
-                            FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                categoryTotals.forEach { chip ->
-                                    val selected = selectedCategoryFilter.equals(chip.filterKey, true)
-                                    CategoryFilterChip(
-                                        category = chip.label,
-                                        stylingKey = chip.stylingKey,
-                                        storedIconName = chip.storedIconName,
-                                        customColor = chip.colorHex?.let { customCategoryTint(it) },
-                                        selected = selected,
-                                        selectedColor = IndNavyHeader
-                                    ) {
-                                        selectedCategoryFilter = if (selected) "ALL" else chip.filterKey
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -888,24 +883,40 @@ fun DashboardScreen(
                                 color = IndTextMuted,
                                 modifier = Modifier.padding(start = 2.dp)
                             )
-                            FlowRow(
+                            LazyRow(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                contentPadding = PaddingValues(horizontal = 2.dp)
                             ) {
-                                DashIconChip("All", Icons.Filled.Apps, selectedCreditStatusFilter == "ALL", IndNavyHeader) {
-                                    selectedCreditStatusFilter = "ALL"
+                                item(key = "received") {
+                                    DashIconChip("Received", Icons.Filled.CheckCircle, selectedCreditStatusFilter == "RECEIVED", IndGreenDark) {
+                                        selectedCreditStatusFilter = if (selectedCreditStatusFilter == "RECEIVED") "ALL" else "RECEIVED"
+                                    }
                                 }
-                                DashIconChip("Received", Icons.Filled.CheckCircle, selectedCreditStatusFilter == "RECEIVED", IndGreenDark) {
-                                    selectedCreditStatusFilter = if (selectedCreditStatusFilter == "RECEIVED") "ALL" else "RECEIVED"
-                                }
-                                DashIconChip("Pending", Icons.Filled.HourglassTop, selectedCreditStatusFilter == "PENDING", Color(0xFFD97706)) {
-                                    selectedCreditStatusFilter = if (selectedCreditStatusFilter == "PENDING") "ALL" else "PENDING"
+                                item(key = "pending") {
+                                    DashIconChip("Pending", Icons.Filled.HourglassTop, selectedCreditStatusFilter == "PENDING", Color(0xFFD97706)) {
+                                        selectedCreditStatusFilter = if (selectedCreditStatusFilter == "PENDING") "ALL" else "PENDING"
+                                    }
                                 }
                                 if (creditFiltersActive) {
-                                    DashIconChip("Clear", Icons.Filled.Close, false, IndRed) {
-                                        selectedCreditStatusFilter = "ALL"
-                                        selectedCreditCategoryFilter = "ALL"
+                                    item(key = "clear") {
+                                        DashIconChip("Clear", Icons.Filled.Close, false, IndRed) {
+                                            selectedCreditStatusFilter = "ALL"
+                                            selectedCreditCategoryFilter = "ALL"
+                                        }
+                                    }
+                                }
+                                creditCategoryTotals.forEach { (category, _, _) ->
+                                    item(key = "cat_$category") {
+                                        val selected = selectedCreditCategoryFilter.equals(category, true)
+                                        CategoryFilterChip(
+                                            category = category,
+                                            stylingKey = category,
+                                            selected = selected,
+                                            selectedColor = Color(0xFF16A34A)
+                                        ) {
+                                            selectedCreditCategoryFilter = if (selected) "ALL" else category
+                                        }
                                     }
                                 }
                             }
@@ -926,32 +937,6 @@ fun DashboardScreen(
                                 onList = { creditsViewMode = "LIST" }
                             )
 
-                            if (creditCategoryTotals.isNotEmpty()) {
-                                Text(
-                                    text = "By category",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = IndTextMuted,
-                                    modifier = Modifier.padding(start = 2.dp, top = 2.dp)
-                                )
-                                FlowRow(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    creditCategoryTotals.forEach { (category, _, _) ->
-                                        val selected = selectedCreditCategoryFilter.equals(category, true)
-                                        CategoryFilterChip(
-                                            category = category,
-                                            stylingKey = category,
-                                            selected = selected,
-                                            selectedColor = Color(0xFF16A34A)
-                                        ) {
-                                            selectedCreditCategoryFilter = if (selected) "ALL" else category
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 }

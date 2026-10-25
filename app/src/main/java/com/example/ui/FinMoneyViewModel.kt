@@ -21,6 +21,10 @@ import com.example.service.EntryIntegrityEngine
 import com.example.service.FinMoneyAuthService
 import com.example.service.LoanAgreementService
 import com.example.service.LoanInviteService
+import com.example.cloud.CloudSyncPreferences
+import com.example.cloud.CloudSyncStage
+import com.example.cloud.CloudUserContext
+import com.example.cloud.UserCloudBackupOrchestrator
 import com.example.cloud.CloudUserContextResolver
 import com.example.cloud.CloudSyncOutboxManager
 import com.example.cloud.LocalFirstCloudSync
@@ -45,6 +49,9 @@ import com.example.ui.components.debitCategoryFilterKey
 import com.example.domain.usecase.LoanLedgerMath
 import com.example.domain.usecase.LoanPartyAuth
 import com.example.domain.usecase.ValidateLoanLifecycleUseCase.ValidationResult
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.text.DateFormatSymbols
@@ -74,6 +81,10 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     private val identityBinding = UserIdentityBindingEngine(app.applicationContext, dao)
     private val userCloudRepository = UserCloudDataRepository()
     private val groqApiClient = GroqApiClient(app)
+    private val cloudSyncMutex = Mutex()
+
+    private val _cloudSyncUi = MutableStateFlow(CloudSyncUiState())
+    val cloudSyncUi: StateFlow<CloudSyncUiState> = _cloudSyncUi.asStateFlow()
 
     // Domain Use Cases
     val calculateBudgetHealthUseCase = CalculateBudgetHealthUseCase()
@@ -812,6 +823,10 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                     colorHex = colorHex.ifBlank { "#00B386" }
                 )
             )
+            val saved = dao.getCustomCategoryByName(trimmed, uid)
+            if (saved != null) {
+                queueCloudAfterLocal { user -> LocalFirstCloudSync.queueCustomCategory(app, user, saved) }
+            }
             notifyUser("Custom category \"$trimmed\" added.")
         }
     }
@@ -890,6 +905,10 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                     colorHex = colorHex.ifBlank { "#0066FF" }
                 )
             )
+            val saved = dao.getCustomExpenseTagByName(trimmed, uid)
+            if (saved != null) {
+                queueCloudAfterLocal { user -> LocalFirstCloudSync.queueCustomExpenseTag(app, user, saved) }
+            }
             notifyUser("Tag \"$trimmed\" saved.")
         }
     }
@@ -2107,7 +2126,17 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                     error = profileCloud.exceptionOrNull()?.message
                 )
             }
-            CloudSyncOutboxManager.flushPending(app.applicationContext, dao)
+            try {
+                val cloudCtx = CloudUserContextResolver.fromProfile(profile, refreshed.uid)
+                val showOverlay = isLocalLedgerEmpty(refreshed.uid)
+                val report = performCloudAccountSync(cloudCtx, showFullscreenOverlay = showOverlay)
+                val restored = report.restore.totalRestored()
+                if (restored > 0 && !showOverlay) {
+                    notifyUser("Restored $restored item(s) from your cloud backup.")
+                }
+            } catch (e: Exception) {
+                Log.w("FinMoneyViewModel", "Account cloud restore skipped: ${e.message}")
+            }
             try {
                 LoanInviteService.pullInbox(app)
             } catch (e: Exception) {
@@ -2123,11 +2152,132 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         launchSafe(Dispatchers.IO) {
             syncVerificationStatusFromFirebase()
             flushPendingCloudSync()
+            refreshCloudSyncMeta()
         }
     }
 
     suspend fun flushPendingCloudSync(): Int = withContext(Dispatchers.IO) {
         CloudSyncOutboxManager.flushPending(app.applicationContext, dao)
+    }
+
+    private suspend fun isLocalLedgerEmpty(userId: String): Boolean {
+        if (userId.isBlank()) return false
+        return dao.getAllDebitsDirect(userId).isEmpty() &&
+            dao.getAllLoansDirect(userId).isEmpty() &&
+            dao.getAllSalaryRecordsDirect(userId).isEmpty() &&
+            dao.getBankTransactionsDirect(userId).isEmpty()
+    }
+
+    fun refreshCloudSyncMeta() {
+        launchSafe(Dispatchers.IO) {
+            val user = CloudUserContextResolver.resolve(dao)
+            val pending = if (user.userId.isNotBlank()) {
+                dao.getCloudSyncOutboxForUser(user.userId).size
+            } else {
+                0
+            }
+            val lastAt = CloudSyncPreferences.lastSuccessfulSyncAt(app.applicationContext, user.userId)
+            _cloudSyncUi.update {
+                it.copy(pendingOutbox = pending, lastSuccessAtMillis = lastAt)
+            }
+        }
+    }
+
+    /**
+     * Full pull + push pipeline with optional full-screen progress (reinstall / empty device).
+     */
+    suspend fun performCloudAccountSync(
+        cloudCtx: CloudUserContext,
+        showFullscreenOverlay: Boolean
+    ): UserCloudBackupOrchestrator.Report = cloudSyncMutex.withLock {
+        withContext(Dispatchers.IO) {
+            if (!cloudCtx.canSyncToCloud) {
+                return@withContext UserCloudBackupOrchestrator.Report(
+                    restore = com.example.cloud.CloudAccountRestore.Result(),
+                    outboxFlushed = 0,
+                    pendingOutboxRemaining = 0,
+                    completedAt = 0L
+                )
+            }
+            _cloudSyncUi.update {
+                it.copy(
+                    isRunning = true,
+                    showFullscreenOverlay = showFullscreenOverlay,
+                    stage = CloudSyncStage.CONNECTING,
+                    statusLine = "Connecting to secure cloud…",
+                    errorMessage = null
+                )
+            }
+            try {
+                val report = UserCloudBackupOrchestrator.runFullAccountSync(
+                    context = app.applicationContext,
+                    dao = dao,
+                    cloud = userCloudRepository,
+                    user = cloudCtx,
+                    onProgress = { progress ->
+                        _cloudSyncUi.update { state ->
+                            state.copy(stage = progress.stage, statusLine = progress.message)
+                        }
+                    }
+                )
+                _cloudSyncUi.update {
+                    it.copy(
+                        stage = CloudSyncStage.SUCCESS,
+                        statusLine = if (report.restore.totalRestored() > 0) {
+                            "Restored ${report.restore.totalRestored()} item(s) from backup"
+                        } else {
+                            "Your data is up to date"
+                        },
+                        restoredCount = report.restore.totalRestored(),
+                        pendingOutbox = report.pendingOutboxRemaining,
+                        lastSuccessAtMillis = CloudSyncPreferences.lastSuccessfulSyncAt(
+                            app.applicationContext,
+                            cloudCtx.userId
+                        ).takeIf { ts -> ts > 0 } ?: report.completedAt
+                    )
+                }
+                if (showFullscreenOverlay) {
+                    delay(900)
+                }
+                _cloudSyncUi.update {
+                    it.copy(isRunning = false, showFullscreenOverlay = false)
+                }
+                report
+            } catch (e: Exception) {
+                _cloudSyncUi.update {
+                    it.copy(
+                        stage = CloudSyncStage.ERROR,
+                        statusLine = "Cloud sync failed",
+                        errorMessage = e.message ?: "Please check your connection and try again.",
+                        isRunning = false,
+                        showFullscreenOverlay = false
+                    )
+                }
+                throw e
+            }
+        }
+    }
+
+    /** Manual "Cloud sync" from Profile — always runs full upload + download. */
+    suspend fun runCloudBackupSync(): UserCloudBackupOrchestrator.Report = withContext(Dispatchers.IO) {
+        val user = CloudUserContextResolver.resolve(dao)
+        performCloudAccountSync(user, showFullscreenOverlay = false).also { report ->
+            val msg = when {
+                report.pendingOutboxRemaining > 0 ->
+                    "Sync in progress — ${report.pendingOutboxRemaining} item(s) will retry when online."
+                report.restore.totalRestored() > 0 ->
+                    "Downloaded ${report.restore.totalRestored()} item(s) and synced to cloud."
+                else -> "Cloud backup is up to date."
+            }
+            notifyUser(msg)
+        }
+    }
+
+    fun runCloudBackupSyncAsync() {
+        launchSafe(Dispatchers.IO) {
+            runCloudBackupSync()
+            refreshCloudSyncMeta()
+        }
     }
 
     fun flushPendingCloudSyncAsync() {

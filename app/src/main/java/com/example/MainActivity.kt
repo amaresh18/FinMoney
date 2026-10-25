@@ -24,6 +24,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.layout.Box
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -34,6 +36,7 @@ import com.example.service.BankSyncManager
 import com.example.ui.FinMoneyViewModel
 import com.example.ui.MainScreen
 import com.example.ui.components.BrandLogo
+import com.example.ui.components.CloudSyncRestoreOverlay
 import com.example.ui.theme.FinMoneyTheme
 import com.example.ui.theme.IndBackground
 import com.example.ui.theme.IndBlue
@@ -63,6 +66,7 @@ class MainActivity : FragmentActivity() {
                 ) {
                     val viewModel: FinMoneyViewModel = viewModel()
                     val userProfileState by viewModel.userProfile.collectAsStateWithLifecycle()
+                    val cloudSyncUi by viewModel.cloudSyncUi.collectAsStateWithLifecycle()
                     val shouldOpenPending by openPendingState
                     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -146,16 +150,26 @@ class MainActivity : FragmentActivity() {
                                 } else {
                                     val openLoanCloudId by openLoanCloudIdState
                                     val openLoanId by openLoanIdState
-                                    MainScreen(
-                                        initialOpenPending = shouldOpenPending,
-                                        onPendingConsumed = { openPendingState.value = false },
-                                        initialLoanCloudId = openLoanCloudId,
-                                        initialLoanId = openLoanId,
-                                        onLoanOpenConsumed = {
-                                            openLoanCloudIdState.value = null
-                                            openLoanIdState.value = null
+                                    Box(Modifier.fillMaxSize()) {
+                                        MainScreen(
+                                            initialOpenPending = shouldOpenPending,
+                                            onPendingConsumed = { openPendingState.value = false },
+                                            initialLoanCloudId = openLoanCloudId,
+                                            initialLoanId = openLoanId,
+                                            onLoanOpenConsumed = {
+                                                openLoanCloudIdState.value = null
+                                                openLoanIdState.value = null
+                                            }
+                                        )
+                                        if (cloudSyncUi.isRunning && cloudSyncUi.showFullscreenOverlay) {
+                                            CloudSyncRestoreOverlay(
+                                                state = cloudSyncUi,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .zIndex(30f)
+                                            )
                                         }
-                                    )
+                                    }
                                 }
                             } else {
                                 com.example.ui.screens.AuthScreen(

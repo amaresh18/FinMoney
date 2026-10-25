@@ -38,6 +38,8 @@ import com.example.ui.FinMoneyViewModel
 import com.example.data.model.CustomCategory
 import com.example.ui.components.AddCustomCategoryDialog
 import com.example.ui.components.IndCard
+import java.text.DateFormat
+import java.util.Date
 import com.example.ui.components.ManageCustomCategoriesDialog
 import com.example.ui.theme.*
 import com.google.firebase.Firebase
@@ -88,8 +90,17 @@ fun UserProfileScreen(
     val phoneVerified = userProfile?.isOtpVerified == true
     val emailVerified = userProfile?.isEmailVerified == true
 
+    val cloudSyncUi by viewModel.cloudSyncUi.collectAsStateWithLifecycle()
+
     LaunchedEffect(Unit) {
         viewModel.syncVerificationStatusFromFirebaseAsync()
+        viewModel.refreshCloudSyncMeta()
+    }
+
+    val lastSyncLabel = remember(cloudSyncUi.lastSuccessAtMillis) {
+        val at = cloudSyncUi.lastSuccessAtMillis
+        if (at <= 0L) "Not synced yet"
+        else DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(at))
     }
 
     var nameInput by remember(effectiveName) { mutableStateOf(effectiveName) }
@@ -484,6 +495,67 @@ fun UserProfileScreen(
                             Text("Save changes", fontWeight = FontWeight.Bold)
                         }
                     }
+                }
+            }
+
+            IndCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ProfileSectionTitle(
+                        title = "Cloud backup & sync",
+                        subtitle = "Linked to your Google account on Firebase",
+                        icon = Icons.Filled.CloudSync
+                    )
+                    Text(
+                        text = "Last successful sync: $lastSyncLabel",
+                        fontSize = 12.sp,
+                        color = IndTextSecondary
+                    )
+                    if (cloudSyncUi.pendingOutbox > 0) {
+                        Text(
+                            text = "${cloudSyncUi.pendingOutbox} change(s) waiting to upload",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = IndBlue
+                        )
+                    }
+                    if (cloudSyncUi.isRunning && !cloudSyncUi.showFullscreenOverlay) {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = IndBlue,
+                            trackColor = IndBlue.copy(alpha = 0.15f)
+                        )
+                        Text(
+                            text = cloudSyncUi.statusLine,
+                            fontSize = 12.sp,
+                            color = IndTextSecondary
+                        )
+                    }
+                    Button(
+                        onClick = { viewModel.runCloudBackupSyncAsync() },
+                        enabled = !cloudSyncUi.isRunning && (firebaseUser != null),
+                        colors = ButtonDefaults.buttonColors(containerColor = IndBlue),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("cloud_sync_button")
+                    ) {
+                        Icon(
+                            Icons.Default.CloudUpload,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (cloudSyncUi.isRunning) "Syncing…" else "Sync to cloud now",
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text(
+                        text = "Downloads your backup after reinstall, then uploads any pending changes.",
+                        fontSize = 11.sp,
+                        color = IndTextSecondary,
+                        lineHeight = 15.sp
+                    )
                 }
             }
 

@@ -19,17 +19,6 @@ class FinMoneyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // Eagerly verify and seed database health guard on application start
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val db = com.example.data.local.AppDatabase.getDatabase(this@FinMoneyApplication)
-                val dao = db.finMoneyDao()
-                com.example.data.local.DatabaseHealthGuard.verifyAndRepairDatabase(dao, forceReset = false)
-                com.example.cloud.CloudSyncOutboxManager.flushPending(this@FinMoneyApplication, dao)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error running DatabaseHealthGuard on app launch", e)
-            }
-        }
         try {
             val apps = FirebaseApp.getApps(this)
             val firebaseApp = if (apps.isEmpty()) {
@@ -67,6 +56,21 @@ class FinMoneyApplication : Application() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "❌ [DIAGNOSTIC] Exception during FirebaseApp initialization in Application.onCreate: ${e.message}", e)
+        }
+
+        // After Firebase is ready: repair local DB, then pull cloud backup + flush outbox (premium cold-start sync).
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val db = com.example.data.local.AppDatabase.getDatabase(this@FinMoneyApplication)
+                val dao = db.finMoneyDao()
+                com.example.data.local.DatabaseHealthGuard.verifyAndRepairDatabase(dao, forceReset = false)
+                com.example.cloud.UserCloudBackupOrchestrator.runFullAccountSync(
+                    this@FinMoneyApplication,
+                    dao
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Error running DatabaseHealthGuard on app launch", e)
+            }
         }
     }
 }

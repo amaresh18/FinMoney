@@ -1,60 +1,59 @@
-﻿OK   brand_air_india  853 bytes  simple-icons:airindia
-OK   brand_airtel  1270 bytes  simple-icons:airtel
-FAIL brand_ajio
-OK   brand_amazon  2275 bytes  simple-icons:amazon
-FAIL brand_apollo
-OK   brand_bigbasket  1620 bytes  simple-icons:bigbasket
-FAIL brand_blinkit
-FAIL brand_bpcl
-FAIL brand_bsnl
-OK   brand_byjus  1019 bytes  simple-icons:byjus
-FAIL brand_cred
-FAIL brand_croma
-FAIL brand_dmart
-FAIL brand_dominos
+﻿OK   brand_air_india  13511 bytes  https://airindia.com/favicon.ico
+OK   brand_airtel  600 bytes  https://airtel.in/favicon.ico
+OK   brand_ajio  1910 bytes  https://www.google.com/s2/favicons?domain=ajio.com&sz=128
+OK   brand_amazon  230 bytes  https://amazon.in/favicon.ico
+OK   brand_apollo  6354 bytes  https://apollo247.com/favicon.ico
+OK   brand_bigbasket  557 bytes  https://bigbasket.com/favicon.ico
+OK   brand_blinkit  1734 bytes  https://www.google.com/s2/favicons?domain=blinkit.com&sz=128
+OK   brand_bpcl  808 bytes  https://bharatpetroleum.in/favicon.ico
+OK   brand_bsnl  325 bytes  fallback-dot
+OK   brand_byjus  4506 bytes  https://byjus.com/favicon.ico
+OK   brand_cred  1805 bytes  https://www.google.com/s2/favicons?domain=cred.club&sz=128
+OK   brand_croma  2000 bytes  https://www.google.com/s2/favicons?domain=croma.com&sz=128
+OK   brand_dmart  219 bytes  https://dmartindia.com/favicon.ico
+OK   brand_dominos  3334 bytes  https://www.google.com/s2/favicons?domain=dominos.co.in&sz=128
 OK   brand_dunzo  1051 bytes  simple-icons:dunzo
-OK   brand_flipkart  978 bytes  simple-icons:flipkart
-FAIL brand_goibibo
-OK   brand_googlepay  1557 bytes  simple-icons:googlepay
-FAIL brand_hotstar
-FAIL brand_hpcl
-OK   brand_indigo  1581 bytes  simple-icons:indigo
-FAIL brand_instamart
-FAIL brand_iocl
-FAIL brand_irctc
-FAIL brand_jio
-FAIL brand_jiomart
-OK   brand_kfc  1845 bytes  simple-icons:kfc
-FAIL brand_makemytrip
-OK   brand_mcdonalds  544 bytes  simple-icons:mcdonalds
-FAIL brand_meesho
-FAIL brand_metro
-FAIL brand_myntra
-FAIL brand_namma_yatri
-OK   brand_netflix  480 bytes  simple-icons:netflix
-FAIL brand_nykaa
-FAIL brand_ola
-OK   brand_paytm  2257 bytes  simple-icons:paytm
-FAIL brand_pharmeasy
-OK   brand_phonepe  884 bytes  simple-icons:phonepe
-OK   brand_prime_video  7306 bytes  simple-icons:amazonprime
-FAIL brand_rapido
-FAIL brand_redbus
-FAIL brand_reliance_digital
-FAIL brand_restaurant
-OK   brand_shell  1192 bytes  simple-icons:shell
-FAIL brand_sonyliv
-OK   brand_spotify  842 bytes  simple-icons:spotify
-OK   brand_starbucks  7851 bytes  simple-icons:starbucks
-OK   brand_swiggy  898 bytes  simple-icons:swiggy
-FAIL brand_tata_1mg
-FAIL brand_tatacliq
-OK   brand_uber  1081 bytes  simple-icons:uber
-OK   brand_unacademy  640 bytes  simple-icons:unacademy
-OK   brand_vi  598 bytes  simple-icons:vodafone
-OK   brand_youtube  604 bytes  simple-icons:youtube
-FAIL brand_zepto
-OK   brand_zomato  2398 bytes  simple-icons:zomato
+OK   brand_flipkart  1636 bytes  https://flipkart.com/favicon.ico
+OK   brand_goibibo  651 bytes  https://goibibo.com/favicon.ico
+OK   brand_googlepay  1147 bytes  https://www.google.com/s2/favicons?domain=pay.google.com&sz=128
+OK   brand_hotstar  6917 bytes  https://hotstar.com/apple-touch-icon.png
+OK   brand_hpcl  992 bytes  https://www.google.com/s2/favicons?domain=hindustanpetroleum.com&sz=128
+OK   brand_indigo  13301 bytes  https://www.google.com/s2/favicons?domain=goindigo.in&sz=128
+OK   brand_instamart  2083 bytes  https://www.google.com/s2/favicons?domain=swiggy.com&sz=128
+OK   brand_iocl  5662 bytes  https://www.google.com/s2/favicons?domain=iocl.com&sz=128
+OK   brand_irctc  325 bytes  fallback-dot
+OK   brand_jio  1778 bytes  https://www.google.com/s2/favicons?domain=jio.com&sz=128
+OK   brand_jiomart  581 bytes  https://www.google.com/s2/favicons?domain=jiomart.com&sz=128
+OK   brand_kfc  11049 bytes  https://www.google.com/s2/favicons?domain=kfc.com&sz=128
+OK   brand_makemytrip  2852 bytes  https://makemytrip.com/favicon.ico
+OK   brand_mcdonalds  1533 bytes  https://www.google.com/s2/favicons?domain=mcdonalds.com&sz=128
+OK   brand_meesho  754 bytes  https://meesho.com/favicon.ico
+OK   brand_metro  631 bytes  https://delhimetrorail.com/favicon.ico
+OK   brand_myntra  1226 bytes  https://myntra.com/favicon.ico
+OK   brand_namma_yatri  446 bytes  https://www.google.com/s2/favicons?domain=www.nammayatri.com&sz=128
+OK   brand_netflix  1896 bytes  https://netflix.com/favicon.ico
+OK   brand_nykaa  5230 bytes  https://www.google.com/s2/favicons?domain=nykaa.com&sz=128
+OK   brand_ola  3349 bytes  https://www.google.com/s2/favicons?domain=book.olacabs.com&sz=128
+OK   brand_paytm  807 bytes  https://paytm.com/favicon.ico
+OK   brand_pharmeasy  5016 bytes  https://pharmeasy.in/favicon.ico
+OK   brand_phonepe  564 bytes  https://phonepe.com/favicon.ico
+OK   brand_prime_video  1724 bytes  https://primevideo.com/apple-touch-icon.png
+OK   brand_rapido  52822 bytes  https://rapido.bike/favicon.ico
+OK   brand_redbus  571 bytes  https://redbus.in/favicon.ico
+OK   brand_reliance_digital  464 bytes  https://reliancedigital.in/favicon.ico
+OK   brand_restaurant  395 bytes  https://zomato.com/favicon.ico
+OK   brand_shell  1831 bytes  https://shell.com/favicon.ico
+OK   brand_sonyliv  2354 bytes  https://sonyliv.com/favicon.ico
+OK   brand_spotify  2670 bytes  https://spotify.com/apple-touch-icon.png
+OK   brand_starbucks  17625 bytes  https://starbucks.com/apple-touch-icon.png
+OK   brand_swiggy  2083 bytes  https://www.google.com/s2/favicons?domain=swiggy.com&sz=128
+OK   brand_tata_1mg  1735 bytes  https://1mg.com/apple-touch-icon-precomposed.png
+OK   brand_tatacliq  5084 bytes  https://tatacliq.com/favicon.ico
+OK   brand_uber  1056 bytes  https://uber.com/favicon.ico
+OK   brand_unacademy  506 bytes  https://unacademy.com/favicon.ico
+OK   brand_vi  3406 bytes  https://www.google.com/s2/favicons?domain=myvi.in&sz=128
+OK   brand_youtube  244 bytes  https://youtube.com/favicon.ico
+OK   brand_zepto  3660 bytes  https://www.google.com/s2/favicons?domain=zepto.com&sz=128
+OK   brand_zomato  395 bytes  https://zomato.com/favicon.ico
 
-Success: 24 / 57
-Failed: brand_ajio, brand_apollo, brand_blinkit, brand_bpcl, brand_bsnl, brand_cred, brand_croma, brand_dmart, brand_dominos, brand_goibibo, brand_hotstar, brand_hpcl, brand_instamart, brand_iocl, brand_irctc, brand_jio, brand_jiomart, brand_makemytrip, brand_meesho, brand_metro, brand_myntra, brand_namma_yatri, brand_nykaa, brand_ola, brand_pharmeasy, brand_rapido, brand_redbus, brand_reliance_digital, brand_restaurant, brand_sonyliv, brand_tata_1mg, brand_tatacliq, brand_zepto
+Success: 57 / 57

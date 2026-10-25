@@ -609,20 +609,20 @@ fun CategoryDrillDownDialog(
                     }
                 }
 
-                // Filter row for ALL, PAID, PENDING
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         listOf(
-                            "ALL" to "All (${debitItems.size})",
                             "PENDING" to "Pending (${debitItems.count { !it.isPaid }})",
                             "PAID" to "Paid (${debitItems.count { it.isPaid }})"
                         ).forEach { (mode, label) ->
                             FilterChip(
                                 selected = filterMode == mode,
-                                onClick = { filterMode = mode },
+                                onClick = {
+                                    filterMode = if (filterMode == mode) "ALL" else mode
+                                },
                                 label = { Text(label, fontSize = 11.sp) },
                                 modifier = Modifier.weight(1f)
                             )

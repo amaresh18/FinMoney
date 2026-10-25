@@ -17,6 +17,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.ui.zIndex
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.components.CloudSyncRestoreOverlay
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -92,11 +94,22 @@ fun AuthScreen(
     modifier: Modifier = Modifier
 ) {
     FinAuthTheme {
-        AuthScreenContent(
-            viewModel = viewModel,
-            onContinue = onContinue,
-            modifier = modifier
-        )
+        val cloudSync by viewModel.cloudSyncUi.collectAsStateWithLifecycle()
+        Box(modifier = modifier.fillMaxSize()) {
+            AuthScreenContent(
+                viewModel = viewModel,
+                onContinue = onContinue,
+                modifier = Modifier.fillMaxSize()
+            )
+            if (cloudSync.isRunning && cloudSync.showFullscreenOverlay) {
+                CloudSyncRestoreOverlay(
+                    state = cloudSync,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(20f)
+                )
+            }
+        }
     }
 }
 
@@ -430,6 +443,7 @@ private fun AuthScreenContent(
 
                     if (regResult.isSuccess) {
                         statusMessage = "Signed in as $detectedName ✓"
+                        viewModel.syncVerificationStatusFromFirebase()
                         onContinue()
                     } else {
                         errorText = regResult.exceptionOrNull()?.message
