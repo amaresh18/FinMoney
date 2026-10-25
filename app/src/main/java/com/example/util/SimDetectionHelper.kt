@@ -27,6 +27,17 @@ data class DetectedSim(
 object SimDetectionHelper {
     private const val TAG = "SimDetectionHelper"
 
+    /** Local display only (no country code) — e.g. `94938 33887`. */
+    fun formatIndianMobileLocal(raw: String): String {
+        val digits = raw.filter { it.isDigit() }.let {
+            if (it.length > 10 && it.startsWith("91")) it.takeLast(10) else it.takeLast(10)
+        }
+        if (digits.length < 10) return digits
+        return "${digits.take(5)} ${digits.takeLast(5)}"
+    }
+
+    fun formatIndianMobileE164(raw: String): String = "+91 ${formatIndianMobileLocal(raw)}"
+
     fun hasPhonePermission(context: Context): Boolean {
         val hasState = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
         val hasNumbers = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -65,8 +76,8 @@ object SimDetectionHelper {
                         val carrier = info.carrierName?.toString()?.takeIf { it.isNotBlank() } ?: "SIM ${info.simSlotIndex + 1}"
                         val display = info.displayName?.toString()?.takeIf { it.isNotBlank() } ?: carrier
                         val formatted = if (digits.length >= 10) {
-                            "+91 ${digits.takeLast(10).chunked(5).joinToString(" ")}"
-                        } else if (number.isNotBlank()) number else "SIM ${info.simSlotIndex + 1}"
+                            formatIndianMobileLocal(digits)
+                        } else if (number.isNotBlank()) formatIndianMobileLocal(number) else "SIM ${info.simSlotIndex + 1}"
 
                         detected.add(
                             DetectedSim(
@@ -105,7 +116,7 @@ object SimDetectionHelper {
                                 displayName = carrier,
                                 rawNumber = line1,
                                 cleanDigits = digits.takeLast(10),
-                                formattedDisplay = "+91 ${digits.takeLast(10).chunked(5).joinToString(" ")}"
+                                formattedDisplay = formatIndianMobileLocal(digits)
                             )
                         )
                     }

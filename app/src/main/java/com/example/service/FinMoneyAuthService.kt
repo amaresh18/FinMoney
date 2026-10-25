@@ -5,6 +5,7 @@ import android.util.Log
 import com.google.firebase.FirebaseApp
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.FirebaseException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
@@ -81,7 +82,7 @@ object FinMoneyAuthService {
 
                 override fun onVerificationFailed(e: FirebaseException) {
                     Log.e(TAG, "Phone verification failed: ${e.message}", e)
-                    completeOnce(Result.failure(e))
+                    completeOnce(Result.failure(IllegalStateException(userMessageForPhoneAuthError(e))))
                 }
 
                 override fun onCodeSent(
@@ -209,4 +210,29 @@ object FinMoneyAuthService {
     }
 
     fun isEmailVerifiedOnFirebase(user: FirebaseUser?): Boolean = user?.isEmailVerified == true
+
+    fun userMessageForPhoneAuthError(error: Throwable?): String {
+        if (error == null) return "Could not send OTP. Please try again."
+        val authEx = error as? FirebaseAuthException
+        when (authEx?.errorCode) {
+            "ERROR_OPERATION_NOT_ALLOWED" -> return (
+                "Phone OTP is not enabled for this app build. In Firebase Console open Authentication → " +
+                    "Sign-in method → enable Phone, then install an updated build."
+                )
+            "ERROR_INVALID_PHONE_NUMBER" -> return "Enter a valid 10-digit Indian mobile number."
+            "ERROR_TOO_MANY_REQUESTS" -> return "Too many OTP attempts. Please wait a few minutes and try again."
+            "ERROR_QUOTA_EXCEEDED" -> return "OTP service is busy. Please try again later."
+        }
+        val msg = error.message.orEmpty()
+        if (msg.contains("OPERATION_NOT_ALLOWED", ignoreCase = true) ||
+            msg.contains("sign-in provider is disabled", ignoreCase = true)
+        ) {
+            return (
+                "Phone OTP is not enabled on the server. Enable Phone sign-in in Firebase Console " +
+                    "(Authentication → Sign-in method) for the project linked to this app."
+                )
+        }
+        return error.localizedMessage?.takeIf { it.isNotBlank() }
+            ?: msg.ifBlank { "Could not send OTP. Please try again." }
+    }
 }

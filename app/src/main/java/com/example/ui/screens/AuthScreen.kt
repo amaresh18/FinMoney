@@ -1,8 +1,6 @@
 package com.example.ui.screens
 
-import android.Manifest
 import android.app.Activity
-import android.os.Build
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -63,7 +61,6 @@ import com.example.identity.UserIdentityBindingEngine.BindPhase
 import com.example.service.FinMoneyAuthService
 import com.example.ui.FinMoneyViewModel
 import com.example.ui.theme.*
-import com.example.util.DetectedSim
 import com.example.util.SimDetectionHelper
 import com.example.util.launchCatching
 import kotlinx.coroutines.CoroutineScope
@@ -174,9 +171,7 @@ private fun AuthScreenContent(
 
                 val dispatch = viewModel.sendLoginPhoneOtp(activity, digits, forceResend)
                 if (dispatch.isFailure) {
-                    errorText = dispatch.exceptionOrNull()?.localizedMessage
-                        ?: dispatch.exceptionOrNull()?.message
-                        ?: "Could not send OTP. Check your number and try again."
+                    errorText = FinMoneyAuthService.userMessageForPhoneAuthError(dispatch.exceptionOrNull())
                     return@launchCatching
                 }
 
@@ -280,9 +275,7 @@ private fun AuthScreenContent(
     var activeCarouselIndex by remember { mutableStateOf(0) }
     var resendTimerSeconds by remember { mutableStateOf(30) }
 
-    val detectedSims = remember { mutableStateListOf<DetectedSim>() }
-    var showSimSelectionDialog by remember { mutableStateOf(false) }
-    var isSimScanning by remember { mutableStateOf(false) }
+    var isPickingPhoneHint by remember { mutableStateOf(false) }
 
     // Auto-advance resend timer
     LaunchedEffect(currentStep, isPhoneVerified) {
@@ -309,74 +302,25 @@ private fun AuthScreenContent(
         }
     }
 
-    fun scanDeviceSims() {
-        isSimScanning = true
-        coroutineScope.launchCatching(
-            tag = "AuthScreen",
-            onError = { e ->
-                Log.e("AuthScreen", "Auth flow error", e)
-                errorText = e.localizedMessage ?: e.message ?: "Something went wrong. Please try again."
-            }
-        ) {
-            try {
-                val sims = SimDetectionHelper.getDetectedSims(context)
-                detectedSims.clear()
-                detectedSims.addAll(sims)
-                val validSims = sims.filter { it.cleanDigits.length >= 10 }
-                if (validSims.isNotEmpty()) {
-                    showSimSelectionDialog = true
-                } else if (context is Activity) {
-                    SimDetectionHelper.requestPhoneNumberHint(
-                        activity = context,
-                        onSuccess = { pendingIntent ->
-                            phoneNumberHintLauncher.launch(
-                                IntentSenderRequest.Builder(pendingIntent).build()
-                            )
-                        },
-                        onFailure = { /* fallback */ }
-                    )
-                }
-            } catch (e: Exception) {
-                Log.w("AuthScreen", "SIM scan error: ${e.message}")
-            } finally {
-                isSimScanning = false
-            }
+    fun requestPhoneNumberFromDevice() {
+        val activity = context as? ComponentActivity
+        if (activity == null) {
+            errorText = "Cannot open number picker on this device."
+            return
         }
-    }
-
-    val phonePermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val granted = permissions.values.any { it }
-        if (granted) {
-            scanDeviceSims()
-        } else if (context is Activity) {
-            SimDetectionHelper.requestPhoneNumberHint(
-                activity = context,
-                onSuccess = { pendingIntent ->
-                    phoneNumberHintLauncher.launch(
-                        IntentSenderRequest.Builder(pendingIntent).build()
-                    )
-                },
-                onFailure = { /* fallback */ }
-            )
-        }
-    }
-
-    // Auto scan SIM when stepping to phone entry
-    LaunchedEffect(currentStep) {
-        if (currentStep == 1 && phoneInput.isBlank() && !isPhoneVerified) {
-            if (SimDetectionHelper.hasPhonePermission(context)) {
-                scanDeviceSims()
-            } else {
-                val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    arrayOf(Manifest.permission.READ_PHONE_STATE, Manifest.permission.READ_PHONE_NUMBERS)
-                } else {
-                    arrayOf(Manifest.permission.READ_PHONE_STATE)
-                }
-                phonePermissionLauncher.launch(permissions)
+        isPickingPhoneHint = true
+        SimDetectionHelper.requestPhoneNumberHint(
+            activity = activity,
+            onSuccess = { pendingIntent ->
+                isPickingPhoneHint = false
+                phoneNumberHintLauncher.launch(IntentSenderRequest.Builder(pendingIntent).build())
+            },
+            onFailure = { e ->
+                isPickingPhoneHint = false
+                Log.w("AuthScreen", "Phone hint unavailable: ${e.message}")
+                errorText = "Could not open the number picker. Type your 10-digit mobile number manually."
             }
-        }
+        )
     }
 
     // Google Sign-In logic
@@ -714,15 +658,16 @@ private fun AuthScreenContent(
 
                     1 -> FinAuthMobileInputStep(
                         phoneInput = phoneInput,
-                        onPhoneChange = { phoneInput = it },
-                        isSimScanning = isSimScanning,
-                        detectedSims = detectedSims,
-                        onScanSims = { scanDeviceSims() },
-                        onSelectSim = { sim ->
-                            phoneInput = sim.cleanDigits
-                            isPhoneVerified = false
-                            triggerOtpDispatch(sim.cleanDigits)
+                        onPhoneChange = { raw ->
+                            val digits = raw.filter { it.isDigit() }
+                            phoneInput = when {
+                                digits.length > 10 && digits.startsWith("91") -> digits.takeLast(10)
+                                digits.length > 10 -> digits.takeLast(10)
+                                else -> digits
+                            }
                         },
+                        isPickingPhoneHint = isPickingPhoneHint,
+                        onPickPhoneFromDevice = { requestPhoneNumberFromDevice() },
                         onSendOtp = {
                             if (!isSendingOtp) triggerOtpDispatch(phoneInput)
                         },
@@ -926,86 +871,6 @@ private fun AuthScreenContent(
             }
         }
 
-        // Device SIM Selection Dialog
-        if (showSimSelectionDialog && detectedSims.any { it.cleanDigits.length >= 10 }) {
-            val validSims = detectedSims.filter { it.cleanDigits.length >= 10 }
-            AlertDialog(
-                onDismissRequest = { showSimSelectionDialog = false },
-                containerColor = FinAuthCardBg,
-                titleContentColor = FinAuthTextPrimary,
-                textContentColor = FinAuthTextSecondary,
-                icon = {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(IndBlue.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Filled.SimCard, contentDescription = null, tint = IndCyan, modifier = Modifier.size(26.dp))
-                    }
-                },
-                title = {
-                    Text("Select Active Device SIM", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                },
-                text = {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            "Select your SIM registered mobile number to auto-verify with FinMoney:",
-                            textAlign = TextAlign.Center,
-                            fontSize = 13.sp,
-                            color = FinAuthTextSecondary
-                        )
-
-                        validSims.forEach { sim ->
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = FinAuthDarkBg,
-                                border = androidx.compose.foundation.BorderStroke(1.dp, IndBlue),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        phoneInput = sim.cleanDigits
-                                        isPhoneVerified = false
-                                        showSimSelectionDialog = false
-                                        triggerOtpDispatch(sim.cleanDigits)
-                                    }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .background(IndBlue.copy(alpha = 0.2f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(Icons.Filled.PhoneAndroid, contentDescription = null, tint = IndCyan, modifier = Modifier.size(20.dp))
-                                    }
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(sim.formattedDisplay, fontWeight = FontWeight.ExtraBold, color = FinAuthTextPrimary, fontSize = 14.sp)
-                                        Text("${sim.carrierName} • SIM ${sim.slotIndex + 1}", fontSize = 11.sp, color = FinAuthTextSecondary)
-                                    }
-                                    Icon(Icons.Filled.CheckCircle, contentDescription = "Select", tint = IndCyan, modifier = Modifier.size(20.dp))
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { showSimSelectionDialog = false }) {
-                        Text("Enter Number Manually", color = IndCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            )
-        }
     }
 }
 
@@ -1244,10 +1109,8 @@ fun OnboardingScreen(
 private fun FinAuthMobileInputStep(
     phoneInput: String,
     onPhoneChange: (String) -> Unit,
-    isSimScanning: Boolean,
-    detectedSims: List<DetectedSim>,
-    onScanSims: () -> Unit,
-    onSelectSim: (DetectedSim) -> Unit,
+    isPickingPhoneHint: Boolean,
+    onPickPhoneFromDevice: () -> Unit,
     onSendOtp: () -> Unit,
     isSendingOtp: Boolean,
     onGoogleSignIn: () -> Unit,
@@ -1284,7 +1147,7 @@ private fun FinAuthMobileInputStep(
         // Clean Big Phone Display Field (+91 00000 00000)
         OutlinedTextField(
             value = phoneInput,
-            onValueChange = { onPhoneChange(it.filter { ch -> ch.isDigit() || ch == '+' || ch == ' ' }) },
+            onValueChange = onPhoneChange,
             prefix = {
                 Text(
                     text = "+91 ",
@@ -1312,60 +1175,25 @@ private fun FinAuthMobileInputStep(
             shape = RoundedCornerShape(16.dp)
         )
 
-        // Device Active SIM Detection Card if present
-        val validSims = detectedSims.filter { it.cleanDigits.length >= 10 }
-        if (validSims.isNotEmpty()) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = IndBlue.copy(alpha = 0.15f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, IndBlue.copy(alpha = 0.4f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(Icons.Filled.SimCard, contentDescription = null, tint = IndCyan, modifier = Modifier.size(16.dp))
-                        Text("Active SIM Registered on Device", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndCyan)
-                    }
-
-                    validSims.forEach { sim ->
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = FinAuthCardBg,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, FinAuthCardBorder),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onSelectSim(sim) }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(CircleShape)
-                                        .background(IndBlue),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Filled.PhoneAndroid, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                                }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("+91 ${sim.formattedDisplay}", fontWeight = FontWeight.Bold, color = FinAuthTextPrimary, fontSize = 13.sp)
-                                    Text(sim.carrierName, fontSize = 10.sp, color = FinAuthTextSecondary)
-                                }
-                                Text("Select", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndCyan)
-                            }
-                        }
-                    }
-                }
+        OutlinedButton(
+            onClick = onPickPhoneFromDevice,
+            enabled = !isPickingPhoneHint,
+            shape = RoundedCornerShape(14.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, IndBlue.copy(alpha = 0.5f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (isPickingPhoneHint) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Filled.ContactPhone, contentDescription = null, tint = IndCyan, modifier = Modifier.size(18.dp))
             }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Use number on this phone (no call permission)",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = FinAuthTextPrimary
+            )
         }
 
         if (statusMessage != null) {
