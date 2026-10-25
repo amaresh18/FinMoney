@@ -1,7 +1,9 @@
 package com.example.service
 
 import android.app.Activity
+import android.content.Context
 import android.util.Log
+import com.example.util.FirebaseProjectDiagnostics
 import com.google.firebase.FirebaseApp
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
@@ -211,28 +213,45 @@ object FinMoneyAuthService {
 
     fun isEmailVerifiedOnFirebase(user: FirebaseUser?): Boolean = user?.isEmailVerified == true
 
-    fun userMessageForPhoneAuthError(error: Throwable?): String {
-        if (error == null) return "Could not send OTP. Please try again."
-        val authEx = error as? FirebaseAuthException
-        when (authEx?.errorCode) {
-            "ERROR_OPERATION_NOT_ALLOWED" -> return (
-                "Phone OTP is not enabled for this app build. In Firebase Console open Authentication → " +
-                    "Sign-in method → enable Phone, then install an updated build."
+    fun userMessageForPhoneAuthError(error: Throwable?, context: Context? = null): String {
+        val root = FirebaseProjectDiagnostics.rootCause(error) ?: error
+        if (root == null) return "Could not send OTP. Please try again."
+        val authEx = root as? FirebaseAuthException
+        val core = when (authEx?.errorCode) {
+            "ERROR_OPERATION_NOT_ALLOWED" -> (
+                "Firebase rejected phone OTP. Phone must be enabled on the same Firebase project this app uses " +
+                    "(not a different project in the console), and you must add SHA-1 & SHA-256 for package " +
+                    "com.aistudio.finmoney.vqpz under Project settings → Your apps."
                 )
-            "ERROR_INVALID_PHONE_NUMBER" -> return "Enter a valid 10-digit Indian mobile number."
-            "ERROR_TOO_MANY_REQUESTS" -> return "Too many OTP attempts. Please wait a few minutes and try again."
-            "ERROR_QUOTA_EXCEEDED" -> return "OTP service is busy. Please try again later."
-        }
-        val msg = error.message.orEmpty()
-        if (msg.contains("OPERATION_NOT_ALLOWED", ignoreCase = true) ||
-            msg.contains("sign-in provider is disabled", ignoreCase = true)
-        ) {
-            return (
-                "Phone OTP is not enabled on the server. Enable Phone sign-in in Firebase Console " +
-                    "(Authentication → Sign-in method) for the project linked to this app."
+            "ERROR_INVALID_PHONE_NUMBER" -> "Enter a valid 10-digit Indian mobile number."
+            "ERROR_TOO_MANY_REQUESTS" -> "Too many OTP attempts. Please wait a few minutes and try again."
+            "ERROR_QUOTA_EXCEEDED" -> "OTP service is busy. Please try again later."
+            "ERROR_APP_NOT_AUTHORIZED" -> (
+                "This app is not authorized for Firebase Auth. Add your signing SHA-1 and SHA-256 in Firebase " +
+                    "Project settings for com.aistudio.finmoney.vqpz, then reinstall."
                 )
+            "ERROR_INVALID_API_KEY" -> "Firebase API key is invalid. Replace app/google-services.json from your Firebase project and rebuild."
+            else -> {
+                val msg = root.message.orEmpty()
+                when {
+                    msg.contains("OPERATION_NOT_ALLOWED", ignoreCase = true) ||
+                        msg.contains("sign-in provider is disabled", ignoreCase = true) -> (
+                        "Firebase rejected phone OTP. Enable Phone on the project this APK uses and verify SHA keys " +
+                            "(see diagnostics below). If you enabled Phone on another Firebase project, link this app to that project via google-services.json."
+                        )
+                    msg.contains("not authorized", ignoreCase = true) -> (
+                        "App not authorized for Firebase. Add SHA-1/SHA-256 for your signing certificate in Firebase Console."
+                        )
+                    else -> root.localizedMessage?.takeIf { it.isNotBlank() }
+                        ?: msg.ifBlank { "Could not send OTP. Please try again." }
+                }
+            }
         }
-        return error.localizedMessage?.takeIf { it.isNotBlank() }
-            ?: msg.ifBlank { "Could not send OTP. Please try again." }
+        if (context == null) return core
+        val needsDiag = authEx?.errorCode == "ERROR_OPERATION_NOT_ALLOWED" ||
+            authEx?.errorCode == "ERROR_APP_NOT_AUTHORIZED" ||
+            core.contains("Firebase project", ignoreCase = true) ||
+            core.contains("google-services", ignoreCase = true)
+        return if (needsDiag) "$core\n\n${FirebaseProjectDiagnostics.summary(context)}" else core
     }
 }

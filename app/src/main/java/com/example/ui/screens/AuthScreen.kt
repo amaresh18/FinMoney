@@ -171,7 +171,7 @@ private fun AuthScreenContent(
 
                 val dispatch = viewModel.sendLoginPhoneOtp(activity, digits, forceResend)
                 if (dispatch.isFailure) {
-                    errorText = FinMoneyAuthService.userMessageForPhoneAuthError(dispatch.exceptionOrNull())
+                    errorText = FinMoneyAuthService.userMessageForPhoneAuthError(dispatch.exceptionOrNull(), context)
                     return@launchCatching
                 }
 
