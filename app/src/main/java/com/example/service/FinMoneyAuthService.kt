@@ -2,6 +2,7 @@ package com.example.service
 
 import android.app.Activity
 import android.util.Log
+import com.google.firebase.FirebaseApp
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.FirebaseException
@@ -44,6 +45,12 @@ object FinMoneyAuthService {
             return Result.failure(IllegalArgumentException("Enter a valid 10-digit mobile number."))
         }
         val e164 = "+91$digits"
+
+        if (FirebaseApp.getApps(activity.applicationContext).isEmpty()) {
+            return Result.failure(
+                IllegalStateException("Firebase is not configured on this build. Please reinstall from Play Store or contact support.")
+            )
+        }
 
         return suspendCancellableCoroutine { cont ->
             var completed = false
@@ -96,7 +103,12 @@ object FinMoneyAuthService {
                 builder.setForceResendingToken(lastForceResendingToken!!)
             }
 
-            PhoneAuthProvider.verifyPhoneNumber(builder.build())
+            try {
+                PhoneAuthProvider.verifyPhoneNumber(builder.build())
+            } catch (e: Exception) {
+                Log.e(TAG, "verifyPhoneNumber failed to start: ${e.message}", e)
+                completeOnce(Result.failure(e))
+            }
         }
     }
 

@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.os.Build
 import android.util.Log
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -64,6 +65,8 @@ import com.example.ui.FinMoneyViewModel
 import com.example.ui.theme.*
 import com.example.util.DetectedSim
 import com.example.util.SimDetectionHelper
+import com.example.util.launchCatching
+import kotlinx.coroutines.CoroutineScope
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
@@ -132,6 +135,7 @@ private fun AuthScreenContent(
     // 3 = Profile Personalization
     // 4 = Email verification (Firebase)
     var currentStep by remember { mutableStateOf(0) }
+    var termsAccepted by remember { mutableStateOf(true) }
 
     fun triggerOtpDispatch(phoneNumber: String, forceResend: Boolean = false) {
         val digits = phoneNumber.filter { it.isDigit() }.takeLast(10)
@@ -139,9 +143,13 @@ private fun AuthScreenContent(
             errorText = "Please enter a valid 10-digit mobile number."
             return
         }
-        val activity = context as? Activity
+        val activity = context as? ComponentActivity
         if (activity == null) {
             errorText = "Unable to start phone verification on this device."
+            return
+        }
+        if (!termsAccepted) {
+            errorText = "Please accept the Terms of Service and Privacy Policy to continue."
             return
         }
 
@@ -150,44 +158,62 @@ private fun AuthScreenContent(
         statusMessage = null
         otpInput = ""
         phoneVerificationId = ""
-        coroutineScope.launch {
-            val collision = viewModel.validateIdentifierOwnership(phone = digits, email = emailInput.trim())
-            if (collision.isFailure) {
-                errorText = collision.exceptionOrNull()?.message
-                isSendingOtp = false
-                return@launch
+        coroutineScope.launchCatching(
+            tag = "AuthScreen",
+            onError = { e ->
+                Log.e("AuthScreen", "Auth flow error", e)
+                errorText = e.localizedMessage ?: e.message ?: "Something went wrong. Please try again."
             }
-
-            val dispatch = viewModel.sendLoginPhoneOtp(activity, digits, forceResend)
-            isSendingOtp = false
-            if (dispatch.isFailure) {
-                errorText = dispatch.exceptionOrNull()?.localizedMessage
-                    ?: "Could not send OTP. Check your number and try again."
-                return@launch
-            }
-
-            val result = dispatch.getOrThrow()
-            if (result.instantSignIn) {
-                val reserve = viewModel.reservePhoneAfterVerification(digits)
-                if (reserve.isFailure) {
-                    errorText = reserve.exceptionOrNull()?.message
-                    return@launch
+        ) {
+            try {
+                val collision = viewModel.validateIdentifierOwnership(phone = digits, email = emailInput.trim())
+                if (collision.isFailure) {
+                    errorText = collision.exceptionOrNull()?.message
+                    return@launchCatching
                 }
-                isPhoneVerified = true
-                statusMessage = "Mobile number verified successfully! ✓"
-                currentStep = 3
-                return@launch
-            }
 
-            phoneVerificationId = result.verificationId ?: ""
-            statusMessage = "OTP sent via SMS to +91 ${digits.takeLast(10)}."
-            currentStep = 2
+                val dispatch = viewModel.sendLoginPhoneOtp(activity, digits, forceResend)
+                if (dispatch.isFailure) {
+                    errorText = dispatch.exceptionOrNull()?.localizedMessage
+                        ?: dispatch.exceptionOrNull()?.message
+                        ?: "Could not send OTP. Check your number and try again."
+                    return@launchCatching
+                }
+
+                val result = dispatch.getOrNull() ?: return@launchCatching
+                if (result.instantSignIn) {
+                    val reserve = viewModel.reservePhoneAfterVerification(digits)
+                    if (reserve.isFailure) {
+                        errorText = reserve.exceptionOrNull()?.message
+                        return@launchCatching
+                    }
+                    isPhoneVerified = true
+                    statusMessage = "Mobile number verified successfully! ✓"
+                    currentStep = 3
+                    return@launchCatching
+                }
+
+                phoneVerificationId = result.verificationId ?: ""
+                if (phoneVerificationId.isBlank()) {
+                    errorText = "Could not start OTP verification. Please try again."
+                    return@launchCatching
+                }
+                statusMessage = "OTP sent via SMS to +91 ${digits.takeLast(10)}."
+                currentStep = 2
+            } catch (e: Exception) {
+                Log.e("AuthScreen", "OTP dispatch crashed", e)
+                errorText = e.localizedMessage ?: e.message ?: "Could not send OTP. Please try again."
+            } finally {
+                isSendingOtp = false
+            }
         }
     }
 
     LaunchedEffect(Unit) {
-        coroutineScope.launch {
+        try {
             viewModel.syncVerificationStatusFromFirebase()
+        } catch (e: Exception) {
+            Log.w("AuthScreen", "Verification sync skipped: ${e.message}")
         }
     }
 
@@ -236,7 +262,13 @@ private fun AuthScreenContent(
                 statusMessage = "Verify your email to activate FinMoney."
             }
             else -> {
-                coroutineScope.launch {
+                coroutineScope.launchCatching(
+            tag = "AuthScreen",
+            onError = { e ->
+                Log.e("AuthScreen", "Auth flow error", e)
+                errorText = e.localizedMessage ?: e.message ?: "Something went wrong. Please try again."
+            }
+        ) {
                     viewModel.syncVerificationStatusFromFirebase()
                     statusMessage = "Signed in as $name ✓"
                     onContinue()
@@ -246,7 +278,6 @@ private fun AuthScreenContent(
     }
 
     var activeCarouselIndex by remember { mutableStateOf(0) }
-    var termsAccepted by remember { mutableStateOf(true) }
     var resendTimerSeconds by remember { mutableStateOf(30) }
 
     val detectedSims = remember { mutableStateListOf<DetectedSim>() }
@@ -280,7 +311,13 @@ private fun AuthScreenContent(
 
     fun scanDeviceSims() {
         isSimScanning = true
-        coroutineScope.launch {
+        coroutineScope.launchCatching(
+            tag = "AuthScreen",
+            onError = { e ->
+                Log.e("AuthScreen", "Auth flow error", e)
+                errorText = e.localizedMessage ?: e.message ?: "Something went wrong. Please try again."
+            }
+        ) {
             try {
                 val sims = SimDetectionHelper.getDetectedSims(context)
                 detectedSims.clear()
@@ -360,13 +397,20 @@ private fun AuthScreenContent(
             GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
         } else null
 
-        coroutineScope.launch {
+        coroutineScope.launchCatching(
+            tag = "AuthScreen",
+            onError = { e ->
+                Log.e("AuthScreen", "Auth flow error", e)
+                errorText = e.localizedMessage ?: e.message ?: "Something went wrong. Please try again."
+            }
+        ) {
             try {
                 if (signInOption == null) {
                     val fbUser = Firebase.auth.currentUser
-                    if (fbUser != null && !fbUser.email.isNullOrBlank()) {
+                    val fbEmail = fbUser?.email?.takeIf { it.isNotBlank() }
+                    if (fbUser != null && fbEmail != null) {
                         val gName = fbUser.displayName ?: nameInput.ifBlank { "FinMoney User" }
-                        val gEmail = fbUser.email!!
+                        val gEmail = fbEmail
                         val gPhoto = fbUser.photoUrl?.toString()
                         nameInput = gName
                         emailInput = gEmail
@@ -391,11 +435,16 @@ private fun AuthScreenContent(
                     } else {
                         errorText = "Google Sign-In is unavailable. Please sign in using Mobile Number OTP."
                     }
-                    return@launch
+                    return@launchCatching
                 }
 
+                val hostActivity = context as? ComponentActivity
+                if (hostActivity == null) {
+                    errorText = "Google Sign-In is unavailable on this screen."
+                    return@launchCatching
+                }
                 val request = GetCredentialRequest.Builder().addCredentialOption(signInOption).build()
-                val result = credentialManager.getCredential(context as Activity, request)
+                val result = credentialManager.getCredential(hostActivity, request)
                 val credential = result.credential
                 if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                     val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data)
@@ -403,7 +452,7 @@ private fun AuthScreenContent(
                     val linkResult = viewModel.linkGoogleIdToken(idToken)
                     if (linkResult.isFailure) {
                         errorText = linkResult.exceptionOrNull()?.localizedMessage ?: "Google sign-in failed."
-                        return@launch
+                        return@launchCatching
                     }
 
                     val gUser = Firebase.auth.currentUser
@@ -427,7 +476,7 @@ private fun AuthScreenContent(
                     )
                     if (googleBindCheck.isFailure) {
                         errorText = googleBindCheck.exceptionOrNull()?.message
-                        return@launch
+                        return@launchCatching
                     }
 
                     val regResult = viewModel.registerOrAuthenticateUser(
@@ -453,9 +502,10 @@ private fun AuthScreenContent(
             } catch (e: Exception) {
                 Log.e("AuthScreen", "Google Sign-In exception: ${e.message}", e)
                 val fbUser = Firebase.auth.currentUser
-                if (fbUser != null && !fbUser.email.isNullOrBlank()) {
+                val fbEmail = fbUser?.email?.takeIf { it.isNotBlank() }
+                if (fbUser != null && fbEmail != null) {
                     val gName = fbUser.displayName ?: "FinMoney User"
-                    val gEmail = fbUser.email!!
+                    val gEmail = fbEmail
                     val cleanPhone = phoneInput.filter { it.isDigit() }
                     val phoneDigits = FinMoneyAuthService.phoneDigitsFromFirebase(fbUser).ifBlank { cleanPhone.takeLast(10) }
                     val regResult = viewModel.registerOrAuthenticateUser(
@@ -467,7 +517,7 @@ private fun AuthScreenContent(
                     )
                     if (regResult.isSuccess) {
                         routeAfterIdentityProviders(gName, gEmail, phoneDigits)
-                        return@launch
+                        return@launchCatching
                     }
                 }
                 errorText = "Google Sign-In failed: ${e.localizedMessage ?: "Unknown error"}. Please sign in with Mobile Number."
@@ -486,7 +536,13 @@ private fun AuthScreenContent(
         phoneInput = reviewerPhone
         isPhoneVerified = true
         isGoogleSignedIn = true
-        coroutineScope.launch {
+        coroutineScope.launchCatching(
+            tag = "AuthScreen",
+            onError = { e ->
+                Log.e("AuthScreen", "Auth flow error", e)
+                errorText = e.localizedMessage ?: e.message ?: "Something went wrong. Please try again."
+            }
+        ) {
             val result = viewModel.registerOrAuthenticateUser(
                 name = reviewerName,
                 email = reviewerEmail,
@@ -668,8 +724,9 @@ private fun AuthScreenContent(
                             triggerOtpDispatch(sim.cleanDigits)
                         },
                         onSendOtp = {
-                            triggerOtpDispatch(phoneInput)
+                            if (!isSendingOtp) triggerOtpDispatch(phoneInput)
                         },
+                        isSendingOtp = isSendingOtp,
                         onGoogleSignIn = { performGoogleSignIn() },
                         isGoogleLoading = isGoogleLoading,
                         errorText = errorText,
@@ -689,7 +746,13 @@ private fun AuthScreenContent(
                             resendTimerSeconds = 30
                         },
                         onVerifyOtp = {
-                            coroutineScope.launch {
+                            coroutineScope.launchCatching(
+            tag = "AuthScreen",
+            onError = { e ->
+                Log.e("AuthScreen", "Auth flow error", e)
+                errorText = e.localizedMessage ?: e.message ?: "Something went wrong. Please try again."
+            }
+        ) {
                                 val cleanPhone = phoneInput.filter { it.isDigit() }.takeLast(10)
                                 val confirm = viewModel.confirmLoginPhoneOtp(phoneVerificationId, otpInput, cleanPhone)
                                 if (confirm.isSuccess) {
@@ -697,14 +760,14 @@ private fun AuthScreenContent(
                                     statusMessage = "Mobile number verified successfully! ✓"
                                     errorText = null
                                     currentStep = 3
-                                    return@launch
+                                    return@launchCatching
                                 }
                                 if (BuildConfig.DEBUG && cleanPhone == "9876543210" && otpInput == "123456") {
                                     isPhoneVerified = true
                                     nameInput = "Play Store Reviewer"
                                     emailInput = "demo.reviewer@finmoney.app"
                                     currentStep = 3
-                                    return@launch
+                                    return@launchCatching
                                 }
                                 errorText = confirm.exceptionOrNull()?.localizedMessage
                                     ?: "Invalid OTP. Enter the 6-digit code from SMS."
@@ -742,7 +805,13 @@ private fun AuthScreenContent(
                                 currentStep = 1
                                 return@FinAuthProfileSetupStep
                             }
-                            coroutineScope.launch {
+                            coroutineScope.launchCatching(
+            tag = "AuthScreen",
+            onError = { e ->
+                Log.e("AuthScreen", "Auth flow error", e)
+                errorText = e.localizedMessage ?: e.message ?: "Something went wrong. Please try again."
+            }
+        ) {
                                 val collision = viewModel.validateIdentifierOwnership(
                                     cleanPhone,
                                     cleanEmail,
@@ -750,12 +819,12 @@ private fun AuthScreenContent(
                                 )
                                 if (collision.isFailure) {
                                     errorText = collision.exceptionOrNull()?.message
-                                    return@launch
+                                    return@launchCatching
                                 }
                                 val bind = viewModel.bindEmailAndSendVerification(cleanEmail)
                                 if (bind.isFailure) {
                                     errorText = bind.exceptionOrNull()?.localizedMessage ?: "Could not send verification email."
-                                    return@launch
+                                    return@launchCatching
                                 }
                                 val emailVerifiedNow = viewModel.refreshEmailVerificationStatus().getOrDefault(false)
                                 val result = viewModel.registerOrAuthenticateUser(
@@ -768,7 +837,7 @@ private fun AuthScreenContent(
                                 )
                                 if (result.isFailure) {
                                     errorText = result.exceptionOrNull()?.message ?: "Registration failed."
-                                    return@launch
+                                    return@launchCatching
                                 }
                                 errorText = null
                                 if (emailVerifiedNow) {
@@ -789,7 +858,13 @@ private fun AuthScreenContent(
                         statusMessage = statusMessage,
                         errorText = errorText,
                         onResendEmail = {
-                            coroutineScope.launch {
+                            coroutineScope.launchCatching(
+            tag = "AuthScreen",
+            onError = { e ->
+                Log.e("AuthScreen", "Auth flow error", e)
+                errorText = e.localizedMessage ?: e.message ?: "Something went wrong. Please try again."
+            }
+        ) {
                                 val resend = viewModel.bindEmailAndSendVerification(emailInput.trim())
                                 statusMessage = if (resend.isSuccess) {
                                     "Verification email resent."
@@ -800,11 +875,17 @@ private fun AuthScreenContent(
                             }
                         },
                         onRefreshVerified = {
-                            coroutineScope.launch {
+                            coroutineScope.launchCatching(
+            tag = "AuthScreen",
+            onError = { e ->
+                Log.e("AuthScreen", "Auth flow error", e)
+                errorText = e.localizedMessage ?: e.message ?: "Something went wrong. Please try again."
+            }
+        ) {
                                 val verified = viewModel.refreshEmailVerificationStatus().getOrDefault(false)
                                 if (!verified) {
                                     errorText = "Email not verified yet. Open the link in your inbox, then tap again."
-                                    return@launch
+                                    return@launchCatching
                                 }
                                 val cleanPhone = phoneInput.filter { it.isDigit() }.takeLast(10)
                                 viewModel.registerOrAuthenticateUser(
@@ -1168,6 +1249,7 @@ private fun FinAuthMobileInputStep(
     onScanSims: () -> Unit,
     onSelectSim: (DetectedSim) -> Unit,
     onSendOtp: () -> Unit,
+    isSendingOtp: Boolean,
     onGoogleSignIn: () -> Unit,
     isGoogleLoading: Boolean,
     errorText: String?,
@@ -1315,16 +1397,24 @@ private fun FinAuthMobileInputStep(
             )
         }
 
-        // Get OTP Button
         Button(
             onClick = onSendOtp,
+            enabled = termsAccepted && !isSendingOtp,
             shape = RoundedCornerShape(28.dp),
             colors = ButtonDefaults.buttonColors(containerColor = IndBlue, contentColor = Color.White),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(54.dp)
         ) {
-            Text("Get OTP", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            if (isSendingOtp) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    color = Color.White,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Text("Get OTP", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
         }
     }
 }

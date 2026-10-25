@@ -30,19 +30,29 @@ class UserIdentityRegistry(
 
     suspend fun lookupPhone(phone10: String): PhoneRegistryEntry? {
         if (!UserIdentityNormalizer.isValidPhone10(phone10)) return null
-        val snap = phones.document(phone10).get().await()
-        if (!snap.exists()) return null
-        val uid = snap.getString("uid") ?: return null
-        return PhoneRegistryEntry(uid = uid, email = snap.getString("email") ?: "")
+        return try {
+            val snap = phones.document(phone10).get().await()
+            if (!snap.exists()) return null
+            val uid = snap.getString("uid") ?: return null
+            PhoneRegistryEntry(uid = uid, email = snap.getString("email") ?: "")
+        } catch (e: Exception) {
+            Log.w(TAG, "lookupPhone failed for $phone10: ${e.message}")
+            null
+        }
     }
 
     suspend fun lookupEmail(email: String): EmailRegistryEntry? {
         val clean = UserIdentityNormalizer.email(email)
         if (!UserIdentityNormalizer.isValidEmail(clean)) return null
-        val snap = emails.document(clean).get().await()
-        if (!snap.exists()) return null
-        val uid = snap.getString("uid") ?: return null
-        return EmailRegistryEntry(uid = uid, phone = snap.getString("phone") ?: "")
+        return try {
+            val snap = emails.document(clean).get().await()
+            if (!snap.exists()) return null
+            val uid = snap.getString("uid") ?: return null
+            EmailRegistryEntry(uid = uid, phone = snap.getString("phone") ?: "")
+        } catch (e: Exception) {
+            Log.w(TAG, "lookupEmail failed for $clean: ${e.message}")
+            null
+        }
     }
 
     suspend fun reservePhoneForUid(uid: String, phone10: String): Result<Unit> = runCatching {

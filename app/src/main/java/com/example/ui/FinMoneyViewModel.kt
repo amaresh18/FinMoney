@@ -31,10 +31,14 @@ import com.example.identity.UserIdentityBindingEngine.BindPhase
 import android.app.Activity
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import com.example.domain.usecase.LoanLedgerMath
 import com.example.domain.usecase.LoanPartyAuth
 import com.example.domain.usecase.ValidateLoanLifecycleUseCase.ValidationResult
@@ -43,6 +47,25 @@ import kotlinx.coroutines.withContext
 import java.text.DateFormatSymbols
 
 class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
+
+    private inline fun launchSafe(
+        context: CoroutineContext = EmptyCoroutineContext,
+        crossinline block: suspend CoroutineScope.() -> Unit
+    ) {
+        viewModelScope.launch(context) launchSafe@{
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.e(TAG, "ViewModel task failed: ${e.message}", e)
+                _userNotice.tryEmit(
+                    e.message?.takeIf { it.isNotBlank() } ?: "Something went wrong. Please try again."
+                )
+            }
+        }
+    }
+
     val repository: FinMoneyRepository = FinMoneyRepository(AppDatabase.getDatabase(app).finMoneyDao())
     private val dao = AppDatabase.getDatabase(app).finMoneyDao()
     private val identityBinding = UserIdentityBindingEngine(app.applicationContext, dao)
@@ -302,7 +325,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         adjustmentNote: String = "",
         isReconciled: Boolean = true
     ) {
-        viewModelScope.launch {
+        launchSafe {
             val activeUid = getActiveUserId()
             val json = FinMoneyRepository.encodeBankBalances(bankBalances)
             val adj = manualAdjustment.toString().toDoubleOrNull() ?: 0.0
@@ -323,19 +346,19 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     fun simulateBankAlert(index: Int = 0, context: Context? = null) {}
 
     fun deleteBankTransaction(id: Long) {
-        viewModelScope.launch {
+        launchSafe {
             dao.deleteBankTransaction(id)
         }
     }
 
     fun deleteBankTransaction(tx: BankTransactionRecord) {
-        viewModelScope.launch {
+        launchSafe {
             dao.deleteBankTransaction(tx.id)
         }
     }
 
     fun updateBankTransaction(tx: BankTransactionRecord) {
-        viewModelScope.launch {
+        launchSafe {
             val activeUid = getActiveUserId()
             val updatedTx = if (tx.userId.isBlank()) tx.copy(userId = activeUid) else tx
             dao.insertBankTransaction(updatedTx)
@@ -343,7 +366,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun clearAllBankTransactions() {
-        viewModelScope.launch {
+        launchSafe {
             dao.clearAllBankTransactions(getActiveUserId())
         }
     }
@@ -363,7 +386,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun approveAllPendingTransactions() {
-        viewModelScope.launch {
+        launchSafe {
             val pending = dao.getPendingBankTransactionsDirect(getActiveUserId())
             val audit = EntryIntegrityEngine.auditPendingTransactions(pending)
             val toApprove = pending.filter { tx -> audit[tx.id]?.isDuplicate != true }
@@ -384,7 +407,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun approvePendingTransaction(id: Long, category: String = "GENERAL") {
-        viewModelScope.launch {
+        launchSafe {
             val msg = BankSyncManager.approveTransactionAndCreateExpense(
                 context = app,
                 txId = id,
@@ -399,7 +422,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun rejectPendingTransaction(id: Long) {
-        viewModelScope.launch {
+        launchSafe {
             BankSyncManager.rejectTransaction(
                 context = app,
                 txId = id
@@ -458,7 +481,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         _kuberaMessages.value = _kuberaMessages.value + userMsg
         _isKuberaThinking.value = true
 
-        viewModelScope.launch(Dispatchers.IO) {
+        launchSafe(Dispatchers.IO) {
             val key = _groqApiKey.value
             val summary = monthlySummary.value
             val responseText = generateOfflineKuberaAdvice(text, summary)
@@ -527,7 +550,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         isPaidViaCreditCard: Boolean = false,
         isRecurring: Boolean = false
     ) {
-        viewModelScope.launch {
+        launchSafe {
             val activeUid = getActiveUserId()
             persistExpense(
                 DebitItem(
@@ -558,7 +581,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
      * Automatically increments currentMonthTenure for Chit and Loan EMIs.
      */
     fun prefillRecurringDebitsForMonth(targetMonth: Int = _currentMonth.value, targetYear: Int = _currentYear.value) {
-        viewModelScope.launch {
+        launchSafe {
             try {
                 val activeUid = getActiveUserId()
                 val recurringDebits = dao.getRecurringDebitsDirect(activeUid)
@@ -605,7 +628,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleDebitRecurring(item: DebitItem) {
-        viewModelScope.launch {
+        launchSafe {
             val updated = item.copy(isRecurring = !item.isRecurring)
             repository.updateDebit(updated)
             queueCloudAfterLocal { user -> LocalFirstCloudSync.queueExpense(app, user, updated) }
@@ -613,14 +636,14 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun insertDebit(item: DebitItem) {
-        viewModelScope.launch {
+        launchSafe {
             persistExpense(item)
             notifyUser("Expense saved on this device.")
         }
     }
 
     fun insertDebits(items: List<DebitItem>) {
-        viewModelScope.launch {
+        launchSafe {
             items.forEach { persistExpense(it) }
             notifyUser(
                 if (items.size == 1) "Expense saved on this device."
@@ -630,20 +653,20 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteDebit(item: DebitItem) {
-        viewModelScope.launch {
+        launchSafe {
             repository.deleteDebit(item)
         }
     }
 
     fun updateDebit(item: DebitItem) {
-        viewModelScope.launch {
+        launchSafe {
             repository.updateDebit(item)
             queueCloudAfterLocal { user -> LocalFirstCloudSync.queueExpense(app, user, item) }
         }
     }
 
     fun toggleDebitCreditCardStatus(item: DebitItem) {
-        viewModelScope.launch {
+        launchSafe {
             val newCcStatus = !item.isActualCreditCardTransaction()
             val updated = item.copy(
                 isPaidViaCreditCard = newCcStatus,
@@ -655,7 +678,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleDebitPaid(item: DebitItem) {
-        viewModelScope.launch {
+        launchSafe {
             val paid = !item.isPaid
             dao.setDebitPaidStatus(item.id, paid)
             val updated = dao.getDebitById(item.id) ?: item.copy(isPaid = paid)
@@ -744,7 +767,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         val m = month ?: _currentMonth.value
         val y = year ?: _currentYear.value
 
-        viewModelScope.launch {
+        launchSafe {
             val activeUid = getActiveUserId()
             val existing = dao.getSalaryRecordDirect(m, y, activeUid)
             val currentSources = getOrCreateIncomeSources(existing)
@@ -784,7 +807,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         val m = month ?: _currentMonth.value
         val y = year ?: _currentYear.value
 
-        viewModelScope.launch {
+        launchSafe {
             val activeUid = getActiveUserId()
             val existing = dao.getSalaryRecordDirect(m, y, activeUid)
             val currentSources = getOrCreateIncomeSources(existing)
@@ -811,7 +834,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         val m = month ?: _currentMonth.value
         val y = year ?: _currentYear.value
 
-        viewModelScope.launch {
+        launchSafe {
             val activeUid = getActiveUserId()
             val existing = dao.getSalaryRecordDirect(m, y, activeUid)
             val currentSources = getOrCreateIncomeSources(existing)
@@ -834,7 +857,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         val m = month ?: _currentMonth.value
         val y = year ?: _currentYear.value
 
-        viewModelScope.launch {
+        launchSafe {
             val activeUid = getActiveUserId()
             val existing = dao.getSalaryRecordDirect(m, y, activeUid)
             val currentSources = getOrCreateIncomeSources(existing)
@@ -853,7 +876,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         val m = month ?: _currentMonth.value
         val y = year ?: _currentYear.value
 
-        viewModelScope.launch {
+        launchSafe {
             val activeUid = getActiveUserId()
             val existing = dao.getSalaryRecordDirect(m, y, activeUid)
             val currentSources = getOrCreateIncomeSources(existing)
@@ -921,7 +944,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         } catch (_: Exception) {
             if (type.equals("BORROWED", true) || type.equals("TAKEN", true)) LoanType.BORROWED else LoanType.LENT
         }
-        viewModelScope.launch {
+        launchSafe {
             val activeUid = getActiveUserId()
             val creatorPhone = currentUserPhone10()
             val draft = LoanTransaction(
@@ -955,14 +978,14 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun notifyLoanCounterparty(loanId: Long) {
-        viewModelScope.launch {
-            val loan = dao.getLoanById(loanId) ?: return@launch
-            if (loan.status == LoanApprovalStatus.REJECTED || loan.status == LoanApprovalStatus.SETTLED) return@launch
+        launchSafe {
+            val loan = dao.getLoanById(loanId) ?: return@launchSafe
+            if (loan.status == LoanApprovalStatus.REJECTED || loan.status == LoanApprovalStatus.SETTLED) return@launchSafe
             if (loan.counterpartyApproved && !loan.amendmentPending &&
                 loan.status != LoanApprovalStatus.PENDING_APPROVAL &&
                 loan.status != LoanApprovalStatus.PENDING_SETTLEMENT
             ) {
-                return@launch
+                return@launchSafe
             }
             val action = when {
                 loan.amendmentPending -> LoanInviteService.Action.APPROVE_CHANGE
@@ -974,8 +997,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun approveLoan(loanId: Long) {
-        viewModelScope.launch {
-            val loan = dao.getLoanById(loanId) ?: return@launch
+        launchSafe {
+            val loan = dao.getLoanById(loanId) ?: return@launchSafe
             val userPhone = currentUserPhone10()
             val check = validateLoanLifecycleUseCase.validateApprovalPermission(
                 creatorPhone = loan.creatorPhone,
@@ -987,7 +1010,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             )
             if (check is ValidationResult.Denied) {
                 emitLoanDenied(check)
-                return@launch
+                return@launchSafe
             }
             val agreed = LoanAgreementService.buildAgreement(loan)
             persistLoan(
@@ -1004,8 +1027,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun rejectLoan(loanId: Long) {
-        viewModelScope.launch {
-            val loan = dao.getLoanById(loanId) ?: return@launch
+        launchSafe {
+            val loan = dao.getLoanById(loanId) ?: return@launchSafe
             val check = validateLoanLifecycleUseCase.validateRejectPermission(
                 creatorPhone = loan.creatorPhone,
                 counterpartyPhone = loan.personContact.ifBlank { loan.counterpartyContact },
@@ -1016,15 +1039,15 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             )
             if (check is ValidationResult.Denied) {
                 emitLoanDenied(check)
-                return@launch
+                return@launchSafe
             }
             dao.updateLoanApproval(loanId, LoanApprovalStatus.REJECTED.name, false)
         }
     }
 
     fun requestLoanSettlement(loanId: Long) {
-        viewModelScope.launch {
-            val loan = dao.getLoanById(loanId) ?: return@launch
+        launchSafe {
+            val loan = dao.getLoanById(loanId) ?: return@launchSafe
             val check = validateLoanLifecycleUseCase.validateSettlementRequest(
                 creatorPhone = loan.creatorPhone,
                 userPhone = currentUserPhone10(),
@@ -1035,12 +1058,12 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             )
             if (check is ValidationResult.Denied) {
                 emitLoanDenied(check)
-                return@launch
+                return@launchSafe
             }
             val entries = dao.listLedgerEntries(loanId)
             if (LoanLedgerMath.hasOpenChild(entries)) {
                 _loanActionMessage.emit("Approve or decline open payments before closing this record.")
-                return@launch
+                return@launchSafe
             }
             val left = LoanLedgerMath.outstanding(loan.totalAmount, entries).coerceAtLeast(0.0)
             persistLoan(
@@ -1064,8 +1087,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun confirmLoanSettlement(loanId: Long) {
-        viewModelScope.launch {
-            val loan = dao.getLoanById(loanId) ?: return@launch
+        launchSafe {
+            val loan = dao.getLoanById(loanId) ?: return@launchSafe
             val check = validateLoanLifecycleUseCase.validateSettlementConfirm(
                 creatorPhone = loan.creatorPhone,
                 counterpartyPhone = loan.personContact.ifBlank { loan.counterpartyContact },
@@ -1076,12 +1099,12 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             )
             if (check is ValidationResult.Denied) {
                 emitLoanDenied(check)
-                return@launch
+                return@launchSafe
             }
             val entries = dao.listLedgerEntries(loanId)
             if (LoanLedgerMath.hasOpenChild(entries)) {
                 _loanActionMessage.emit("Approve or decline open payments before closing this record.")
-                return@launch
+                return@launchSafe
             }
             val left = LoanLedgerMath.outstanding(loan.totalAmount, entries)
             if (left > 0.009) {
@@ -1101,7 +1124,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                     )
                 )
             }
-            val closed = dao.getLoanById(loanId) ?: return@launch
+            val closed = dao.getLoanById(loanId) ?: return@launchSafe
             persistLoan(
                 closed.copy(
                     status = LoanApprovalStatus.SETTLED,
@@ -1115,11 +1138,11 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun downloadLoanAgreement(loanId: Long) {
-        viewModelScope.launch {
-            val loan = dao.getLoanById(loanId) ?: return@launch
+        launchSafe {
+            val loan = dao.getLoanById(loanId) ?: return@launchSafe
             if (loan.agreementText.isBlank() && loan.status != LoanApprovalStatus.MUTUAL_APPROVED) {
                 _loanActionMessage.emit("Agreement is available only after counterparty approval.")
-                return@launch
+                return@launchSafe
             }
             LoanAgreementService.shareAgreement(getApplication(), loan)
         }
@@ -1132,15 +1155,15 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         newName: String,
         newPhone: String
     ) {
-        viewModelScope.launch {
-            val loan = dao.getLoanById(loanId) ?: return@launch
+        launchSafe {
+            val loan = dao.getLoanById(loanId) ?: return@launchSafe
             if (!LoanPartyAuth.isCreator(loan.creatorPhone, currentUserPhone10(), loan.userId, getActiveUserId())) {
                 _loanActionMessage.emit("Only the creator can edit this record.")
-                return@launch
+                return@launchSafe
             }
             if (loan.status == LoanApprovalStatus.SETTLED || loan.status == LoanApprovalStatus.PENDING_SETTLEMENT) {
                 _loanActionMessage.emit("Finish settlement before changing this record.")
-                return@launch
+                return@launchSafe
             }
             val mutuallyAgreed = loan.status == LoanApprovalStatus.MUTUAL_APPROVED ||
                 loan.status == LoanApprovalStatus.APPROVED
@@ -1155,7 +1178,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 )
                 persistLoan(proposed)
                 inviteCounterparty(proposed, LoanInviteService.Action.APPROVE_CHANGE)
-                return@launch
+                return@launchSafe
             }
             val updated = loan.copy(
                 personName = newName.ifBlank { loan.personName },
@@ -1182,8 +1205,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun approveLoanAmendment(loanId: Long) {
-        viewModelScope.launch {
-            val loan = dao.getLoanById(loanId) ?: return@launch
+        launchSafe {
+            val loan = dao.getLoanById(loanId) ?: return@launchSafe
             val check = validateLoanLifecycleUseCase.validateAmendmentApproval(
                 creatorPhone = loan.creatorPhone,
                 counterpartyPhone = loan.personContact.ifBlank { loan.counterpartyContact },
@@ -1194,13 +1217,13 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             )
             if (check is ValidationResult.Denied) {
                 emitLoanDenied(check)
-                return@launch
+                return@launchSafe
             }
             val entries = dao.listLedgerEntries(loanId)
             val projected = LoanLedgerMath.outstanding(loan.proposedAmount, entries)
             if (projected < -0.009) {
                 _loanActionMessage.emit("Approved repayments are already higher than this new amount.")
-                return@launch
+                return@launchSafe
             }
             val applied = loan.copy(
                 totalAmount = loan.proposedAmount,
@@ -1227,11 +1250,11 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun rejectLoanAmendment(loanId: Long) {
-        viewModelScope.launch {
-            val loan = dao.getLoanById(loanId) ?: return@launch
+        launchSafe {
+            val loan = dao.getLoanById(loanId) ?: return@launchSafe
             if (!loan.amendmentPending) {
                 _loanActionMessage.emit("There is no change waiting for approval.")
-                return@launch
+                return@launchSafe
             }
             val isCreator = LoanPartyAuth.isCreator(loan.creatorPhone, currentUserPhone10(), loan.userId, getActiveUserId())
             val isCounterparty = LoanPartyAuth.isCounterparty(
@@ -1240,7 +1263,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             )
             if (!isCreator && !isCounterparty) {
                 _loanActionMessage.emit("Only the creator or counterparty can cancel this change.")
-                return@launch
+                return@launchSafe
             }
             persistLoan(
                 loan.copy(
@@ -1260,8 +1283,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun requestDeleteApproval(loanId: Long) {
-        viewModelScope.launch {
-            val loan = dao.getLoanById(loanId) ?: return@launch
+        launchSafe {
+            val loan = dao.getLoanById(loanId) ?: return@launchSafe
             val check = validateLoanLifecycleUseCase.validateDeletePermission(
                 creatorPhone = loan.creatorPhone,
                 userPhone = currentUserPhone10(),
@@ -1277,36 +1300,36 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteLoan(id: Long) {
-        viewModelScope.launch {
+        launchSafe {
             repository.deleteLoanById(id)
         }
     }
 
     fun submitLedgerEntry(loanId: Long, kind: LoanLedgerKind, amount: Double, notes: String, proofPaths: String) {
-        viewModelScope.launch {
-            val loan = dao.getLoanById(loanId) ?: return@launch
+        launchSafe {
+            val loan = dao.getLoanById(loanId) ?: return@launchSafe
             if (amount <= 0.0) {
                 _loanActionMessage.emit("Enter an amount greater than zero.")
-                return@launch
+                return@launchSafe
             }
             val open = loan.status == LoanApprovalStatus.MUTUAL_APPROVED || loan.status == LoanApprovalStatus.APPROVED
             if (!open || loan.amendmentPending) {
                 _loanActionMessage.emit("Payments can be added only while the main agreement is active and has no pending change.")
-                return@launch
+                return@launchSafe
             }
             val phone = currentUserPhone10()
             val isCreator = LoanPartyAuth.isCreator(loan.creatorPhone, phone, loan.userId, getActiveUserId())
             val isCounterparty = LoanPartyAuth.isCounterparty(loan.personContact.ifBlank { loan.counterpartyContact }, phone)
             if (!isCreator && !isCounterparty) {
                 _loanActionMessage.emit("Only the two people on this record can add a payment.")
-                return@launch
+                return@launchSafe
             }
             val entries = dao.listLedgerEntries(loanId)
             if (kind == LoanLedgerKind.CLEARING) {
                 val left = (LoanLedgerMath.outstanding(loan.totalAmount, entries) - LoanLedgerMath.reservedClearing(entries)).coerceAtLeast(0.0)
                 if (amount - left > 0.009) {
                     _loanActionMessage.emit("Remaining is ₹${"%,.0f".format(left)}. A clearing payment cannot be more than that.")
-                    return@launch
+                    return@launchSafe
                 }
             }
             val entryId = dao.insertLedgerEntry(
@@ -1336,23 +1359,23 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun approveLedgerEntry(entryId: Long) {
-        viewModelScope.launch {
-            val entry = dao.getLedgerEntry(entryId) ?: return@launch
-            val loan = dao.getLoanById(entry.loanId) ?: return@launch
+        launchSafe {
+            val entry = dao.getLedgerEntry(entryId) ?: return@launchSafe
+            val loan = dao.getLoanById(entry.loanId) ?: return@launchSafe
             if (!canCounterpartyActOnEntry(loan, entry)) {
                 _loanActionMessage.emit("Only the other person can approve this payment.")
-                return@launch
+                return@launchSafe
             }
             if (!LoanLedgerMath.isPending(entry.status)) {
                 _loanActionMessage.emit("This payment is not waiting for approval.")
-                return@launch
+                return@launchSafe
             }
             val entries = dao.listLedgerEntries(entry.loanId)
             if (entry.kind == LoanLedgerKind.CLEARING) {
                 val after = LoanLedgerMath.outstandingAfter(loan.totalAmount, entries, entry.id, entry.kind, entry.amount)
                 if (!LoanLedgerMath.clearingFits(after)) {
                     _loanActionMessage.emit("This repayment is now more than the remaining balance.")
-                    return@launch
+                    return@launchSafe
                 }
             }
             val agreed = entry.copy(
@@ -1367,19 +1390,19 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun declineLedgerEntry(entryId: Long) {
-        viewModelScope.launch {
-            val entry = dao.getLedgerEntry(entryId) ?: return@launch
-            val loan = dao.getLoanById(entry.loanId) ?: return@launch
+        launchSafe {
+            val entry = dao.getLedgerEntry(entryId) ?: return@launchSafe
+            val loan = dao.getLoanById(entry.loanId) ?: return@launchSafe
             val phone = currentUserPhone10()
             val isProposer = isLedgerProposer(loan, entry, phone)
             val isOther = canCounterpartyActOnEntry(loan, entry)
             if (!isProposer && !isOther) {
                 _loanActionMessage.emit("Only the two people on this record can decline this payment.")
-                return@launch
+                return@launchSafe
             }
             if (!LoanLedgerMath.isPending(entry.status)) {
                 _loanActionMessage.emit("This payment is not waiting for approval.")
-                return@launch
+                return@launchSafe
             }
             dao.updateLedgerEntry(
                 entry.copy(status = LoanApprovalStatus.REJECTED, updatedAt = System.currentTimeMillis())
@@ -1389,27 +1412,27 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun editLedgerEntry(entryId: Long, newAmount: Double, newNotes: String, newProofs: String?) {
-        viewModelScope.launch {
-            val entry = dao.getLedgerEntry(entryId) ?: return@launch
-            val loan = dao.getLoanById(entry.loanId) ?: return@launch
+        launchSafe {
+            val entry = dao.getLedgerEntry(entryId) ?: return@launchSafe
+            val loan = dao.getLoanById(entry.loanId) ?: return@launchSafe
             if (!isLedgerProposer(loan, entry, currentUserPhone10())) {
                 _loanActionMessage.emit("Only the person who added this payment can edit it.")
-                return@launch
+                return@launchSafe
             }
             if (newAmount <= 0.0) {
                 _loanActionMessage.emit("Enter an amount greater than zero.")
-                return@launch
+                return@launchSafe
             }
             if (loan.status == LoanApprovalStatus.SETTLED || loan.status == LoanApprovalStatus.PENDING_SETTLEMENT) {
                 _loanActionMessage.emit("This record is closing, so payments cannot be edited.")
-                return@launch
+                return@launchSafe
             }
             val entries = dao.listLedgerEntries(entry.loanId)
             if (LoanLedgerMath.countsTowardBalance(entry.status)) {
                 val after = LoanLedgerMath.outstandingAfter(loan.totalAmount, entries, entry.id, entry.kind, newAmount)
                 if (entry.kind == LoanLedgerKind.CLEARING && !LoanLedgerMath.clearingFits(after)) {
                     _loanActionMessage.emit("That amount would clear more than the remaining balance.")
-                    return@launch
+                    return@launchSafe
                 }
                 dao.updateLedgerEntry(
                     entry.copy(
@@ -1431,7 +1454,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                     val left = (LoanLedgerMath.outstanding(loan.totalAmount, entries) - LoanLedgerMath.reservedClearing(entries, entry.id)).coerceAtLeast(0.0)
                     if (newAmount - left > 0.009) {
                         _loanActionMessage.emit("That amount would clear more than the remaining balance.")
-                        return@launch
+                        return@launchSafe
                     }
                 }
                 dao.updateLedgerEntry(
@@ -1450,23 +1473,23 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun approveLedgerAmendment(entryId: Long) {
-        viewModelScope.launch {
-            val entry = dao.getLedgerEntry(entryId) ?: return@launch
-            val loan = dao.getLoanById(entry.loanId) ?: return@launch
+        launchSafe {
+            val entry = dao.getLedgerEntry(entryId) ?: return@launchSafe
+            val loan = dao.getLoanById(entry.loanId) ?: return@launchSafe
             if (!entry.amendmentPending) {
                 _loanActionMessage.emit("There is no change waiting on this payment.")
-                return@launch
+                return@launchSafe
             }
             if (!canCounterpartyActOnEntry(loan, entry)) {
                 _loanActionMessage.emit("Only the other person can approve this change.")
-                return@launch
+                return@launchSafe
             }
             val entries = dao.listLedgerEntries(entry.loanId)
             if (entry.kind == LoanLedgerKind.CLEARING) {
                 val after = LoanLedgerMath.outstandingAfter(loan.totalAmount, entries, entry.id, entry.kind, entry.proposedAmount)
                 if (!LoanLedgerMath.clearingFits(after)) {
                     _loanActionMessage.emit("That change would clear more than the remaining balance.")
-                    return@launch
+                    return@launchSafe
                 }
             }
             val applied = entry.copy(
@@ -1486,14 +1509,14 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun declineLedgerAmendment(entryId: Long) {
-        viewModelScope.launch {
-            val entry = dao.getLedgerEntry(entryId) ?: return@launch
-            val loan = dao.getLoanById(entry.loanId) ?: return@launch
-            if (!entry.amendmentPending) return@launch
+        launchSafe {
+            val entry = dao.getLedgerEntry(entryId) ?: return@launchSafe
+            val loan = dao.getLoanById(entry.loanId) ?: return@launchSafe
+            if (!entry.amendmentPending) return@launchSafe
             val phone = currentUserPhone10()
             if (!isLedgerProposer(loan, entry, phone) && !canCounterpartyActOnEntry(loan, entry)) {
                 _loanActionMessage.emit("Only the two people on this record can cancel this change.")
-                return@launch
+                return@launchSafe
             }
             dao.updateLedgerEntry(
                 entry.copy(
@@ -1509,19 +1532,19 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteLedgerEntry(entryId: Long) {
-        viewModelScope.launch {
-            val entry = dao.getLedgerEntry(entryId) ?: return@launch
-            val loan = dao.getLoanById(entry.loanId) ?: return@launch
+        launchSafe {
+            val entry = dao.getLedgerEntry(entryId) ?: return@launchSafe
+            val loan = dao.getLoanById(entry.loanId) ?: return@launchSafe
             if (!isLedgerProposer(loan, entry, currentUserPhone10())) {
                 _loanActionMessage.emit("Only the person who added this payment can delete it.")
-                return@launch
+                return@launchSafe
             }
             val canDelete = LoanLedgerMath.isPending(entry.status) ||
                 entry.status == LoanApprovalStatus.REJECTED ||
                 loan.status == LoanApprovalStatus.SETTLED
             if (!canDelete) {
                 _loanActionMessage.emit("An approved payment stays on the record until both parties settle it.")
-                return@launch
+                return@launchSafe
             }
             dao.deleteLedgerEntry(entryId)
             refreshLoanBalance(loan.id)
@@ -1575,7 +1598,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         monthlyBudget: Double? = null,
         currencySymbol: String? = null
     ) {
-        viewModelScope.launch {
+        launchSafe {
             val cleanPhone = phoneNumber.filter { it.isDigit() }.takeLast(10)
             val cleanEmail = email.trim().lowercase()
             val existing = dao.getUserProfileDirect()
@@ -1591,7 +1614,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 val bindCheck = identityBinding.assertCanBind(cleanPhone, cleanEmail, phase, bindUid)
                 if (bindCheck.isFailure) {
                     Log.w("FinMoneyViewModel", "Profile save blocked: ${bindCheck.exceptionOrNull()?.message}")
-                    return@launch
+                    return@launchSafe
                 }
                 if (phase == BindPhase.COMMIT_PAIR) {
                     val commit = identityBinding.commitVerifiedPair(
@@ -1603,7 +1626,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                     )
                     if (commit.isFailure) {
                         Log.w("FinMoneyViewModel", "Profile registry commit failed: ${commit.exceptionOrNull()?.message}")
-                        return@launch
+                        return@launchSafe
                     }
                 }
             }
@@ -1641,12 +1664,17 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         email: String,
         phase: BindPhase = BindPhase.PRE_PHONE_OTP
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        val uid = try {
-            Firebase.auth.currentUser?.uid
-        } catch (_: Throwable) {
-            null
-        } ?: dao.getUserProfileDirect()?.userId
-        identityBinding.assertCanBind(phone, email, phase, uid)
+        try {
+            val uid = try {
+                Firebase.auth.currentUser?.uid
+            } catch (_: Throwable) {
+                null
+            } ?: dao.getUserProfileDirect()?.userId
+            identityBinding.assertCanBind(phone, email, phase, uid)
+        } catch (e: Exception) {
+            Log.e("FinMoneyViewModel", "validateIdentifierOwnership failed", e)
+            Result.failure(e)
+        }
     }
 
     suspend fun sendLoginPhoneOtp(activity: Activity, phone: String, forceResend: Boolean = false): Result<FinMoneyAuthService.PhoneOtpDispatchResult> {
@@ -1656,7 +1684,11 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     suspend fun confirmLoginPhoneOtp(verificationId: String, otpCode: String, phone: String): Result<Unit> =
         withContext(Dispatchers.IO) {
             val verified = FinMoneyAuthService.verifyPhoneOtpCode(verificationId, otpCode)
-            if (verified.isFailure) return@withContext Result.failure(verified.exceptionOrNull()!!)
+            if (verified.isFailure) {
+                return@withContext Result.failure(
+                    verified.exceptionOrNull() ?: IllegalStateException("Phone verification failed.")
+                )
+            }
             val cleanPhone = phone.filter { it.isDigit() }.takeLast(10)
             identityBinding.reservePhoneAfterOtp(cleanPhone).getOrElse { return@withContext Result.failure(it) }
             syncVerificationStatusFromFirebase().getOrElse { return@withContext Result.failure(it) }
@@ -1760,7 +1792,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun syncVerificationStatusFromFirebaseAsync() {
-        viewModelScope.launch(Dispatchers.IO) {
+        launchSafe(Dispatchers.IO) {
             syncVerificationStatusFromFirebase()
             flushPendingCloudSync()
         }
@@ -1771,7 +1803,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun flushPendingCloudSyncAsync() {
-        viewModelScope.launch(Dispatchers.IO) {
+        launchSafe(Dispatchers.IO) {
             flushPendingCloudSync()
         }
     }
@@ -1790,7 +1822,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     private fun queueCloudAfterLocal(block: suspend (com.example.cloud.CloudUserContext) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        launchSafe(Dispatchers.IO) {
             try {
                 val user = CloudUserContextResolver.resolve(dao)
                 block(user)
@@ -1816,13 +1848,13 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun markLoanNotificationRead(notificationId: Long) {
-        viewModelScope.launch {
+        launchSafe {
             dao.markNotificationRead(notificationId)
         }
     }
 
     fun pullLoanInboxAsync() {
-        viewModelScope.launch(Dispatchers.IO) {
+        launchSafe(Dispatchers.IO) {
             try {
                 LoanInviteService.pullInbox(app)
             } catch (e: Exception) {
@@ -1913,7 +1945,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun signOut() {
-        viewModelScope.launch(Dispatchers.IO) {
+        launchSafe(Dispatchers.IO) {
             try {
                 flushPendingCloudSync()
                 dao.deactivateAllUserProfiles()
@@ -1929,12 +1961,12 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun markUserLoggedIn(name: String? = null, email: String? = null, phone: String? = null) {
-        viewModelScope.launch {
+        launchSafe {
             val cleanPhone = phone?.filter { it.isDigit() }?.takeLast(10) ?: ""
             val cleanEmail = email?.trim()?.lowercase() ?: ""
             val cleanName = name?.takeIf { it != "Signed Out" && it.isNotBlank() } ?: "FinMoney Member"
 
-            if (cleanPhone.isBlank() && cleanEmail.isBlank()) return@launch
+            if (cleanPhone.isBlank() && cleanEmail.isBlank()) return@launchSafe
 
             val result = registerOrAuthenticateUser(
                 name = cleanName,
@@ -1948,14 +1980,14 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun restoreSampleLedger() {
-        viewModelScope.launch(Dispatchers.IO) {
+        launchSafe(Dispatchers.IO) {
             DatabaseHealthGuard.verifyAndRepairDatabase(dao, forceReset = true)
         }
     }
 
     private val authStateListener = com.google.firebase.auth.FirebaseAuth.AuthStateListener { firebaseAuth ->
         val user = firebaseAuth.currentUser
-        viewModelScope.launch(Dispatchers.IO) {
+        launchSafe(Dispatchers.IO) {
             if (user != null) {
                 val uid = user.uid
                 val fbDisplayName = user.displayName?.takeIf { it.isNotBlank() }
@@ -2008,7 +2040,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     init {
-        viewModelScope.launch(Dispatchers.IO) {
+        launchSafe(Dispatchers.IO) {
             DatabaseHealthGuard.verifyAndRepairDatabase(dao, forceReset = false)
         }
         try {
@@ -2028,6 +2060,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        private const val TAG = "FinMoneyViewModel"
+
         fun getMonthName(month: Int): String {
             val months = DateFormatSymbols().months
             return if (month in 1..12) months[month - 1] else "Month $month"

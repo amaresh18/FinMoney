@@ -1,6 +1,7 @@
 package com.example.identity
 
 import android.content.Context
+import android.util.Log
 import com.example.data.local.FinMoneyDao
 import com.example.util.NetworkReachabilityHelper
 import com.google.firebase.Firebase
@@ -30,24 +31,29 @@ class UserIdentityBindingEngine(
         phase: BindPhase,
         uid: String? = currentUid()
     ): Result<Unit> {
-        val cleanPhone = UserIdentityNormalizer.phone10(phone)
-        val cleanEmail = UserIdentityNormalizer.email(email)
+        return try {
+            val cleanPhone = UserIdentityNormalizer.phone10(phone)
+            val cleanEmail = UserIdentityNormalizer.email(email)
 
-        assertLocalBinding(cleanPhone, cleanEmail, uid, phase).getOrElse { return Result.failure(it) }
+            assertLocalBinding(cleanPhone, cleanEmail, uid, phase).getOrElse { return Result.failure(it) }
 
-        if (!NetworkReachabilityHelper.isNetworkAvailable(appContext)) {
-            if (phase == BindPhase.COMMIT_PAIR) {
-                return Result.failure(
-                    UserIdentityConflictException(
-                        UserIdentityConflictException.Code.OFFLINE_REGISTRY_REQUIRED,
-                        "Internet is required to secure your FinMoney account. Please connect and try again."
+            if (!NetworkReachabilityHelper.isNetworkAvailable(appContext)) {
+                if (phase == BindPhase.COMMIT_PAIR) {
+                    return Result.failure(
+                        UserIdentityConflictException(
+                            UserIdentityConflictException.Code.OFFLINE_REGISTRY_REQUIRED,
+                            "Internet is required to secure your FinMoney account. Please connect and try again."
+                        )
                     )
-                )
+                }
+                return Result.success(Unit)
             }
-            return Result.success(Unit)
-        }
 
-        return assertRemoteBinding(cleanPhone, cleanEmail, uid, phase)
+            assertRemoteBinding(cleanPhone, cleanEmail, uid, phase)
+        } catch (e: Exception) {
+            Log.e(TAG, "assertCanBind failed: ${e.message}", e)
+            Result.failure(e)
+        }
     }
 
     suspend fun reservePhoneAfterOtp(phone: String): Result<Unit> {
@@ -83,6 +89,20 @@ class UserIdentityBindingEngine(
     }
 
     private suspend fun assertLocalBinding(
+        cleanPhone: String,
+        cleanEmail: String,
+        uid: String?,
+        phase: BindPhase
+    ): Result<Unit> {
+        return try {
+            assertLocalBindingInner(cleanPhone, cleanEmail, uid, phase)
+        } catch (e: Exception) {
+            Log.e(TAG, "Local identity check failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun assertLocalBindingInner(
         cleanPhone: String,
         cleanEmail: String,
         uid: String?,
@@ -152,49 +172,67 @@ class UserIdentityBindingEngine(
         uid: String?,
         phase: BindPhase
     ): Result<Unit> {
-        if (cleanPhone.isNotBlank() && UserIdentityNormalizer.isValidPhone10(cleanPhone)) {
-            val remotePhone = registry.lookupPhone(cleanPhone)
-            if (remotePhone != null) {
-                if (uid != null && remotePhone.uid == uid) {
-                    if (cleanEmail.isNotBlank() && remotePhone.email.isNotBlank() && remotePhone.email != cleanEmail) {
-                        return Result.failure(UserIdentityConflictException.phoneBoundToEmail(remotePhone.email))
-                    }
-                } else {
-                    if (remotePhone.email.isNotBlank()) {
-                        if (cleanEmail.isNotBlank() && remotePhone.email != cleanEmail) {
+        return try {
+            if (cleanPhone.isNotBlank() && UserIdentityNormalizer.isValidPhone10(cleanPhone)) {
+                val remotePhone = registry.lookupPhone(cleanPhone)
+                if (remotePhone != null) {
+                    if (uid != null && remotePhone.uid == uid) {
+                        if (cleanEmail.isNotBlank() && remotePhone.email.isNotBlank() && remotePhone.email != cleanEmail) {
                             return Result.failure(UserIdentityConflictException.phoneBoundToEmail(remotePhone.email))
                         }
-                        return Result.failure(UserIdentityConflictException.phoneTaken(remotePhone.email))
-                    }
-                    if (uid == null || remotePhone.uid != uid) {
-                        return Result.failure(UserIdentityConflictException.phoneTaken(null))
+                    } else {
+                        if (remotePhone.email.isNotBlank()) {
+                            if (cleanEmail.isNotBlank() && remotePhone.email != cleanEmail) {
+                                return Result.failure(UserIdentityConflictException.phoneBoundToEmail(remotePhone.email))
+                            }
+                            return Result.failure(UserIdentityConflictException.phoneTaken(remotePhone.email))
+                        }
+                        if (uid == null || remotePhone.uid != uid) {
+                            return Result.failure(UserIdentityConflictException.phoneTaken(null))
+                        }
                     }
                 }
             }
-        }
 
-        if (cleanEmail.isNotBlank() && UserIdentityNormalizer.isValidEmail(cleanEmail)) {
-            val remoteEmail = registry.lookupEmail(cleanEmail)
-            if (remoteEmail != null) {
-                if (uid != null && remoteEmail.uid == uid) {
-                    if (cleanPhone.isNotBlank() && remoteEmail.phone.isNotBlank() && remoteEmail.phone != cleanPhone) {
-                        return Result.failure(UserIdentityConflictException.emailBoundToPhone(remoteEmail.phone))
-                    }
-                } else {
-                    if (remoteEmail.phone.isNotBlank()) {
-                        if (cleanPhone.isNotBlank() && remoteEmail.phone != cleanPhone) {
+            if (cleanEmail.isNotBlank() && UserIdentityNormalizer.isValidEmail(cleanEmail)) {
+                val remoteEmail = registry.lookupEmail(cleanEmail)
+                if (remoteEmail != null) {
+                    if (uid != null && remoteEmail.uid == uid) {
+                        if (cleanPhone.isNotBlank() && remoteEmail.phone.isNotBlank() && remoteEmail.phone != cleanPhone) {
                             return Result.failure(UserIdentityConflictException.emailBoundToPhone(remoteEmail.phone))
                         }
-                        return Result.failure(UserIdentityConflictException.emailTaken(remoteEmail.phone))
-                    }
-                    if (uid == null || remoteEmail.uid != uid) {
-                        return Result.failure(UserIdentityConflictException.emailTaken(null))
+                    } else {
+                        if (remoteEmail.phone.isNotBlank()) {
+                            if (cleanPhone.isNotBlank() && remoteEmail.phone != cleanPhone) {
+                                return Result.failure(UserIdentityConflictException.emailBoundToPhone(remoteEmail.phone))
+                            }
+                            return Result.failure(UserIdentityConflictException.emailTaken(remoteEmail.phone))
+                        }
+                        if (uid == null || remoteEmail.uid != uid) {
+                            return Result.failure(UserIdentityConflictException.emailTaken(null))
+                        }
                     }
                 }
             }
-        }
 
-        return Result.success(Unit)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.w(TAG, "Remote identity registry check failed: ${e.message}", e)
+            if (phase == BindPhase.PRE_PHONE_OTP) {
+                Result.success(Unit)
+            } else {
+                Result.failure(
+                    UserIdentityConflictException(
+                        UserIdentityConflictException.Code.OFFLINE_REGISTRY_REQUIRED,
+                        "Could not verify your account right now. Check your internet connection and try again."
+                    )
+                )
+            }
+        }
+    }
+
+    companion object {
+        private const val TAG = "UserIdentityBinding"
     }
 
     private fun currentUid(): String? = try {
