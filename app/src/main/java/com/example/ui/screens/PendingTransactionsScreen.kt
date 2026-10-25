@@ -173,6 +173,19 @@ fun PendingTransactionsScreen(
                         }
                     }
                     if (pendingTransactions.isNotEmpty()) {
+                        IconButton(
+                            onClick = { viewModel.batchRefineWithGemini() },
+                            modifier = Modifier
+                                .padding(end = AppTheme.dimensions.extraSmall)
+                                .testTag("gemini_refine_all_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = "Refine all with Gemini AI",
+                                tint = AppTheme.colors.primary
+                            )
+                        }
+
                         Button(
                             onClick = { viewModel.approveAllPendingTransactions() },
                             colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.primary),
@@ -429,7 +442,8 @@ fun PendingTransactionsScreen(
                             onApprove = { category ->
                                 viewModel.approvePendingTransaction(tx.id, category ?: "GENERAL")
                             },
-                            onReject = { viewModel.rejectPendingTransaction(tx.id) }
+                            onReject = { viewModel.rejectPendingTransaction(tx.id) },
+                            onRefineWithGemini = { viewModel.reclassifyTransactionWithGemini(tx.id) }
                         )
                     }
                 }
@@ -520,7 +534,8 @@ fun PendingTransactionCard(
     dateFormatted: String,
     auditResult: EntryAuditResult? = null,
     onApprove: (selectedCategory: String?) -> Unit,
-    onReject: () -> Unit
+    onReject: () -> Unit,
+    onRefineWithGemini: () -> Unit = {}
 ) {
     val isDup = transaction.isDuplicate || auditResult?.isDuplicate == true
     val dupReason = if (!transaction.duplicateReason.isNullOrBlank()) transaction.duplicateReason!! else (auditResult?.duplicateReason ?: "Potential duplicate transaction detected.")
@@ -668,40 +683,59 @@ fun PendingTransactionCard(
                     }
                 }
 
-                // Category selector pill
-                Box {
-                    Surface(
-                        shape = RoundedCornerShape(AppTheme.dimensions.extraSmall + 2.dp),
-                        color = AppTheme.colors.cardSecondary,
-                        modifier = Modifier.clickable { showCategoryMenu = true }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(AppTheme.dimensions.extraSmall)
+                ) {
+                    IconButton(
+                        onClick = onRefineWithGemini,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .testTag("gemini_refine_btn_${transaction.id}")
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = AppTheme.dimensions.paddingSmall, vertical = AppTheme.dimensions.extraSmall - 1.dp),
-                            horizontalArrangement = Arrangement.spacedBy(AppTheme.dimensions.extraSmall)
-                        ) {
-                            Text(
-                                text = "Category: ${categories.find { it.first == selectedCategory }?.second ?: selectedCategory}",
-                                style = AppTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Medium,
-                                color = AppTheme.colors.secondary
-                            )
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(14.dp), tint = AppTheme.colors.textSecondary)
-                        }
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = "Refine with Gemini AI",
+                            tint = AppTheme.colors.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
 
-                    DropdownMenu(
-                        expanded = showCategoryMenu,
-                        onDismissRequest = { showCategoryMenu = false }
-                    ) {
-                        categories.forEach { (catKey, catLabel) ->
-                            DropdownMenuItem(
-                                text = { Text(catLabel, style = AppTheme.typography.bodyMedium) },
-                                onClick = {
-                                    selectedCategory = catKey
-                                    showCategoryMenu = false
-                                }
-                            )
+                    // Category selector pill
+                    Box {
+                        Surface(
+                            shape = RoundedCornerShape(AppTheme.dimensions.extraSmall + 2.dp),
+                            color = AppTheme.colors.cardSecondary,
+                            modifier = Modifier.clickable { showCategoryMenu = true }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = AppTheme.dimensions.paddingSmall, vertical = AppTheme.dimensions.extraSmall - 1.dp),
+                                horizontalArrangement = Arrangement.spacedBy(AppTheme.dimensions.extraSmall)
+                            ) {
+                                Text(
+                                    text = "Category: ${categories.find { it.first == selectedCategory }?.second ?: selectedCategory}",
+                                    style = AppTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = AppTheme.colors.secondary
+                                )
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(14.dp), tint = AppTheme.colors.textSecondary)
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = showCategoryMenu,
+                            onDismissRequest = { showCategoryMenu = false }
+                        ) {
+                            categories.forEach { (catKey, catLabel) ->
+                                DropdownMenuItem(
+                                    text = { Text(catLabel, style = AppTheme.typography.bodyMedium) },
+                                    onClick = {
+                                        selectedCategory = catKey
+                                        showCategoryMenu = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }

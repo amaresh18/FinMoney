@@ -22,41 +22,56 @@ object NotificationTransactionGate {
     )
 
     private val PROMO_PATTERNS = listOf(
-        Regex("""\b(?:pre[- ]?approved|preapproved)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:apply now|click here|tap to|limited time|hurry|don't miss)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:scratch card|spin to win|lucky draw|refer(?:ral)?\s+(?:and\s+)?earn)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:flat\s+\d+%\s*off|\d+%\s*off|upto\s*₹|up to\s*rs)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:cashback\s+offer|offer\s+for\s+you|exclusive\s+deal|special\s+offer)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:recharge\s+now|pay\s+bill\s+now|avail\s+(?:the\s+)?offer)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:rate\s+us|update\s+available|new\s+features)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:you\s+are\s+eligible|get\s+instant\s+loan|personal\s+loan\s+offer)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:reward\s+points?\s+expir|redeem\s+your\s+points)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bwon\s+a\s+(?:scratch|reward|cashback)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:rewards?\s+unlocked|voucher\s+inside|coupon\s+inside)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:complete\s+your\s+kyc|update\s+kyc)\s+to\s+(?:win|get)\b""", RegexOption.IGNORE_CASE)
+        // Loan & Credit Line Marketing
+        Regex("""\b(?:pre[- ]?approved|preapproved|personal\s+loan|instant\s+loan|loan\s+offer|apply\s+(?:for\s+)?loan|eligible\s+for\s+(?:a\s+)?loan|credit\s+line\s+of|instant\s+cash\s+up\s+to|zero\s+processing\s+fee|interest\s+rate\s+starting)\b""", RegexOption.IGNORE_CASE),
+        // Credit Card Marketing & Limit Offers
+        Regex("""\b(?:apply\s+(?:for\s+)?(?:credit\s+)?card|lifetime\s+free\s+credit\s+card|upgrade\s+(?:your\s+)?(?:credit\s+)?card|credit\s+limit\s+increase|limit\s+increas(?:ed|e)\s+to|enhancement\s+on\s+your\s+card|annual\s+fee\s+waiver)\b""", RegexOption.IGNORE_CASE),
+        // Cashback, Reward & Scratch Card Marketing
+        Regex("""\b(?:cashback\s+on\s+your|earn\s+(?:up\s+to\s+)?(?:cashback|rs|₹|inr)|win\s+(?:up\s+to\s+)?(?:cashback|rs|₹|inr)|won\s+a\s+(?:scratch|cashback|reward)|scratch\s+card|spin\s+to\s+win|lucky\s+draw|claim\s+(?:your\s+)?(?:cashback|reward|voucher)|rewards?\s+unlocked|exclusive\s+offer|special\s+offer|cashback\s+offer|stand\s+a\s+chance)\b""", RegexOption.IGNORE_CASE),
+        // Discount, Sale & Coupon Promos
+        Regex("""\b(?:flat\s+\d+%\s*off|\d+%\s*off|upto\s*₹|up to\s*rs|save\s+up\s+to|discount\s+on|use\s+code\b|coupon\s+code|voucher\s+inside|coupon\s+inside|deals\s+starting|festival\s+sale|mega\s+sale|best\s+deals?|hurry|don't\s+miss|limited\s+time|limited\s+period)\b""", RegexOption.IGNORE_CASE),
+        // Upcoming Bill Due & Bill Generation Notices (NOT yet paid)
+        Regex("""\b(?:bill\s+generated|bill\s+is\s+generated|bill\s+of\s+(?:rs|₹|inr)|bill\s+due|bill\s+is\s+due|due\s+date\s+is|payment\s+due\s+of|due\s+on\b|pay\s+before\b|avoid\s+late\s+fee|statement\s+(?:is\s+)?ready|minimum\s+amount\s+due|total\s+amount\s+due|reminder:\s*pay)\b""", RegexOption.IGNORE_CASE),
+        // Recharge, Plan Expiry & Data Pack Alerts
+        Regex("""\b(?:recharge\s+with|recharge\s+now|recharge\s+of\s+(?:rs|₹|inr)|plan\s+expir(?:ed|ing|es)|pack\s+expir(?:ed|ing|es)|validity\s+expir(?:ed|ing|es)|daily\s+data\s+(?:pack\s+)?exhausted|100%\s+daily\s+data|quota\s+exhausted|unlimited\s+calls\s+and|topup\s+now)\b""", RegexOption.IGNORE_CASE),
+        // Referral Loops & Engagement
+        Regex("""\b(?:refer\s+(?:and\s+|&)?earn|refer\s+your\s+friend|invite\s+friend|rate\s+us|rate\s+our\s+app|update\s+available|new\s+features)\b""", RegexOption.IGNORE_CASE),
+        // Call-to-action imperative marketing without actual debit/credit
+        Regex("""\b(?:click\s+here|tap\s+to\s+(?:claim|avail|apply|view|pay)|avail\s+(?:the\s+)?offer|complete\s+your\s+kyc\s+to)\b""", RegexOption.IGNORE_CASE)
     )
 
     private val UNSETTLED_REQUEST_MARKERS = listOf(
         "payment request", "collect request", "has requested", "is requesting",
         "money request", "upi request", "pay request", "awaiting your approval",
-        "approve the request", "requesting rs", "requesting ₹", "please pay",
-        "reminder to pay", "payment pending", "awaiting payment", "pay by clicking"
+        "approve the request", "requesting rs", "requesting ₹", "requesting inr", "please pay",
+        "reminder to pay", "payment pending", "awaiting payment", "pay by clicking",
+        "tap to pay", "pending approval"
     )
 
     private val EXPLICIT_DEBIT_VERBS = listOf(
-        "debited", "debit of", "is debited", "has been debited",
-        "paid to", "paid rs", "paid ₹", "spent on", "spent rs", "spent ₹",
-        "sent to", "sent rs", "sent ₹", "withdrawn", "withdrawal of",
-        "charged to", "charged rs", "charged ₹", "purchase of", "transferred to",
-        "transfer of", "autopay of", "mandate of", "imps to", "neft to", "upi to"
+        "debited", "debit of", "is debited", "has been debited", "was debited",
+        "debited by", "debited with", "debited for", "debited from",
+        "paid to", "paid at", "paid for", "paid rs", "paid ₹", "paid inr",
+        "you paid", "payment successful", "successfully paid",
+        "spent on", "spent at", "spent rs", "spent ₹", "spent inr",
+        "sent to", "sent rs", "sent ₹", "sent inr", "money sent to",
+        "transferred to", "transferred rs", "transferred inr", "transferred ₹",
+        "withdrawn from", "withdrawal of", "cash withdrawal", "atm cash",
+        "charged to", "charged rs", "charged ₹", "charged inr",
+        "autopay of", "mandate of", "imps to", "neft to", "upi to"
     )
 
     private val EXPLICIT_CREDIT_VERBS = listOf(
-        "credited", "credit of", "is credited", "has been credited",
-        "received from", "received rs", "received ₹", "recd rs", "recd.",
-        "deposited", "refunded", "refund of", "salary credited",
-        "transferred to your", "money received", "payment received",
-        "credited to your", "credited by", "credited in", "inward credit"
+        "credited", "credit of", "is credited", "has been credited", "was credited",
+        "credited with", "credited to", "credited by", "credited in", "inward credit",
+        "received from", "received in", "received rs", "received ₹", "received inr",
+        "recd rs", "recd ₹", "recd.", "rec'd rs", "rec'd ₹", "money received from", "payment received from",
+        "you received", "you have received", "deposited to", "deposited in",
+        "refund of", "refund credited", "refunded to your", "reversal credited", "reversed to",
+        "cashback credited", "cashback received", "cashback of rs", "cashback of ₹", "cashback of inr",
+        "salary credited", "salary of", "salary deposit", "stipend credited",
+        "transferred to your", "transferred to you", "sent you", "paid you",
+        "added to account", "added to your account", "added to wallet"
     )
 
     private val BALANCE_ONLY_MARKERS = listOf(
@@ -85,7 +100,7 @@ object NotificationTransactionGate {
             return Decision(Action.IGNORE, "Promotional or marketing message without settled transaction")
         }
 
-        if (isUnsettledPaymentRequest(lower) && !hasExplicitTransactionVerb(lower)) {
+        if (isUnsettledPaymentRequest(lower)) {
             return Decision(Action.IGNORE, "UPI/payment request — not a completed debit or credit")
         }
 
@@ -125,7 +140,7 @@ object NotificationTransactionGate {
             return Decision(Action.IGNORE, incorrect)
         }
 
-        if (!hasExplicitTx && !hasRef && parseResult.confidenceScore < 0.55f) {
+        if (!hasExplicitTx && !hasRef && parseResult.confidenceScore < 0.60f) {
             return Decision(Action.IGNORE, "Low-confidence alert without UTR/reference or debit/credit verb")
         }
 
@@ -139,8 +154,11 @@ object NotificationTransactionGate {
     fun hasExplicitTransactionVerb(lowerText: String): Boolean {
         if (EXPLICIT_DEBIT_VERBS.any { lowerText.contains(it) }) return true
         if (EXPLICIT_CREDIT_VERBS.any { lowerText.contains(it) }) return true
+        if (Regex("""\b(?:dr|cr)[:.]|\b(?:dr|cr)\s""").containsMatchIn(lowerText)) return true
+        if (Regex("""(?:upi|imps|neft|rtgs)[\s\:\/\-]+(?:dr|cr)""", RegexOption.IGNORE_CASE).containsMatchIn(lowerText)) return true
         if (Regex("""\b(?:upi|imps|neft|rtgs)\s+(?:ref|txn|transaction)\b""").containsMatchIn(lowerText)) return true
-        if (Regex("""\b(?:txn|transaction)\s+(?:id|ref)\b""").containsMatchIn(lowerText)) return true
+        if (Regex("""\b(?:txn|transaction)\s+(?:id|ref|done|successful|completed)\b""").containsMatchIn(lowerText)) return true
+        if (Regex("""\b(?:paid|sent|received)\s+(?:inr|rs\.?|₹|\$)\s*\d+""", RegexOption.IGNORE_CASE).containsMatchIn(lowerText)) return true
         return false
     }
 
@@ -161,7 +179,26 @@ object NotificationTransactionGate {
     private fun matchesPromoWithoutSettlement(lower: String): Boolean {
         val promoHit = PROMO_PATTERNS.any { it.containsMatchIn(lower) }
         if (!promoHit) return false
-        return !hasExplicitTransactionVerb(lower)
+
+        // Uncompromising promotional markers that are NEVER actual bank debits or credits
+        val strictPromos = listOf(
+            "scratch card", "spin to win", "lucky draw", "win up to", "won a scratch",
+            "pre-approved", "preapproved", "personal loan", "instant loan", "apply now",
+            "eligible for loan", "discount on", "save up to", "use code", "coupon code",
+            "deals starting", "festival sale", "mega sale", "bill is due", "bill due",
+            "bill generated", "recharge with", "recharge now", "plan expires", "pack expired",
+            "data exhausted", "refer and earn", "refer your friend", "cashback on your next",
+            "earn cashback", "get cashback", "cashback offer", "claim your", "rewards unlocked"
+        )
+        if (strictPromos.any { lower.contains(it) }) {
+            return true
+        }
+
+        // Only permit through if there is an explicit settled bank account / card action
+        val hasSettledAccountDebitOrCredit = Regex("""\b(?:a\/c|account|acct|card)\b.*?\b(?:debited|credited)\b""").containsMatchIn(lower) ||
+            Regex("""\b(?:debited\s+from|credited\s+to|refund\s+credited)\b""").containsMatchIn(lower)
+
+        return !hasSettledAccountDebitOrCredit
     }
 
     private fun isPromotionalCashbackWording(lower: String): Boolean {
@@ -170,12 +207,20 @@ object NotificationTransactionGate {
             lower.contains("get cashback") ||
             lower.contains("cashback offer") ||
             lower.contains("cashback rewards") ||
-            (lower.contains("cashback") && lower.contains("next transaction"))
+            lower.contains("win cashback") ||
+            lower.contains("claim cashback") ||
+            lower.contains("cashback unlocked") ||
+            (lower.contains("cashback") && (lower.contains("next") || lower.contains("order") || lower.contains("offer")))
     }
 
     private fun hasExplicitCreditSettlement(lower: String): Boolean {
-        return EXPLICIT_CREDIT_VERBS.any { lower.contains(it) } ||
+        return lower.contains("cashback credited") ||
+            lower.contains("cashback received") ||
+            lower.contains("cashback of inr") ||
+            lower.contains("cashback of rs") ||
+            lower.contains("cashback of ₹") ||
             lower.contains("credited to your account") ||
+            lower.contains("credited to account") ||
             lower.contains("has been credited")
     }
 

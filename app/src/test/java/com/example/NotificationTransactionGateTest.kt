@@ -61,4 +61,129 @@ class NotificationTransactionGateTest {
         assertEquals(NotificationTransactionGate.Action.REQUEST_USER_APPROVAL, decision.action)
         assertEquals(BankTxType.CREDIT, tx!!.type)
     }
+
+    @Test
+    fun `upi expense from google pay requires approval and identifies as debit`() {
+        val notif = "Paid ₹150 to Chai Point"
+        val parsed = TransactionParser.parse(notif, "Google Pay")
+        val tx = parsed.toParsedBankTransaction()
+        val decision = NotificationTransactionGate.evaluate("Google Pay", notif, parsed, tx)
+
+        assertEquals(NotificationTransactionGate.Action.REQUEST_USER_APPROVAL, decision.action)
+        assertEquals(150.0, tx!!.amount, 0.01)
+        assertEquals(BankTxType.DEBIT, tx.type)
+    }
+
+    @Test
+    fun `upi income from phonepe requires approval and identifies as credit`() {
+        val notif = "Received ₹500 from Amit"
+        val parsed = TransactionParser.parse(notif, "PhonePe")
+        val tx = parsed.toParsedBankTransaction()
+        val decision = NotificationTransactionGate.evaluate("PhonePe", notif, parsed, tx)
+
+        assertEquals(NotificationTransactionGate.Action.REQUEST_USER_APPROVAL, decision.action)
+        assertEquals(500.0, tx!!.amount, 0.01)
+        assertEquals(BankTxType.CREDIT, tx.type)
+    }
+
+    @Test
+    fun `salary credit requires approval and identifies as credit`() {
+        val sms = "Dear Customer, your Account **1234 credited with INR 65,000.00 on 01-OCT-26 by SALARY. Avl Bal: INR 95,000.00."
+        val parsed = TransactionParser.parse(sms, "AD-HDFCBK")
+        val tx = parsed.toParsedBankTransaction()
+        val decision = NotificationTransactionGate.evaluate("HDFC Bank", sms, parsed, tx)
+
+        assertEquals(NotificationTransactionGate.Action.REQUEST_USER_APPROVAL, decision.action)
+        assertEquals(65000.0, tx!!.amount, 0.01)
+        assertEquals(BankTxType.CREDIT, tx.type)
+        assertEquals(95000.0, tx.availableBalance!!, 0.01)
+    }
+
+    @Test
+    fun `refund settlement requires approval and identifies as credit`() {
+        val notif = "Refund of ₹250 for canceled order credited to your account"
+        val parsed = TransactionParser.parse(notif, "Swiggy")
+        val tx = parsed.toParsedBankTransaction()
+        val decision = NotificationTransactionGate.evaluate("Swiggy", notif, parsed, tx)
+
+        assertEquals(NotificationTransactionGate.Action.REQUEST_USER_APPROVAL, decision.action)
+        assertEquals(250.0, tx!!.amount, 0.01)
+        assertEquals(BankTxType.CREDIT, tx.type)
+    }
+
+    @Test
+    fun `sbi debit alert requires approval and identifies as debit`() {
+        val sms = "Your A/C XX5678 debited by Rs.820.00 on 09-OCT-26 transfer to ZOMATO. Avail Bal: Rs.14,230.75. UPI Ref 428192837123."
+        val parsed = TransactionParser.parse(sms, "VK-SBIINB")
+        val tx = parsed.toParsedBankTransaction()
+        val decision = NotificationTransactionGate.evaluate("SBI", sms, parsed, tx)
+
+        assertEquals(NotificationTransactionGate.Action.REQUEST_USER_APPROVAL, decision.action)
+        assertEquals(820.0, tx!!.amount, 0.01)
+        assertEquals(BankTxType.DEBIT, tx.type)
+        assertEquals(14230.75, tx.availableBalance!!, 0.01)
+    }
+
+    @Test
+    fun `loan promotion advertisement is ignored`() {
+        val sms = "Congratulations! You have pre-approved personal loan of Rs 5,00,000 at low interest. Apply now in 2 mins."
+        val parsed = TransactionParser.parse(sms, "HDFCBK")
+        val decision = NotificationTransactionGate.evaluate("HDFC Bank", sms, parsed, parsed.toParsedBankTransaction())
+
+        assertEquals(NotificationTransactionGate.Action.IGNORE, decision.action)
+    }
+
+    @Test
+    fun `upcoming electricity bill due notice is ignored`() {
+        val sms = "Dear Customer, your electricity bill of Rs 1,450.00 is generated. Due date is 30-OCT-26. Pay before due date to avoid late fee."
+        val parsed = TransactionParser.parse(sms, "BESCOM")
+        val decision = NotificationTransactionGate.evaluate("BESCOM", sms, parsed, parsed.toParsedBankTransaction())
+
+        assertEquals(NotificationTransactionGate.Action.IGNORE, decision.action)
+    }
+
+    @Test
+    fun `recharge prompt alert is ignored`() {
+        val notif = "Daily data 100% exhausted. Recharge with ₹299 now for 2GB/day and unlimited calls."
+        val parsed = TransactionParser.parse(notif, "Jio")
+        val decision = NotificationTransactionGate.evaluate("Jio", notif, parsed, parsed.toParsedBankTransaction())
+
+        assertEquals(NotificationTransactionGate.Action.IGNORE, decision.action)
+    }
+
+    @Test
+    fun `scratch card and reward promo is ignored`() {
+        val notif = "You won a scratch card! Win up to ₹1,000 cashback on Google Pay today. Tap to claim."
+        val parsed = TransactionParser.parse(notif, "Google Pay")
+        val decision = NotificationTransactionGate.evaluate("Google Pay", notif, parsed, parsed.toParsedBankTransaction())
+
+        assertEquals(NotificationTransactionGate.Action.IGNORE, decision.action)
+    }
+
+    @Test
+    fun `discount coupon code offer is ignored`() {
+        val notif = "Flat 50% off on Swiggy! Use code SWIGGY50 to save up to ₹150 on your order."
+        val parsed = TransactionParser.parse(notif, "Swiggy")
+        val decision = NotificationTransactionGate.evaluate("Swiggy", notif, parsed, parsed.toParsedBankTransaction())
+
+        assertEquals(NotificationTransactionGate.Action.IGNORE, decision.action)
+    }
+
+    @Test
+    fun `credit limit enhancement marketing is ignored`() {
+        val sms = "Dear Customer, good news! You are eligible for credit limit increase up to Rs. 2,00,000 on your card ending 1234. Avail offer now."
+        val parsed = TransactionParser.parse(sms, "ICICIB")
+        val decision = NotificationTransactionGate.evaluate("ICICI Bank", sms, parsed, parsed.toParsedBankTransaction())
+
+        assertEquals(NotificationTransactionGate.Action.IGNORE, decision.action)
+    }
+
+    @Test
+    fun `referral invite loop is ignored`() {
+        val notif = "Refer your friend and earn ₹100 directly in your bank account! Invite now."
+        val parsed = TransactionParser.parse(notif, "PhonePe")
+        val decision = NotificationTransactionGate.evaluate("PhonePe", notif, parsed, parsed.toParsedBankTransaction())
+
+        assertEquals(NotificationTransactionGate.Action.IGNORE, decision.action)
+    }
 }

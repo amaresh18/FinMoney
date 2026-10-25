@@ -2,19 +2,29 @@ package com.example
 
 import android.content.Intent
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -25,9 +35,14 @@ import com.example.ui.MainScreen
 import com.example.ui.components.BrandLogo
 import com.example.ui.theme.FinMoneyTheme
 import com.example.ui.theme.IndBackground
+import com.example.ui.theme.IndBlue
+import com.example.ui.theme.IndBlueDark
+import com.example.ui.theme.IndCyan
+import com.example.ui.theme.FinAuthDarkBg
+import com.example.util.BiometricAuthHelper
 import kotlinx.coroutines.delay
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     private val openPendingState = mutableStateOf(false)
     private val openLoanCloudIdState = mutableStateOf<String?>(null)
@@ -97,18 +112,51 @@ class MainActivity : ComponentActivity() {
                             label = "AppAuthTransition"
                         ) { loggedIn ->
                             if (loggedIn) {
-                                val openLoanCloudId by openLoanCloudIdState
-                                val openLoanId by openLoanIdState
-                                MainScreen(
-                                    initialOpenPending = shouldOpenPending,
-                                    onPendingConsumed = { openPendingState.value = false },
-                                    initialLoanCloudId = openLoanCloudId,
-                                    initialLoanId = openLoanId,
-                                    onLoanOpenConsumed = {
-                                        openLoanCloudIdState.value = null
-                                        openLoanIdState.value = null
+                                val isBioCapable = remember {
+                                    BiometricAuthHelper.canAuthenticate(this@MainActivity) &&
+                                        BiometricAuthHelper.isBiometricEnabled(this@MainActivity)
+                                }
+                                var isBiometricUnlocked by remember(profile?.userId) {
+                                    mutableStateOf(!isBioCapable)
+                                }
+                                var biometricError by remember { mutableStateOf<String?>(null) }
+
+                                fun triggerBiometricUnlock() {
+                                    biometricError = null
+                                    BiometricAuthHelper.authenticate(
+                                        activity = this@MainActivity,
+                                        title = "Unlock FinMoney",
+                                        subtitle = "Confirm fingerprint or face unlock to access financial data",
+                                        onSuccess = { isBiometricUnlocked = true },
+                                        onError = { error -> biometricError = error }
+                                    )
+                                }
+
+                                LaunchedEffect(loggedIn, isBioCapable) {
+                                    if (isBioCapable && !isBiometricUnlocked) {
+                                        triggerBiometricUnlock()
                                     }
-                                )
+                                }
+
+                                if (isBioCapable && !isBiometricUnlocked) {
+                                    BiometricLockScreen(
+                                        onUnlock = { triggerBiometricUnlock() },
+                                        errorMessage = biometricError
+                                    )
+                                } else {
+                                    val openLoanCloudId by openLoanCloudIdState
+                                    val openLoanId by openLoanIdState
+                                    MainScreen(
+                                        initialOpenPending = shouldOpenPending,
+                                        onPendingConsumed = { openPendingState.value = false },
+                                        initialLoanCloudId = openLoanCloudId,
+                                        initialLoanId = openLoanId,
+                                        onLoanOpenConsumed = {
+                                            openLoanCloudIdState.value = null
+                                            openLoanIdState.value = null
+                                        }
+                                    )
+                                }
                             } else {
                                 com.example.ui.screens.AuthScreen(
                                     viewModel = viewModel,
@@ -150,5 +198,86 @@ class MainActivity : ComponentActivity() {
         BankSyncManager.ensureServiceBound(this)
         com.example.cloud.CloudSyncOutboxManager.scheduleFlush(applicationContext)
     }
+}
 
+@Composable
+private fun BiometricLockScreen(
+    onUnlock: () -> Unit,
+    errorMessage: String? = null
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(FinAuthDarkBg)
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Brush.linearGradient(listOf(IndBlue, IndBlueDark))),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Filled.Fingerprint,
+                    contentDescription = "Biometric Lock",
+                    tint = Color.White,
+                    modifier = Modifier.size(44.dp)
+                )
+            }
+
+            Text(
+                text = "FinMoney Secure Lock",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                textAlign = TextAlign.Center
+            )
+
+            Text(
+                text = "Fingerprint or face unlock is required to view your financial accounts, EMIs, and transactions.",
+                fontSize = 13.sp,
+                color = Color.White.copy(alpha = 0.7f),
+                textAlign = TextAlign.Center,
+                lineHeight = 18.sp
+            )
+
+            if (errorMessage != null) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color.Red.copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.Red.copy(alpha = 0.4f))
+                ) {
+                    Text(
+                        text = errorMessage,
+                        color = Color(0xFFFF8A80),
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Button(
+                onClick = onUnlock,
+                shape = RoundedCornerShape(24.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = IndBlue, contentColor = Color.White),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+            ) {
+                Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Unlock with Biometrics / PIN", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+        }
+    }
 }

@@ -218,7 +218,8 @@ object BankSyncManager {
             NotificationTransactionGate.Action.REQUEST_USER_APPROVAL -> { /* continue */ }
         }
 
-        if (!isFinancial || parsed == null) {
+        if (!isFinancial || parsed == null || !parseResult.isFinancialNotification) {
+            android.util.Log.i("BankSyncManager", "Filtered non-financial or promotional notification: ${parseResult.debugReason}")
             return null
         }
 
@@ -358,6 +359,15 @@ object BankSyncManager {
                 _syncNotificationEvents.emit(msg)
 
                 saveTransactionToFirestore(context, savedRecord, cloudUser)
+
+                // Schedule Gemini AI classification engine to refine categorization & metadata
+                com.example.service.gemini.GeminiNotificationClassificationService.scheduleBackgroundRefinement(
+                    context = context,
+                    savedRecordId = insertedId,
+                    rawText = text,
+                    senderOrTitle = title,
+                    timestamp = timestamp
+                )
 
             } catch (e: Exception) {
                 android.util.Log.e("BankSyncManager", "Error saving transaction: ${e.message}", e)

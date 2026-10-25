@@ -321,6 +321,9 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
     /**
      * Determines why a notification is classified as non-financial. Returns null if valid financial.
      */
+    /**
+     * Determines why a notification is classified as non-financial. Returns null if valid financial.
+     */
     fun determineNonFinancialReason(text: String, title: String = "", sourcePackage: String = ""): String? {
         val lower = "$title $text".lowercase()
 
@@ -329,7 +332,8 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             lower.contains("out for delivery") || lower.contains("valet has picked") || 
             lower.contains("order placed") || lower.contains("preparing your order") || 
             lower.contains("dispatched") || lower.contains("arriving soon") || 
-            lower.contains("track delivery") || lower.contains("driver is on")) {
+            lower.contains("track delivery") || lower.contains("driver is on") ||
+            lower.contains("track your order")) {
             return "Matches delivery/order status tracking pattern"
         }
 
@@ -346,38 +350,102 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             }
         }
 
-        // 3. Late Payment Reminders & Bill Generation
+        // 3. Upcoming Bill Due Reminders & Bill Generation (NOT yet paid)
         if (lower.contains("bill generated") || lower.contains("is generated") || 
             lower.contains("bill of rs") || lower.contains("bill of ₹") || 
             lower.contains("due of") || lower.contains("due date") || 
-            lower.contains("bill due") || lower.contains("pay before") || 
-            lower.contains("reminder: pay") || lower.contains("bill is due")) {
-            if (!lower.contains("debited") && !lower.contains("credited") && !lower.contains("paid rs") && !lower.contains("spent")) {
+            lower.contains("bill due") || lower.contains("bill is due") ||
+            lower.contains("pay before") || lower.contains("reminder: pay") ||
+            lower.contains("minimum amount due") || lower.contains("total amount due") ||
+            lower.contains("statement is ready") || lower.contains("statement generated") ||
+            lower.contains("avoid late fee")) {
+            val isAlreadyPaid = lower.contains("has been debited") || lower.contains("debited from") ||
+                lower.contains("successfully paid") || lower.contains("payment received")
+            if (!isAlreadyPaid) {
                 return "Matches bill due/generated reminder pattern"
             }
         }
 
-        // 4. Cashback Eligibility & Reward Loops
+        // 4. Recharge Prompts, Plan Expiry & Data Alerts
+        if (lower.contains("recharge with") || lower.contains("recharge now") ||
+            lower.contains("recharge of rs") || lower.contains("recharge of ₹") ||
+            lower.contains("plan expiring") || lower.contains("plan expires") ||
+            lower.contains("pack expiring") || lower.contains("pack expires") ||
+            lower.contains("validity expiring") || lower.contains("validity expires") ||
+            lower.contains("data exhausted") || lower.contains("daily data quota") ||
+            lower.contains("100% daily data") || lower.contains("unlimited calls and") ||
+            lower.contains("topup now")) {
+            val isAlreadyRecharged = lower.contains("recharge successful") ||
+                lower.contains("recharge of rs") && lower.contains("successful") ||
+                (lower.contains("debited") && lower.contains("recharge"))
+            if (!isAlreadyRecharged) {
+                return "Matches recharge prompt / plan expiry alert"
+            }
+        }
+
+        // 5. Promotional Offers, Cashback Hooks & Shopping Discounts
         if (lower.contains("scratch card") || lower.contains("tap to claim") ||
             lower.contains("win up to") || lower.contains("won a scratch") ||
             lower.contains("claim your") || lower.contains("cashback on your next") ||
             lower.contains("earn up to") || lower.contains("spin to win") ||
-            lower.contains("refer and earn") || lower.contains("lucky draw")) {
-            if (!NotificationTransactionGate.hasExplicitTransactionVerb(lower)) {
+            lower.contains("refer and earn") || lower.contains("refer & earn") ||
+            lower.contains("lucky draw") || lower.contains("earn cashback") ||
+            lower.contains("get cashback") || lower.contains("cashback offer") ||
+            lower.contains("cashback rewards") || lower.contains("rewards unlocked") ||
+            lower.contains("coupon code") || lower.contains("voucher inside") ||
+            lower.contains("use code") || lower.contains("flat 50% off") ||
+            lower.contains("flat 40% off") || lower.contains("flat 30% off") ||
+            lower.contains("flat 20% off") || lower.contains("flat 10% off") ||
+            lower.contains("save up to") || lower.contains("deals starting") ||
+            lower.contains("hurry") || lower.contains("don't miss") ||
+            lower.contains("limited period offer") || lower.contains("limited time offer") ||
+            lower.contains("exclusive deal") || lower.contains("special offer") ||
+            lower.contains("festival sale") || lower.contains("mega sale") ||
+            lower.contains("stand a chance to win")) {
+            val isActualCashbackSettled = lower.contains("cashback credited") ||
+                lower.contains("cashback received") || lower.contains("cashback of inr") ||
+                lower.contains("cashback of rs") || lower.contains("cashback of ₹")
+            if (!isActualCashbackSettled) {
                 return "Matches scratch card/reward promotional pattern"
             }
         }
 
-        // 5. One-Time Passwords (OTP) & Security codes
+        // 6. Loan Marketing, Credit Limit & Card Advertisements
+        if (lower.contains("pre-approved") || lower.contains("preapproved") ||
+            lower.contains("instant loan") || lower.contains("personal loan") ||
+            lower.contains("loan offer") || lower.contains("apply for loan") ||
+            lower.contains("apply for credit card") || lower.contains("eligible for loan") ||
+            lower.contains("credit line of") || lower.contains("instant cash up to") ||
+            lower.contains("credit limit increased") || lower.contains("limit increase to") ||
+            lower.contains("lifetime free credit card") || lower.contains("upgrade your card") ||
+            lower.contains("zero processing fee") || lower.contains("instant disbursement")) {
+            val isActualLoanDisbursement = (lower.contains("loan disbursed") || lower.contains("disbursement of")) &&
+                (lower.contains("credited to") || lower.contains("credited in"))
+            if (!isActualLoanDisbursement) {
+                return "Matches loan or credit card marketing advertisement"
+            }
+        }
+
+        // 7. Collect / Payment Requests (Unsettled incoming requests)
+        if (lower.contains("payment request") || lower.contains("collect request") ||
+            lower.contains("has requested") || lower.contains("is requesting") ||
+            lower.contains("money request") || lower.contains("upi request") ||
+            lower.contains("awaiting your approval") || lower.contains("approve request") ||
+            lower.contains("request pending") || lower.contains("tap to pay")) {
+            return "Matches unsettled UPI/payment request"
+        }
+
+        // 8. One-Time Passwords (OTP) & Security codes
         if (lower.contains("otp") || lower.contains("verification code") || 
             lower.contains("login code") || lower.contains("do not share") || 
-            lower.contains("one time password") || lower.contains("security code")) {
+            lower.contains("one time password") || lower.contains("security code") ||
+            lower.contains("secret code")) {
             if (!lower.contains("debited") && !lower.contains("credited") && !lower.contains("paid rs") && !lower.contains("spent")) {
                 return "Matches OTP/verification code pattern"
             }
         }
 
-        // 6. Transaction Failures / Declines / Reversals
+        // 9. Transaction Failures / Declines / Reversals
         if (lower.contains("declined") || lower.contains("insufficient funds") || 
             lower.contains("transaction failed") || lower.contains("payment failed") || 
             lower.contains("failed due to") || lower.contains("could not be processed") || 
@@ -385,39 +453,14 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             return "Matches transaction failure/decline pattern"
         }
 
-        // 7. Banking Alerts & Informational Reminders
+        // 10. Banking Alerts, KYC & Informational Reminders
         if (lower.contains("password expire") || lower.contains("password will expire") || 
-            lower.contains("kyc update") || lower.contains("login alert") || 
-            lower.contains("statement available") || lower.contains("minimum balance") || 
-            lower.contains("maintain balance") || lower.contains("security alert")) {
-            return "Matches banking alert/reminder pattern"
-        }
-
-        // 8. UPI collect / payment requests (not settled transactions)
-        if (lower.contains("payment request") || lower.contains("collect request") ||
-            lower.contains("has requested") || lower.contains("money request") ||
-            lower.contains("upi request") || lower.contains("awaiting your approval") ||
-            lower.contains("reminder to pay")
-        ) {
-            if (!NotificationTransactionGate.hasExplicitTransactionVerb(lower)) {
-                return "Matches unsettled UPI/payment request pattern"
-            }
-        }
-
-        // 9. Credit Card Promotions & Marketing Offers
-        if (lower.contains("eligible for") || lower.contains("pre-approved") || 
-            lower.contains("pre approved") || lower.contains("limit increase") || 
-            lower.contains("apply now") || lower.contains("10% off") || 
-            lower.contains("discount on") || lower.contains("cashback offer") || 
-            lower.contains("personal loan") || lower.contains("credit card offer")) {
-            return "Matches promotional/marketing offer pattern"
-        }
-
-        // 10. Engagement Pings & App Marketing Spam
-        if (lower.contains("update available") || lower.contains("rate us") || 
-            lower.contains("spin to win") || lower.contains("claim your reward") || 
-            lower.contains("exclusive offer")) {
-            return "Matches app marketing/engagement spam pattern"
+            lower.contains("kyc update") || lower.contains("complete your kyc") ||
+            lower.contains("login alert") || lower.contains("statement available") ||
+            lower.contains("minimum balance charges") || lower.contains("maintain balance") ||
+            lower.contains("rate us") || lower.contains("update available") ||
+            lower.contains("security alert")) {
+            return "Matches banking alert / reminder pattern"
         }
 
         val hasExplicitVerb = NotificationTransactionGate.hasExplicitTransactionVerb(lower)
@@ -429,18 +472,12 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             lower.contains("balance is rs") || lower.contains("balance is ₹")
 
         val hasCurrency = lower.contains("inr") || lower.contains("rs") ||
-                lower.contains("₹") || lower.contains("r.s") || lower.contains("rupees") || lower.contains("usd")
-
-        val isKnownBank = lower.contains("hdfc") || lower.contains("sbi") ||
-                lower.contains("icici") || lower.contains("axis") || lower.contains("kotak") ||
-                lower.contains("pnb") || lower.contains("canara") || lower.contains("union") ||
-                lower.contains("idfc") || lower.contains("onecard") || lower.contains("slice") ||
-                lower.contains("amex") || lower.contains("bank") || lower.contains("card") ||
-                lower.contains("paytm") || lower.contains("phonepe") || lower.contains("gpay")
+                lower.contains("₹") || lower.contains("r.s") || lower.contains("rupees") ||
+                lower.contains("usd") || lower.contains("$")
 
         val isValid = (hasExplicitVerb && hasCurrency) ||
-            (hasRefHint && hasCurrency && hasExplicitVerb) ||
-            (hasBalanceOnlyHint && hasCurrency && isKnownBank)
+            (hasRefHint && (hasCurrency || hasExplicitVerb)) ||
+            (hasBalanceOnlyHint && hasCurrency)
 
         return if (!isValid) "Non-financial message content" else null
     }
@@ -464,25 +501,28 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
         val normalizedText = text.replace("&nbsp;", " ").replace("\u00A0", " ")
 
         val regexes = listOf(
-            // 1. Verb followed by currency or amount
-            Regex("""(?:debited|credited|paid|sent|spent|charged|withdrawn|transferred|transfer|withdrawal|done|received|recd|rec'd|added|deposited)\s+(?:by|with|for|of|to|from)?\s*(?:inr|rs\.?|₹|usd)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
-            // 2. Amount followed by verb
-            Regex("""([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?\s*(?:inr|rs\.?|₹|usd)?\s*(?:debited|credited|paid|spent|charged|received|recd|rec'd|added)""", RegexOption.IGNORE_CASE),
-            // 3. Mandate / Autopay / ATM / SIP / UPI / Salary / Refund
-            Regex("""(?:autopay|mandate|sip|atm|upi|salary|deposit|refund)\s+(?:of|for|by)?\s*(?:inr|rs\.?|₹|usd)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
-            // 4. Currency prefix when paired with debit/credit context in the same line
-            Regex("""(?:inr|rs\.?|₹|usd)\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?\s*(?:debited|credited|paid|spent|sent|charged)""", RegexOption.IGNORE_CASE),
-            // 5. Generic currency prefix (last resort — skip if line is balance-only)
-            Regex("""(?:inr|rs\.?|₹|usd)\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE)
+            // 1. Explicit payment phrases: payment of Rs 500, paid Rs 300, order payment of ₹450
+            Regex("""(?:payment|order payment)\s+(?:of|for|amounting to)?\s*(?:inr|rs\.?|₹|usd|\$)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
+            // 2. Action verbs followed by prepositions/words and amount:
+            // "Paid ₹150 to Swiggy", "Debited by INR 450", "Received Rs 500 from Amit", "Sent Rs 200", etc.
+            Regex("""(?:debited|credited|paid|sent|spent|charged|withdrawn|transferred|transfer|withdrawal|done|received|recd|rec'd|added|deposited|refunded|refund|cashback)\s+(?:(?:by|with|for|of|to|from|is|was|has been)\s+)*(?:inr|rs\.?|₹|usd|\$)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
+            // 3. Amount followed by action verb: "Rs 500 debited", "₹150 paid", "INR 1,200 spent", "500.00 credited"
+            Regex("""(?:inr|rs\.?|₹|usd|\$)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?\s*(?:(?:is|was|has been|done|transferred|transfer|paid|debited|credited|spent|sent|charged|received|deposited|refunded)\s+)*(?:debited|credited|paid|spent|sent|charged|received|deposited|refunded)""", RegexOption.IGNORE_CASE),
+            // 4. Mandate / Autopay / ATM / SIP / UPI / Salary / Deposit / Refund
+            Regex("""(?:autopay|mandate|sip|atm|upi|salary|deposit|refund)\s+(?:of|for|by)?\s*(?:inr|rs\.?|₹|usd|\$)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
+            // 5. UPI / IMPS / NEFT format: UPI/DR/1234/500.00 or UPI:Rs.500
+            Regex("""(?:upi|imps|neft|rtgs)[\s\:\/\-]+(?:dr|cr)?[\s\:\/\-]*(?:inr|rs\.?|₹|usd|\$)?\s*([\d,]+(?:\.\d{1,2})?)""", RegexOption.IGNORE_CASE),
+            // 6. Currency prefix before amount, ignoring if it's explicitly an available balance/credit limit
+            Regex("""(?:inr|rs\.?|₹|usd|\$)\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE)
         )
 
         for (regex in regexes) {
-            val match = regex.find(normalizedText)
-            if (match != null) {
-                val lineStart = normalizedText.lastIndexOf('\n', match.range.first).let { if (it < 0) 0 else it }
-                val lineEnd = normalizedText.indexOf('\n', match.range.first).let { if (it < 0) normalizedText.length else it }
-                val line = normalizedText.substring(lineStart, lineEnd).lowercase()
-                if (isBalanceOrLimitLine(line) && !NotificationTransactionGate.hasExplicitTransactionVerb(line)) {
+            val matches = regex.findAll(normalizedText)
+            for (match in matches) {
+                // Ensure this match is not explicitly the available balance or credit limit
+                val prefixStart = (match.range.first - 30).coerceAtLeast(0)
+                val prefix = normalizedText.substring(prefixStart, match.range.first).lowercase()
+                if (isBalanceOrLimitPrefix(prefix) || isPromotionalAmountPrefix(prefix)) {
                     continue
                 }
                 val num = cleanNumber(match.groupValues[1])
@@ -490,6 +530,23 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             }
         }
         return null
+    }
+
+    private fun isPromotionalAmountPrefix(lowerPrefix: String): Boolean {
+        return lowerPrefix.contains("flat") || lowerPrefix.contains("up to") ||
+            lowerPrefix.contains("upto") || lowerPrefix.contains("save") ||
+            lowerPrefix.contains("discount") || lowerPrefix.contains("win") ||
+            lowerPrefix.contains("earn") || lowerPrefix.contains("voucher of") ||
+            lowerPrefix.contains("coupon of")
+    }
+
+    private fun isBalanceOrLimitPrefix(lowerPrefix: String): Boolean {
+        return lowerPrefix.contains("avl bal") || lowerPrefix.contains("avail bal") ||
+            lowerPrefix.contains("available bal") || lowerPrefix.contains("account balance") ||
+            lowerPrefix.contains("balance in") || lowerPrefix.contains("balance is") ||
+            lowerPrefix.contains("balance:") || lowerPrefix.contains("bal:") ||
+            lowerPrefix.contains("credit limit") || lowerPrefix.contains("available limit") ||
+            lowerPrefix.contains("total limit") || lowerPrefix.contains("clear bal")
     }
 
     private fun isBalanceOrLimitLine(lowerLine: String): Boolean {
@@ -605,24 +662,61 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
         return keywords.distinct().take(15)
     }
 
-    private fun determineTransactionType(lowerText: String): BankTxType {
-        val hasDebit = lowerText.contains("debited") || lowerText.contains("paid to") ||
-            lowerText.contains("spent on") || lowerText.contains("spent rs") || lowerText.contains("spent ₹") ||
-            lowerText.contains("sent to") || lowerText.contains("withdrawn") || lowerText.contains("charged to") ||
-            lowerText.contains("purchase of") || lowerText.contains("autopay of")
+    fun determineTransactionType(lowerText: String): BankTxType {
+        // High-confidence credit indicators
+        val isCredit = lowerText.contains("credited") || lowerText.contains("credit of") ||
+            lowerText.contains("is credited") || lowerText.contains("was credited") ||
+            lowerText.contains("has been credited") || lowerText.contains("credited with") ||
+            lowerText.contains("credited to") || lowerText.contains("credited by") ||
+            lowerText.contains("credited in") || lowerText.contains("inward credit") ||
+            lowerText.contains("received") || lowerText.contains("recd") || lowerText.contains("rec'd") ||
+            lowerText.contains("money received") || lowerText.contains("payment received") ||
+            lowerText.contains("you received") || lowerText.contains("you have received") ||
+            lowerText.contains("deposited") || lowerText.contains("deposit of") ||
+            lowerText.contains("refund") || lowerText.contains("refunded") ||
+            lowerText.contains("reversal") || lowerText.contains("reversed") ||
+            lowerText.contains("cashback credited") || lowerText.contains("cashback received") ||
+            lowerText.contains("cashback of") || lowerText.contains("salary") || lowerText.contains("stipend") ||
+            lowerText.contains("incoming") || lowerText.contains("transferred to your") ||
+            lowerText.contains("transferred to you") || lowerText.contains("sent you") ||
+            lowerText.contains("paid you") || lowerText.contains("added to account") ||
+            lowerText.contains("added to wallet") || lowerText.contains("added to your") ||
+            Regex("""\bcr[:.]|\bcr\s""").containsMatchIn(lowerText) ||
+            Regex("""(?:upi|imps|neft)[/-]cr[/-]""").containsMatchIn(lowerText)
 
-        val isCredit = lowerText.contains("credited") || lowerText.contains("received from") ||
-                lowerText.contains("recd") || lowerText.contains("rec'd") || lowerText.contains("recd.") ||
-                Regex("""\bcr[:.]|\bcr\s""").containsMatchIn(lowerText) ||
-                lowerText.contains("deposited") || lowerText.contains("refunded") ||
-                lowerText.contains("payment received") || lowerText.contains("money received") ||
-                lowerText.contains("inward credit") || lowerText.contains("incoming") ||
-                lowerText.contains("transferred to your") || lowerText.contains("salary credited") ||
-                (lowerText.contains("cashback") && lowerText.contains("credited")) ||
-                lowerText.contains("remittance")
+        val hasDebit = lowerText.contains("debited") || lowerText.contains("debit of") ||
+            lowerText.contains("is debited") || lowerText.contains("was debited") ||
+            lowerText.contains("has been debited") || lowerText.contains("debited from") ||
+            lowerText.contains("debited by") || lowerText.contains("debited with") ||
+            lowerText.contains("paid") || lowerText.contains("you paid") ||
+            lowerText.contains("payment of") || lowerText.contains("payment to") ||
+            lowerText.contains("payment for") || lowerText.contains("payment done") ||
+            lowerText.contains("payment successful") || lowerText.contains("successfully paid") ||
+            lowerText.contains("spent") || lowerText.contains("spent on") || lowerText.contains("spent at") ||
+            lowerText.contains("sent to") || lowerText.contains("money sent") ||
+            lowerText.contains("withdrawn") || lowerText.contains("withdrawal") ||
+            lowerText.contains("charged") || lowerText.contains("purchase of") || lowerText.contains("purchased at") ||
+            lowerText.contains("autopay") || lowerText.contains("mandate") ||
+            Regex("""\bdr[:.]|\bdr\s""").containsMatchIn(lowerText) ||
+            Regex("""(?:upi|imps|neft)[/-]dr[/-]""").containsMatchIn(lowerText)
 
-        if (hasDebit && !isCredit) return BankTxType.DEBIT
-        return if (isCredit) BankTxType.CREDIT else BankTxType.DEBIT
+        // Conflict handling:
+        if (hasDebit && isCredit) {
+            if (lowerText.contains("refund") || lowerText.contains("cashback credited") ||
+                lowerText.contains("cashback received") ||
+                lowerText.contains("salary") || lowerText.contains("received from") ||
+                lowerText.contains("credited with") || lowerText.contains("credited by")) {
+                return BankTxType.CREDIT
+            }
+            if (lowerText.contains("debited from") || lowerText.contains("debited by") ||
+                lowerText.contains("spent on") || lowerText.contains("paid to") ||
+                lowerText.contains("you paid") || lowerText.contains("withdrawn")) {
+                return BankTxType.DEBIT
+            }
+        }
+
+        if (isCredit) return BankTxType.CREDIT
+        return BankTxType.DEBIT
     }
 
     fun identifyCategoryNLP(text: String, title: String = "", merchantName: String = ""): String {

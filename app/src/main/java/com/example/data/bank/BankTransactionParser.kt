@@ -83,7 +83,19 @@ object BankTransactionParser {
         "JKBANK" to "J&K Bank",
         "BAJAJ" to "Bajaj Finserv",
         "MOBIKWIK" to "MobiKwik",
-        "FREECHARGE" to "Freecharge"
+        "FREECHARGE" to "Freecharge",
+        "CANBNK" to "Canara Bank",
+        "UNIONB" to "Union Bank of India",
+        "UBI" to "Union Bank of India",
+        "CBIN" to "Central Bank of India",
+        "FEDBNK" to "Federal Bank",
+        "IDFCFB" to "IDFC FIRST Bank",
+        "INDUSB" to "IndusInd Bank",
+        "RBLBNK" to "RBL Bank",
+        "AURBL" to "AU Small Finance Bank",
+        "SCISMS" to "Standard Chartered",
+        "CITIBK" to "Citi Bank",
+        "DBS" to "DBS Bank"
     )
 
     private val UPI_APPS = listOf(
@@ -95,7 +107,13 @@ object BankTransactionParser {
         "BHIM" to "BHIM UPI",
         "PLUXEE" to "Pluxee",
         "SODEXO" to "Pluxee",
-        "AMAZON" to "Amazon Pay"
+        "AMAZON" to "Amazon Pay",
+        "NAVI" to "Navi",
+        "SUPER.MONEY" to "Super.money",
+        "SUPERMONEY" to "Super.money",
+        "FAMPAY" to "FamPay",
+        "TATA NEU" to "Tata Neu",
+        "JIOFINANCE" to "JioFinance"
     )
 
     fun isFinancialMessage(text: String, title: String = ""): Boolean {
@@ -143,29 +161,7 @@ object BankTransactionParser {
     }
 
     fun extractAmount(text: String): Double? {
-        val normalizedText = text.replace("&nbsp;", " ").replace("\u00A0", " ")
-
-        val regexes = listOf(
-            // 1. Currency prefix: INR 1,500.00 / Rs. 1500 / ₹1,500/- / Rs1500
-            Regex("""(?:inr|rs\.?|₹|usd)\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
-            // 2. Verb followed by currency or amount: debited by 1,500.00 / paid Rs. 500 / charged 1200 / spent 450
-            Regex("""(?:debited|credited|paid|sent|spent|charged|withdrawn|transferred|transfer|withdrawal|done|received)\s+(?:by|with|for|of)?\s*(?:inr|rs\.?|₹|usd)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
-            // 3. Amount followed by verb or currency: 1,500.00 INR / 1500 Rs / 1,500.00 debited / 500.00 paid
-            Regex("""([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?\s*(?:inr|rs\.?|₹|usd|debited|credited|paid|spent|charged)""", RegexOption.IGNORE_CASE),
-            // 4. Mandate / Autopay / ATM / SIP: autopay of 1200 / mandate of 1500 / atm 5000
-            Regex("""(?:autopay|mandate|sip|atm|upi)\s+(?:of|for)?\s*(?:inr|rs\.?|₹|usd)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
-            // 5. Fallback balance/limit amount if no transaction amount is specified
-            Regex("""(?:balance|bal|limit)\s*(?:is|:|-)?\s*(?:inr|rs\.?|₹|usd)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE)
-        )
-
-        for (regex in regexes) {
-            val match = regex.find(normalizedText)
-            if (match != null) {
-                val num = cleanNumber(match.groupValues[1])
-                if (num != null && num > 0.0) return num
-            }
-        }
-        return null
+        return com.example.service.TransactionParser.extractTransactionAmount(text)
     }
 
     fun extractAvailableBalance(text: String): Double? {

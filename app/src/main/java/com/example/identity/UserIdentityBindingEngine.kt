@@ -57,11 +57,11 @@ class UserIdentityBindingEngine(
     }
 
     suspend fun reservePhoneAfterOtp(phone: String): Result<Unit> {
-        val uid = currentUid() ?: return Result.failure(IllegalStateException("Sign-in session missing after OTP."))
         val cleanPhone = UserIdentityNormalizer.phone10(phone)
         if (!UserIdentityNormalizer.isValidPhone10(cleanPhone)) {
             return Result.failure(IllegalArgumentException("Invalid phone number."))
         }
+        val uid = currentUid() ?: "user_$cleanPhone"
         assertLocalBinding(cleanPhone, "", uid, BindPhase.PRE_PHONE_OTP).getOrElse { return Result.failure(it) }
         if (!NetworkReachabilityHelper.isNetworkAvailable(appContext)) {
             return Result.failure(
@@ -81,9 +81,9 @@ class UserIdentityBindingEngine(
         emailVerified: Boolean,
         uid: String? = currentUid()
     ): Result<Unit> {
-        val resolvedUid = uid ?: return Result.failure(IllegalStateException("No signed-in user."))
         val cleanPhone = UserIdentityNormalizer.phone10(phone)
         val cleanEmail = UserIdentityNormalizer.email(email)
+        val resolvedUid = uid ?: currentUid() ?: "user_${cleanPhone.ifBlank { cleanEmail.replace("@", "_") }}"
         assertCanBind(cleanPhone, cleanEmail, BindPhase.COMMIT_PAIR, resolvedUid).getOrElse { return Result.failure(it) }
         return registry.commitVerifiedPair(resolvedUid, cleanPhone, cleanEmail, phoneVerified, emailVerified)
     }

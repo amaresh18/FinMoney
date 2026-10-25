@@ -196,22 +196,9 @@ object EntryIntegrityEngine {
         val lower = rawText.lowercase()
 
         // 1. Transaction Type / Verb Inversion Check
-        val hasRefundCreditKeywords = lower.contains("refund") || lower.contains("refunded") ||
-                lower.contains("cashback") || lower.contains("reversal") ||
-                lower.contains("credited to your account") || lower.contains("credited by") ||
-                lower.contains("deposited to") || lower.contains("received from")
-
-        val hasDebitKeywords = lower.contains("debited from") || lower.contains("paid to") ||
-                lower.contains("sent to") || lower.contains("spent on") ||
-                lower.contains("withdrawn from") || lower.contains("purchase of") ||
-                lower.contains("charged to")
-
-        if (type == BankTxType.DEBIT && hasRefundCreditKeywords && !hasDebitKeywords) {
-            return "Incorrect entry: Transaction wording indicates a refund/credit, but parsed as Debit."
-        }
-
-        if (type == BankTxType.CREDIT && hasDebitKeywords && !hasRefundCreditKeywords) {
-            return "Incorrect entry: Transaction wording indicates a debit/payment, but parsed as Credit."
+        val expectedType = TransactionParser.determineTransactionType(lower)
+        if (type != expectedType && !lower.contains("credit card") && !lower.contains("card bill")) {
+            return "Incorrect entry: Transaction wording indicates ${if (expectedType == BankTxType.CREDIT) "Credit/Income" else "Debit/Expense"}, but parsed as ${if (type == BankTxType.CREDIT) "Credit" else "Debit"}."
         }
 
         // 2. Non-financial OTP / Verification Code Check

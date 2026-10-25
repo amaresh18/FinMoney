@@ -252,7 +252,7 @@ object FinMoneyAuthService {
                 when {
                     msg.contains("OPERATION_NOT_ALLOWED", ignoreCase = true) ||
                         msg.contains("sign-in provider is disabled", ignoreCase = true) -> (
-                        "Firebase rejected phone OTP. Enable Phone on the project this APK uses and verify SHA keys " +
+                        "Firebase rejected phone OTP. Enable Phone on the project this APK uses and verify SHA-1 & SHA-256 keys " +
                             "(see diagnostics below). If you enabled Phone on another Firebase project, link this app to that project via google-services.json."
                         )
                     msg.contains("not authorized", ignoreCase = true) -> (
