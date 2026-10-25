@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardOptions
@@ -210,77 +211,77 @@ fun DashboardScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = AppTheme.dimensions.screenHorizontal),
-        verticalArrangement = Arrangement.spacedBy(AppTheme.dimensions.medium),
-        contentPadding = PaddingValues(top = AppTheme.dimensions.medium, bottom = 96.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp)
     ) {
-        // Google Calendar Month Selector Header
         item {
             var showCalendarPicker by remember { mutableStateOf(false) }
-
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = IndSurface,
-                border = BorderStroke(1.dp, IndBlue.copy(alpha = 0.3f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { showCalendarPicker = true }
-                    .testTag("calendar_header_button")
+                border = BorderStroke(1.dp, IndBorderSubtle),
+                shadowElevation = 1.dp,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = IndBlueLight,
-                            modifier = Modifier.size(40.dp)
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { showCalendarPicker = true }
+                                .testTag("calendar_header_button"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Filled.CalendarMonth,
-                                    contentDescription = null,
-                                    tint = IndBlue,
-                                    modifier = Modifier.size(22.dp)
-                                )
+                            Box(
+                                modifier = Modifier.size(32.dp).clip(CircleShape).background(IndBlueLight),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Filled.CalendarMonth, null, tint = IndBlue, modifier = Modifier.size(16.dp))
                             }
+                            Text("$monthName $year", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = IndNavyHeader)
                         }
-                        Column {
-                            Text(
-                                text = "$monthName $year Dashboard",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = IndNavyHeader
-                            )
-                            Text(
-                                text = "Google Calendar Date Filter ▾",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = IndBlue,
-                                fontSize = 11.sp
+                        IconButton(onClick = { viewModel.previousMonth() }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Filled.ChevronLeft, "Prev", tint = IndTextSecondary, modifier = Modifier.size(20.dp))
+                        }
+                        IconButton(onClick = { viewModel.nextMonth() }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Filled.ChevronRight, "Next", tint = IndTextSecondary, modifier = Modifier.size(20.dp))
+                        }
+                        IconButton(onClick = { viewModel.toggleFinancialSafetyVisible() }, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                if (isFinancialSafetyVisible) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
+                                "Privacy",
+                                tint = IndBlue,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        IconButton(onClick = { viewModel.previousMonth() }) {
-                            Icon(Icons.Filled.ChevronLeft, contentDescription = "Prev Month", tint = IndTextSecondary)
-                        }
-                        IconButton(onClick = { viewModel.nextMonth() }) {
-                            Icon(Icons.Filled.ChevronRight, contentDescription = "Next Month", tint = IndTextSecondary)
-                        }
+                    Spacer(Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        CompactMetric(
+                            "In",
+                            if (!isFinancialSafetyVisible) "★★★★" else "$currencySymbol${"%,.0f".format(summary.totalIncome)}",
+                            IndGreenDark,
+                            Icons.Filled.SouthWest
+                        ) { mainLedgerTab = "CREDITS" }
+                        CompactMetric(
+                            "Out",
+                            "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
+                            IndRed,
+                            Icons.Filled.NorthEast
+                        ) { mainLedgerTab = "DEBITS" }
+                        CompactMetric(
+                            "Net",
+                            if (!isFinancialSafetyVisible) "★★★★" else "$currencySymbol${"%,.0f".format(summary.netFlexibleSpending)}",
+                            if (summary.netFlexibleSpending >= 0) IndNavyHeader else IndRed,
+                            Icons.Filled.Savings
+                        )
                     }
                 }
             }
-
             if (showCalendarPicker) {
                 IndGoogleCalendarDatePicker(
                     currentMonth = month,
@@ -295,167 +296,16 @@ fun DashboardScreen(
             }
         }
 
-        // Summary Card (Aggregate View)
-        item {
-            IndCard(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "MONTHLY AGGREGATE SUMMARY",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = IndBlueDark,
-                        fontSize = 11.sp
-                    )
-                    IconButton(
-                        onClick = { viewModel.toggleFinancialSafetyVisible() },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isFinancialSafetyVisible) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
-                            contentDescription = "Toggle Privacy",
-                            tint = if (isFinancialSafetyVisible) IndBlue else IndTextSecondary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .clickable { mainLedgerTab = "CREDITS" }
-                            .testTag("edit_income_section")
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Total Income ▾", style = MaterialTheme.typography.labelSmall, color = IndGreenDark, fontWeight = FontWeight.Bold)
-                        }
-                        Text(
-                            text = if (!isFinancialSafetyVisible) "$currencySymbol★★★★★★" else "$currencySymbol${"%,.0f".format(summary.totalIncome)}",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = IndGreenDark
-                        )
-                    }
-                    Column(
-                        modifier = Modifier.clickable { mainLedgerTab = "DEBITS" }
-                    ) {
-                        Text("Total Outflow ▾", style = MaterialTheme.typography.labelSmall, color = IndRed, fontWeight = FontWeight.Bold)
-                        Text(
-                            text = "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = IndRed
-                        )
-                    }
-                    Column {
-                        Text("Net Savings", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary)
-                        Text(
-                            text = if (!isFinancialSafetyVisible) "$currencySymbol★★★★★★" else "$currencySymbol${"%,.0f".format(summary.netFlexibleSpending)}",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = if (summary.netFlexibleSpending >= 0) IndTextPrimary else IndRed
-                        )
-                    }
-                }
-            }
-        }
-
-        // Quick Action Buttons: Add Credit & Add Debit
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                IndPrimaryButton(
-                    text = "Add Credit",
-                    onClick = { showAddCreditDialog = true },
-                    icon = Icons.Filled.Add,
-                    backgroundColor = Color(0xFF16A34A),
-                    testTag = "add_credit_dashboard_button",
-                    modifier = Modifier.weight(1f)
-                )
-
-                IndPrimaryButton(
-                    text = "Add Debit",
-                    onClick = { onOpenAddDebit() },
-                    icon = Icons.Filled.Add,
-                    backgroundColor = IndBlue,
-                    testTag = "add_debit_dashboard_button",
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        // Secondary Utility Bar: Import Statement & Prefill Recurring Bills
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFFEFF6FF),
-                    border = BorderStroke(1.dp, IndBlue.copy(alpha = 0.3f)),
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { showImportStatementDialog = true }
-                        .testTag("import_statement_dashboard_button")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FileUpload,
-                            contentDescription = "Import Statement",
-                            tint = IndBlue,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "Import Statement",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = IndBlue
-                        )
-                    }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFFF0FDF4),
-                    border = BorderStroke(1.dp, Color(0xFF86EFAC)),
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable {
-                            viewModel.prefillRecurringDebitsForMonth(month, year)
-                        }
-                        .testTag("prefill_recurring_dashboard_button")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Repeat,
-                            contentDescription = "Prefill Recurring",
-                            tint = Color(0xFF16A34A),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "Prefill Recurring",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF16A34A)
-                        )
-                    }
+                MiniDashAction("Expense", Icons.Filled.Add, IndBlue, IndBlueLight, Modifier.weight(1f).testTag("add_debit_dashboard_button")) { onOpenAddDebit() }
+                MiniDashAction("Income", Icons.Filled.Add, IndGreenDark, IndGreenLight, Modifier.weight(1f).testTag("add_credit_dashboard_button")) { showAddCreditDialog = true }
+                MiniDashAction("Import", Icons.Filled.FileUpload, IndBlue, Color(0xFFEFF6FF), Modifier.weight(1f).testTag("import_statement_dashboard_button")) { showImportStatementDialog = true }
+                MiniDashAction("Recurring", Icons.Filled.Repeat, Color(0xFF16A34A), Color(0xFFF0FDF4), Modifier.weight(1f).testTag("prefill_recurring_dashboard_button")) {
+                    viewModel.prefillRecurringDebitsForMonth(month, year)
                 }
             }
         }
@@ -591,7 +441,7 @@ fun DashboardScreen(
                         color = if (isDebits) IndRed else Color.Transparent
                     ) {
                         Row(
-                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+                            modifier = Modifier.padding(vertical = 7.dp, horizontal = 8.dp),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -599,12 +449,12 @@ fun DashboardScreen(
                                 imageVector = Icons.Filled.ArrowUpward,
                                 contentDescription = "Debits",
                                 tint = if (isDebits) Color.White else IndRed,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Expenses / Debits",
-                                fontSize = 13.sp,
+                                text = "Expenses",
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isDebits) Color.White else IndTextPrimary
                             )
@@ -620,7 +470,7 @@ fun DashboardScreen(
                         color = if (isCredits) Color(0xFF16A34A) else Color.Transparent
                     ) {
                         Row(
-                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+                            modifier = Modifier.padding(vertical = 7.dp, horizontal = 8.dp),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -628,12 +478,12 @@ fun DashboardScreen(
                                 imageVector = Icons.Filled.ArrowDownward,
                                 contentDescription = "Credits",
                                 tint = if (isCredits) Color.White else Color(0xFF16A34A),
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Credits / Income",
-                                fontSize = 13.sp,
+                                text = "Income",
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isCredits) Color.White else IndTextPrimary
                             )
@@ -660,178 +510,94 @@ fun DashboardScreen(
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = "Spending",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = IndNavyHeader
-                        )
-                        Text(
-                            text = "${filteredDebits.size} of ${currentDebits.size} items",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = IndTextSecondary
-                        )
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = "$currencySymbol${"%,.0f".format(visibleTotal)}",
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 20.sp,
-                            color = IndNavyHeader
-                        )
-                        Text("Filtered total", fontSize = 11.sp, color = IndTextSecondary)
-                    }
+                    Text(
+                        text = "Spending · ${filteredDebits.size} items",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = IndNavyHeader
+                    )
+                    Text(
+                        text = "$currencySymbol${"%,.0f".format(visibleTotal)}",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 16.sp,
+                        color = IndNavyHeader
+                    )
                 }
 
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = IndSurface,
                     border = BorderStroke(1.dp, IndBorderSubtle),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("View", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndTextSecondary)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(IndBackground)
-                                .padding(4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            listOf(
-                                "GROUP_BY_CATEGORY" to "By category",
-                                "LIST" to "All items"
-                            ).forEach { (mode, label) ->
-                                val selected = dashboardViewMode == mode
-                                Surface(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable { dashboardViewMode = mode },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = if (selected) IndBlue else Color.Transparent
-                                ) {
-                                    Text(
-                                        text = label,
-                                        modifier = Modifier.padding(vertical = 8.dp),
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (selected) Color.White else IndTextSecondary
-                                    )
+                            DashIconChip("Category", Icons.Filled.GridView, dashboardViewMode == "GROUP_BY_CATEGORY", IndBlue) {
+                                dashboardViewMode = "GROUP_BY_CATEGORY"
+                            }
+                            DashIconChip("List", Icons.Filled.ViewList, dashboardViewMode == "LIST", IndBlue) {
+                                dashboardViewMode = "LIST"
+                            }
+                            DashIconChip("All", Icons.Filled.Apps, selectedStatusFilter == "ALL", IndNavyHeader) {
+                                selectedStatusFilter = "ALL"
+                            }
+                            DashIconChip("Unpaid", Icons.Filled.HourglassTop, selectedStatusFilter == "YET_TO_PAY", Color(0xFFD97706)) {
+                                selectedStatusFilter = "YET_TO_PAY"
+                            }
+                            DashIconChip("Paid", Icons.Filled.CheckCircle, selectedStatusFilter == "ALREADY_PAID", IndGreenDark) {
+                                selectedStatusFilter = "ALREADY_PAID"
+                            }
+                            DashIconChip("Card", Icons.Filled.CreditCard, creditCardOnlyFilter, IndPurple) {
+                                creditCardOnlyFilter = !creditCardOnlyFilter
+                            }
+                            DashIconChip("Repeat", Icons.Filled.Repeat, recurringOnlyFilter, Color(0xFF0284C7)) {
+                                recurringOnlyFilter = !recurringOnlyFilter
+                            }
+                            if (filtersActive) {
+                                DashIconChip("Clear", Icons.Filled.Close, false, IndRed) {
+                                    selectedStatusFilter = "ALL"
+                                    creditCardOnlyFilter = false
+                                    recurringOnlyFilter = false
+                                    selectedCategoryFilter = "ALL"
+                                    viewModel.setMonthYear(month, year, null)
                                 }
                             }
                         }
 
-                        Text("Payment", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndTextSecondary)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf(
-                                "ALL" to "All",
-                                "YET_TO_PAY" to "Unpaid",
-                                "ALREADY_PAID" to "Paid"
-                            ).forEach { (key, label) ->
-                                FilterChip(
-                                    selected = selectedStatusFilter == key,
-                                    onClick = { selectedStatusFilter = key },
-                                    label = { Text(label, fontSize = 12.sp) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-
-                        Text("Type Filters", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndTextSecondary)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilterChip(
-                                selected = creditCardOnlyFilter,
-                                onClick = { creditCardOnlyFilter = !creditCardOnlyFilter },
-                                label = { Text("Credit Card", fontSize = 12.sp) },
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            FilterChip(
-                                selected = recurringOnlyFilter,
-                                onClick = { recurringOnlyFilter = !recurringOnlyFilter },
-                                label = { Text("Recurring", fontSize = 12.sp) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        if (filtersActive) {
-                            TextButton(onClick = {
-                                selectedStatusFilter = "ALL"
-                                creditCardOnlyFilter = false
-                                recurringOnlyFilter = false
-                                selectedCategoryFilter = "ALL"
-                                viewModel.setMonthYear(month, year, null)
-                            }) {
-                                Text("Clear filters")
-                            }
-                        }
-                    }
-                }
-
-                if (categoryTotals.isNotEmpty()) {
-                    Text(
-                        "Totals by category",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = IndTextSecondary
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        categoryTotals.forEach { (category, total, count) ->
-                            val selected = selectedCategoryFilter.equals(category, true)
-                            Surface(
+                        if (categoryTotals.isNotEmpty()) {
+                            Row(
                                 modifier = Modifier
-                                    .width(148.dp)
-                                    .clickable {
-                                        selectedCategoryFilter = if (selected) "ALL" else category
-                                    },
-                                shape = RoundedCornerShape(16.dp),
-                                color = if (selected) IndNavyHeader else IndSurface,
-                                border = BorderStroke(1.dp, if (selected) IndNavyHeader else IndBorderSubtle)
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Text(
-                                        prettyCategory(category),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (selected) Color.White.copy(alpha = 0.8f) else IndTextSecondary,
-                                        maxLines = 1
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        "$currencySymbol${"%,.0f".format(total)}",
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = if (selected) Color.White else IndNavyHeader
-                                    )
-                                    Text(
-                                        "$count items",
-                                        fontSize = 11.sp,
-                                        color = if (selected) IndBlueLight else IndTextMuted
-                                    )
+                                categoryTotals.forEach { (category, total, count) ->
+                                    val selected = selectedCategoryFilter.equals(category, true)
+                                    CategoryTotalPill(
+                                        category = category,
+                                        totalLabel = "$currencySymbol${"%,.0f".format(total)}",
+                                        count = count,
+                                        selected = selected,
+                                        selectedColor = IndNavyHeader
+                                    ) {
+                                        selectedCategoryFilter = if (selected) "ALL" else category
+                                    }
                                 }
                             }
                         }
@@ -852,27 +618,6 @@ fun DashboardScreen(
                 )
             }
         } else if (dashboardViewMode == "GROUP_BY_CATEGORY") {
-            // Spend by Category Header identical to Analytics
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Spend by Category (${dashboardCategorySummaries.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = IndTextPrimary
-                    )
-                    Text(
-                        text = "Tap to inspect & edit items",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = IndTextMuted
-                    )
-                }
-            }
-
             items(dashboardCategorySummaries, key = { "cat_${it.categoryKey}" }) { cat ->
                 val categoryShare = if (totalFilteredDebits > 0) (cat.totalAmount / totalFilteredDebits).toFloat() else 0f
                 val isExpanded = expandedCategoryKeys.contains(cat.categoryKey)
@@ -1034,155 +779,84 @@ fun DashboardScreen(
 
                 Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text(
-                                text = "Income & Credits Inflow",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = IndNavyHeader
-                            )
-                            Text(
-                                text = "${filteredCredits.size} of ${currentIncomeSources.size} credit sources",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = IndTextSecondary
-                            )
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = "+$currencySymbol${"%,.0f".format(visibleCreditTotal)}",
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 20.sp,
-                                color = Color(0xFF16A34A)
-                            )
-                            Text("Filtered total", fontSize = 11.sp, color = IndTextSecondary)
-                        }
+                        Text(
+                            text = "Income · ${filteredCredits.size} items",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndNavyHeader
+                        )
+                        Text(
+                            text = "+$currencySymbol${"%,.0f".format(visibleCreditTotal)}",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 16.sp,
+                            color = Color(0xFF16A34A)
+                        )
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(14.dp),
                         color = IndSurface,
                         border = BorderStroke(1.dp, IndBorderSubtle),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text("View", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndTextSecondary)
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(IndBackground)
-                                    .padding(4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                listOf(
-                                    "GROUP_BY_CATEGORY" to "By category",
-                                    "LIST" to "All items"
-                                ).forEach { (mode, label) ->
-                                    val selected = creditsViewMode == mode
-                                    Surface(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clickable { creditsViewMode = mode },
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = if (selected) Color(0xFF16A34A) else Color.Transparent
-                                    ) {
-                                        Text(
-                                            text = label,
-                                            modifier = Modifier.padding(vertical = 8.dp),
-                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = if (selected) Color.White else IndTextSecondary
-                                        )
+                                DashIconChip("Category", Icons.Filled.GridView, creditsViewMode == "GROUP_BY_CATEGORY", Color(0xFF16A34A)) {
+                                    creditsViewMode = "GROUP_BY_CATEGORY"
+                                }
+                                DashIconChip("List", Icons.Filled.ViewList, creditsViewMode == "LIST", Color(0xFF16A34A)) {
+                                    creditsViewMode = "LIST"
+                                }
+                                DashIconChip("All", Icons.Filled.Apps, selectedCreditStatusFilter == "ALL", IndNavyHeader) {
+                                    selectedCreditStatusFilter = "ALL"
+                                }
+                                DashIconChip("Received", Icons.Filled.CheckCircle, selectedCreditStatusFilter == "RECEIVED", IndGreenDark) {
+                                    selectedCreditStatusFilter = "RECEIVED"
+                                }
+                                DashIconChip("Pending", Icons.Filled.HourglassTop, selectedCreditStatusFilter == "PENDING", Color(0xFFD97706)) {
+                                    selectedCreditStatusFilter = "PENDING"
+                                }
+                                if (creditFiltersActive) {
+                                    DashIconChip("Clear", Icons.Filled.Close, false, IndRed) {
+                                        selectedCreditStatusFilter = "ALL"
+                                        selectedCreditCategoryFilter = "ALL"
                                     }
                                 }
                             }
 
-                            Text("Status", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndTextSecondary)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf(
-                                    "ALL" to "All",
-                                    "RECEIVED" to "Received",
-                                    "PENDING" to "Pending"
-                                ).forEach { (key, label) ->
-                                    FilterChip(
-                                        selected = selectedCreditStatusFilter == key,
-                                        onClick = { selectedCreditStatusFilter = key },
-                                        label = { Text(label, fontSize = 12.sp) },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-
-                            if (creditFiltersActive) {
-                                TextButton(onClick = {
-                                    selectedCreditStatusFilter = "ALL"
-                                    selectedCreditCategoryFilter = "ALL"
-                                }) {
-                                    Text("Clear filters")
-                                }
-                            }
-                        }
-                    }
-
-                    if (creditCategoryTotals.isNotEmpty()) {
-                        Text(
-                            "Totals by category",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = IndTextSecondary
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            creditCategoryTotals.forEach { (category, total, count) ->
-                                val selected = selectedCreditCategoryFilter.equals(category, true)
-                                Surface(
+                            if (creditCategoryTotals.isNotEmpty()) {
+                                Row(
                                     modifier = Modifier
-                                        .width(148.dp)
-                                        .clickable {
-                                            selectedCreditCategoryFilter = if (selected) "ALL" else category
-                                        },
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = if (selected) Color(0xFF16A34A) else IndSurface,
-                                    border = BorderStroke(1.dp, if (selected) Color(0xFF16A34A) else IndBorderSubtle)
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Text(
-                                            prettyCategory(category),
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = if (selected) Color.White.copy(alpha = 0.8f) else IndTextSecondary,
-                                            maxLines = 1
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            "+$currencySymbol${"%,.0f".format(total)}",
-                                            fontSize = 18.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = if (selected) Color.White else Color(0xFF16A34A)
-                                        )
-                                        Text(
-                                            "$count items",
-                                            fontSize = 11.sp,
-                                            color = if (selected) Color.White.copy(alpha = 0.8f) else IndTextMuted
-                                        )
+                                    creditCategoryTotals.forEach { (category, total, count) ->
+                                        val selected = selectedCreditCategoryFilter.equals(category, true)
+                                        CategoryTotalPill(
+                                            category = category,
+                                            totalLabel = "+$currencySymbol${"%,.0f".format(total)}",
+                                            count = count,
+                                            selected = selected,
+                                            selectedColor = Color(0xFF16A34A)
+                                        ) {
+                                            selectedCreditCategoryFilter = if (selected) "ALL" else category
+                                        }
                                     }
                                 }
                             }
@@ -1203,26 +877,6 @@ fun DashboardScreen(
                     )
                 }
             } else if (creditsViewMode == "GROUP_BY_CATEGORY") {
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Inflow by Category (${creditsCategorySummaries.size})",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = IndTextPrimary
-                        )
-                        Text(
-                            text = "Tap to expand category items",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = IndTextMuted
-                        )
-                    }
-                }
-
                 items(creditsCategorySummaries, key = { "credit_cat_${it.categoryKey}" }) { cat ->
                     val isExpanded = expandedCreditCategoryKeys.contains(cat.categoryKey)
                     val categoryItems = remember(filteredCredits, cat.categoryKey) {
@@ -1809,6 +1463,142 @@ private fun prettyCategory(raw: String): String {
     return raw.replace('_', ' ').lowercase().split(' ')
         .filter { it.isNotBlank() }
         .joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }
+}
+
+@Composable
+private fun CompactMetric(
+    label: String,
+    value: String,
+    color: Color,
+    icon: ImageVector,
+    onClick: (() -> Unit)? = null
+) {
+    Column(
+        modifier = Modifier
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 4.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Icon(icon, null, tint = color, modifier = Modifier.size(12.dp))
+            Text(label, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = IndTextSecondary)
+        }
+        Text(value, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = color)
+    }
+}
+
+@Composable
+private fun MiniDashAction(
+    label: String,
+    icon: ImageVector,
+    tint: Color,
+    background: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = background,
+        border = BorderStroke(1.dp, tint.copy(alpha = 0.22f)),
+        modifier = modifier.clickable(onClick = onClick)
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Icon(icon, label, tint = tint, modifier = Modifier.size(16.dp))
+            Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = tint, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun DashIconChip(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    accent: Color,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = if (selected) accent else IndBackground,
+        border = BorderStroke(1.dp, if (selected) accent else IndBorderSubtle),
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(icon, null, tint = if (selected) Color.White else accent, modifier = Modifier.size(13.dp))
+            Text(
+                label,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (selected) Color.White else IndTextPrimary
+            )
+        }
+    }
+}
+
+@Composable
+private fun CategoryTotalPill(
+    category: String,
+    totalLabel: String,
+    count: Int,
+    selected: Boolean,
+    selectedColor: Color,
+    onClick: () -> Unit
+) {
+    val styling = getCategoryStyling(category)
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) selectedColor else IndBackground,
+        border = BorderStroke(1.dp, if (selected) selectedColor else IndBorderSubtle),
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(if (selected) Color.White.copy(alpha = 0.18f) else styling.second),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    styling.first,
+                    null,
+                    tint = if (selected) Color.White else styling.third,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+            Column {
+                Text(
+                    prettyCategory(category),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (selected) Color.White.copy(alpha = 0.85f) else IndTextSecondary,
+                    maxLines = 1
+                )
+                Text(
+                    totalLabel,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (selected) Color.White else IndNavyHeader
+                )
+                Text(
+                    "$count",
+                    fontSize = 9.sp,
+                    color = if (selected) Color.White.copy(alpha = 0.7f) else IndTextMuted
+                )
+            }
+        }
+    }
 }
 
 @Composable

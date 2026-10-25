@@ -4,6 +4,7 @@ import androidx.room.TypeConverter
 import com.example.data.model.DebitCategory
 import com.example.data.model.IncomeCategory
 import com.example.data.model.LoanApprovalStatus
+import com.example.data.model.LoanLedgerKind
 import com.example.data.model.LoanType
 
 class Converters {
@@ -17,6 +18,20 @@ class Converters {
                 LoanType.valueOf(it)
             } catch (_: Exception) {
                 if (it.equals("BORROWED", true) || it.equals("TAKEN", true)) LoanType.BORROWED else LoanType.LENT
+            }
+        }
+    }
+
+    @TypeConverter
+    fun fromLoanLedgerKind(value: LoanLedgerKind?): String? = value?.name
+
+    @TypeConverter
+    fun toLoanLedgerKind(value: String?): LoanLedgerKind? {
+        return value?.let {
+            try {
+                LoanLedgerKind.valueOf(it)
+            } catch (_: Exception) {
+                LoanLedgerKind.CLEARING
             }
         }
     }

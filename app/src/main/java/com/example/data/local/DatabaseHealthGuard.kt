@@ -30,6 +30,8 @@ object DatabaseHealthGuard {
                             name = "FinMoney Member",
                             email = "",
                             phoneNumber = "",
+                            isOtpVerified = false,
+                            isEmailVerified = false,
                             monthlyBudget = 0.0,
                             currencySymbol = "₹"
                         )

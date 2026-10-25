@@ -71,6 +71,12 @@ fun UserProfileScreen(
     val effectivePhone = remember(userProfile) {
         userProfile?.phoneNumber?.takeIf { it.isNotBlank() } ?: ""
     }
+    val phoneVerified = userProfile?.isOtpVerified == true
+    val emailVerified = userProfile?.isEmailVerified == true
+
+    LaunchedEffect(Unit) {
+        viewModel.syncVerificationStatusFromFirebaseAsync()
+    }
 
     var nameInput by remember(effectiveName) { mutableStateOf(effectiveName) }
     var emailInput by remember(effectiveEmail) { mutableStateOf(effectiveEmail) }
@@ -226,31 +232,51 @@ fun UserProfileScreen(
                     ) {
                         Surface(
                             shape = RoundedCornerShape(20.dp),
-                            color = IndGreenLight,
-                            border = BorderStroke(1.dp, IndGreen.copy(alpha = 0.3f))
+                            color = if (phoneVerified) IndGreenLight else IndSurface,
+                            border = BorderStroke(1.dp, if (phoneVerified) IndGreen.copy(alpha = 0.3f) else IndBorderSubtle)
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Icon(Icons.Filled.Verified, contentDescription = null, tint = IndGreenDark, modifier = Modifier.size(14.dp))
-                                Text("Google Verified", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndGreenDark)
+                                Icon(
+                                    if (phoneVerified) Icons.Filled.Verified else Icons.Outlined.PhoneAndroid,
+                                    contentDescription = null,
+                                    tint = if (phoneVerified) IndGreenDark else IndTextSecondary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    if (phoneVerified) "Mobile verified" else "Mobile pending",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (phoneVerified) IndGreenDark else IndTextSecondary
+                                )
                             }
                         }
 
                         Surface(
                             shape = RoundedCornerShape(20.dp),
-                            color = IndBlueLight,
-                            border = BorderStroke(1.dp, IndBlue.copy(alpha = 0.3f))
+                            color = if (emailVerified) IndGreenLight else IndSurface,
+                            border = BorderStroke(1.dp, if (emailVerified) IndGreen.copy(alpha = 0.3f) else IndBorderSubtle)
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Icon(Icons.Filled.CloudSync, contentDescription = null, tint = IndBlue, modifier = Modifier.size(14.dp))
-                                Text("Sync Active", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndBlue)
+                                Icon(
+                                    if (emailVerified) Icons.Filled.MarkEmailRead else Icons.Outlined.Email,
+                                    contentDescription = null,
+                                    tint = if (emailVerified) IndGreenDark else IndTextSecondary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    if (emailVerified) "Email verified" else "Email pending",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (emailVerified) IndGreenDark else IndTextSecondary
+                                )
                             }
                         }
                     }
@@ -265,27 +291,42 @@ fun UserProfileScreen(
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
-                            OutlinedTextField(
-                                value = emailInput,
-                                onValueChange = { emailInput = it },
-                                label = { Text("Email Address") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            OutlinedTextField(
-                                value = phoneInput,
-                                onValueChange = { phoneInput = it },
-                                label = { Text("Phone Number") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
+                            if (effectivePhone.isNotBlank()) {
+                                OutlinedTextField(
+                                    value = "+91 ${effectivePhone.takeLast(10)}",
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    enabled = false,
+                                    label = { Text("Mobile (OTP verified)") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            if (effectiveEmail.isNotBlank()) {
+                                OutlinedTextField(
+                                    value = effectiveEmail,
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    enabled = false,
+                                    label = { Text("Email") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            Text(
+                                "Phone and email can only be changed after re-verification. Sign out and complete onboarding to update.",
+                                fontSize = 11.sp,
+                                color = IndTextSecondary
                             )
 
                             Button(
                                 onClick = {
                                     viewModel.saveUserProfile(
                                         name = nameInput,
-                                        email = emailInput,
-                                        phoneNumber = phoneInput
+                                        email = effectiveEmail,
+                                        phoneNumber = effectivePhone,
+                                        isOtpVerified = phoneVerified,
+                                        isEmailVerified = emailVerified
                                     )
                                     isEditProfileMode = false
                                     android.widget.Toast.makeText(context, "Profile updated successfully!", android.widget.Toast.LENGTH_SHORT).show()

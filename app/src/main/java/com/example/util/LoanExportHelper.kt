@@ -23,7 +23,13 @@ object LoanExportHelper {
         
         for (loan in loans) {
             val typeStr = if (loan.type == LoanType.GIVEN || loan.type == LoanType.LENT) "GIVEN (LENT)" else "TAKEN (BORROWED)"
-            val remaining = (loan.totalAmount - loan.settledAmount).coerceAtLeast(0.0)
+            val remaining = if (loan.status == com.example.data.model.LoanApprovalStatus.SETTLED || loan.status == com.example.data.model.LoanApprovalStatus.REJECTED) {
+                0.0
+            } else if (loan.outstandingAmount > 0.0 || loan.paidAmount > 0.0) {
+                loan.outstandingAmount
+            } else {
+                (loan.totalAmount - loan.settledAmount).coerceAtLeast(0.0)
+            }
             val start = dateFormat.format(Date(loan.startDateTimestamp))
             val due = loan.dueDateTimestamp?.let { dateFormat.format(Date(it)) } ?: "None"
             val name = escapeCsv(loan.counterpartyName)
@@ -56,7 +62,13 @@ object LoanExportHelper {
             val typeStr = if (isGiven) "GIVEN (LENT)" else "TAKEN (BORROWED)"
             val bg = if (isGiven) "#E8F5E9" else "#FFEBEE"
             val fg = if (isGiven) "#2E7D32" else "#C62828"
-            val remaining = (loan.totalAmount - loan.settledAmount).coerceAtLeast(0.0)
+            val remaining = if (loan.status == com.example.data.model.LoanApprovalStatus.SETTLED || loan.status == com.example.data.model.LoanApprovalStatus.REJECTED) {
+                0.0
+            } else if (loan.outstandingAmount > 0.0 || loan.paidAmount > 0.0) {
+                loan.outstandingAmount
+            } else {
+                (loan.totalAmount - loan.settledAmount).coerceAtLeast(0.0)
+            }
             val start = dateFormat.format(Date(loan.startDateTimestamp))
             val due = loan.dueDateTimestamp?.let { dateFormat.format(Date(it)) } ?: "None"
             

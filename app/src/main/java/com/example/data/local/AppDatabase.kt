@@ -19,12 +19,14 @@ import kotlinx.coroutines.launch
         DebitItem::class,
         CustomCategory::class,
         LoanTransaction::class,
+        LoanLedgerEntry::class,
         AppNotification::class,
         MonthlyReconciliation::class,
         BankTransactionRecord::class,
-        RawNotificationRecord::class
+        RawNotificationRecord::class,
+        CloudSyncOutboxEntry::class
     ],
-    version = 17,
+    version = 22,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -40,6 +42,91 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE loan_transactions ADD COLUMN proofPaths TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE loan_transactions ADD COLUMN agreementText TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_user_profiles_phone_unique " +
+                        "ON user_profiles(phoneNumber) WHERE phoneNumber != ''"
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_user_profiles_email_unique " +
+                        "ON user_profiles(email) WHERE email != ''"
+                )
+            }
+        }
+
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE loan_transactions ADD COLUMN outstandingAmount REAL NOT NULL DEFAULT 0.0")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS loan_ledger_entries (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        loanId INTEGER NOT NULL,
+                        userId TEXT NOT NULL,
+                        proposerPhone TEXT NOT NULL,
+                        proposerIsCreator INTEGER NOT NULL,
+                        kind TEXT NOT NULL,
+                        amount REAL NOT NULL,
+                        proposedAmount REAL NOT NULL,
+                        notes TEXT NOT NULL,
+                        proposedNotes TEXT NOT NULL,
+                        amendmentPending INTEGER NOT NULL,
+                        proofPaths TEXT NOT NULL,
+                        proposedProofPaths TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        agreementText TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        FOREIGN KEY(loanId) REFERENCES loan_transactions(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_loan_ledger_entries_loanId ON loan_ledger_entries(loanId)")
+            }
+        }
+
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE loan_transactions ADD COLUMN proposedAmount REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE loan_transactions ADD COLUMN proposedNotes TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE loan_transactions ADD COLUMN proposedPersonName TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE loan_transactions ADD COLUMN proposedPersonContact TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE loan_transactions ADD COLUMN amendmentPending INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE loan_transactions ADD COLUMN creatorPhone TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS cloud_sync_outbox (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        userId TEXT NOT NULL,
+                        subcollection TEXT NOT NULL,
+                        documentId TEXT NOT NULL,
+                        payloadJson TEXT NOT NULL,
+                        legacyCollectionsJson TEXT NOT NULL,
+                        attempts INTEGER NOT NULL,
+                        lastError TEXT,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_cloud_sync_outbox_user_doc " +
+                        "ON cloud_sync_outbox(userId, subcollection, documentId)"
+                )
             }
         }
 
@@ -91,7 +178,15 @@ abstract class AppDatabase : RoomDatabase() {
                         AppDatabase::class.java,
                         "finmoney_database"
                     )
-                        .addMigrations(MIGRATION_15_16, MIGRATION_16_17)
+                        .addMigrations(
+                            MIGRATION_15_16,
+                            MIGRATION_16_17,
+                            MIGRATION_17_18,
+                            MIGRATION_18_19,
+                            MIGRATION_19_20,
+                            MIGRATION_20_21,
+                            MIGRATION_21_22
+                        )
                         .fallbackToDestructiveMigration()
                         .fallbackToDestructiveMigrationOnDowngrade()
                         .build()

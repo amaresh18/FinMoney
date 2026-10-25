@@ -17,7 +17,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import android.widget.Toast
+import kotlinx.coroutines.flow.collectLatest
+import com.example.service.BankSyncManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -33,9 +37,23 @@ import com.example.ui.theme.*
 @Composable
 fun MainScreen(
     initialOpenPending: Boolean = false,
-    onPendingConsumed: () -> Unit = {}
+    onPendingConsumed: () -> Unit = {},
+    initialLoanCloudId: String? = null,
+    initialLoanId: Long? = null,
+    onLoanOpenConsumed: () -> Unit = {}
 ) {
     val viewModel: FinMoneyViewModel = viewModel()
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        viewModel.userNotice.collectLatest { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
+    LaunchedEffect(Unit) {
+        BankSyncManager.syncNotificationEvents.collectLatest { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
     var selectedTab by remember { mutableIntStateOf(0) }
     var showPendingTransactions by remember { mutableStateOf(initialOpenPending) }
 
@@ -53,6 +71,22 @@ fun MainScreen(
     val currentMonth by viewModel.currentMonth.collectAsStateWithLifecycle()
     val currentYear by viewModel.currentYear.collectAsStateWithLifecycle()
     val allDebits by viewModel.allDebits.collectAsStateWithLifecycle()
+
+    var focusLoanCloudId by remember { mutableStateOf(initialLoanCloudId) }
+    var focusLoanId by remember { mutableStateOf(initialLoanId) }
+
+    LaunchedEffect(initialLoanCloudId, initialLoanId) {
+        if (!initialLoanCloudId.isNullOrBlank() || (initialLoanId != null && initialLoanId > 0L)) {
+            focusLoanCloudId = initialLoanCloudId
+            focusLoanId = initialLoanId
+            selectedTab = 1
+            showPendingTransactions = false
+            onLoanOpenConsumed()
+        }
+    }
+    LaunchedEffect(Unit) {
+        viewModel.pullLoanInboxAsync()
+    }
 
     var showQuickMultiAddSheet by remember { mutableStateOf(false) }
     var showAnalytics by remember { mutableStateOf(false) }
@@ -325,7 +359,14 @@ fun MainScreen(
             if (showPendingTransactions) {
                 PendingTransactionsScreen(
                     viewModel = viewModel,
-                    onBack = { showPendingTransactions = false }
+                    onBack = { showPendingTransactions = false },
+                    onOpenLoan = { loanId, cloudId, notificationId ->
+                        viewModel.markLoanNotificationRead(notificationId)
+                        focusLoanId = loanId
+                        focusLoanCloudId = cloudId
+                        showPendingTransactions = false
+                        selectedTab = 1
+                    }
                 )
             } else if (showKuberaAi) {
                 KuberaAiScreen(viewModel = viewModel)
@@ -352,7 +393,13 @@ fun MainScreen(
                         }
                     1 -> LentBorrowedScreen(
                         viewModel = viewModel,
-                        onBack = { selectedTab = 0 }
+                        onBack = { selectedTab = 0 },
+                        focusLoanId = focusLoanId,
+                        focusLoanCloudId = focusLoanCloudId,
+                        onFocusConsumed = {
+                            focusLoanId = null
+                            focusLoanCloudId = null
+                        }
                     )
                     2 -> AnalyticsScreen(
                         viewModel = viewModel,

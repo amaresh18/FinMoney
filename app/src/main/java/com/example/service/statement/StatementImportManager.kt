@@ -88,8 +88,7 @@ object StatementImportManager {
     ): ImportCommitSummary = withContext(Dispatchers.IO) {
         val db = AppDatabase.getDatabase(context)
         val dao = db.finMoneyDao()
-        val userProfile = dao.getUserProfileDirect()
-        val userPhone = userProfile?.phoneNumber ?: ""
+        val cloudUser = com.example.cloud.CloudUserContextResolver.resolve(dao)
 
         val existingTxs = dao.getRecentBankTransactionsDirect(300)
         val existingRefs = existingTxs.mapNotNull { it.referenceNumber.takeIf { ref -> ref.isNotBlank() } }.toSet()
@@ -138,6 +137,7 @@ object StatementImportManager {
 
             // 1. Insert into bank_transactions as APPROVED (already reconciled via statement)
             val record = BankTransactionRecord(
+                userId = cloudUser.userId,
                 cloudId = UUID.randomUUID().toString(),
                 bankName = tx.bankName,
                 accountNumberLast4 = tx.accountLast4,
@@ -160,6 +160,7 @@ object StatementImportManager {
             // 2. Handle Debits vs Credits in financial ledger
             if (tx.type == BankTxType.DEBIT) {
                 val debitItem = DebitItem(
+                    userId = cloudUser.userId,
                     cloudId = UUID.randomUUID().toString(),
                     month = tx.month,
                     year = tx.year,
@@ -182,18 +183,18 @@ object StatementImportManager {
                 dao.insertBankTransaction(
                     savedRecord.copy(matchedDebitId = debitId, matchedDebitTitle = debitItem.title)
                 )
-                BankSyncManager.saveDebitToFirestore(context, debitItem.copy(id = debitId), userPhone, savedRecord)
+                BankSyncManager.saveDebitToFirestore(context, debitItem.copy(id = debitId), cloudUser, savedRecord)
 
                 debitsAdded++
                 totalDebits += tx.amount
             } else {
                 // CREDIT: Add to Monthly Income sources for that month/year
-                addIncomeCredit(context, dao, tx, userPhone, savedRecord)
+                addIncomeCredit(context, dao, tx, cloudUser, savedRecord)
                 creditsAdded++
                 totalCredits += tx.amount
             }
 
-            BankSyncManager.saveTransactionToFirestore(context, savedRecord, userPhone)
+            BankSyncManager.saveTransactionToFirestore(context, savedRecord, cloudUser)
         }
 
         ImportCommitSummary(
@@ -211,7 +212,7 @@ object StatementImportManager {
         context: Context,
         dao: com.example.data.local.FinMoneyDao,
         tx: ImportedStatementTransaction,
-        userPhone: String,
+        cloudUser: com.example.cloud.CloudUserContext,
         bankTxRecord: BankTransactionRecord? = null
     ) {
         val existingSalary = dao.getSalaryRecordDirect(tx.month, tx.year)
@@ -244,9 +245,10 @@ object StatementImportManager {
                 updatedAt = System.currentTimeMillis()
             )
             dao.insertOrUpdateSalary(updatedRecord)
-            BankSyncManager.saveSalaryToFirestore(context, updatedRecord, userPhone)
+            BankSyncManager.saveSalaryToFirestore(context, updatedRecord.copy(userId = cloudUser.userId), cloudUser)
         } else {
             val newRecord = com.example.data.model.SalaryRecord(
+                userId = cloudUser.userId,
                 month = tx.month,
                 year = tx.year,
                 monthYear = monthYear,
@@ -256,9 +258,9 @@ object StatementImportManager {
                 updatedAt = System.currentTimeMillis()
             )
             dao.insertOrUpdateSalary(newRecord)
-            BankSyncManager.saveSalaryToFirestore(context, newRecord, userPhone)
+            BankSyncManager.saveSalaryToFirestore(context, newRecord, cloudUser)
         }
-        BankSyncManager.saveIncomeToFirestore(context, newSource, tx.month, tx.year, userPhone, bankTxRecord)
+        BankSyncManager.saveIncomeToFirestore(context, newSource, tx.month, tx.year, cloudUser, bankTxRecord)
     }
 
     private fun getFileName(context: Context, uri: Uri): String {

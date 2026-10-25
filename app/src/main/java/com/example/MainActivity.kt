@@ -14,6 +14,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.service.BankSyncManager
@@ -27,12 +30,14 @@ import kotlinx.coroutines.delay
 class MainActivity : ComponentActivity() {
 
     private val openPendingState = mutableStateOf(false)
+    private val openLoanCloudIdState = mutableStateOf<String?>(null)
+    private val openLoanIdState = mutableStateOf<Long?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        openPendingState.value = intent?.action == BankSyncManager.ACTION_OPEN_PENDING
+        applyOpenIntent(intent)
 
         setContent {
             FinMoneyTheme {
@@ -43,6 +48,17 @@ class MainActivity : ComponentActivity() {
                     val viewModel: FinMoneyViewModel = viewModel()
                     val userProfileState by viewModel.userProfile.collectAsStateWithLifecycle()
                     val shouldOpenPending by openPendingState
+                    val lifecycleOwner = LocalLifecycleOwner.current
+
+                    DisposableEffect(lifecycleOwner) {
+                        val observer = LifecycleEventObserver { _, event ->
+                            if (event == Lifecycle.Event.ON_RESUME) {
+                                viewModel.syncVerificationStatusFromFirebaseAsync()
+                            }
+                        }
+                        lifecycleOwner.lifecycle.addObserver(observer)
+                        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+                    }
 
                     var isInitializing by remember { mutableStateOf(true) }
 
@@ -65,25 +81,39 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     } else {
-                        val isLoggedIn = userProfileState != null &&
-                            userProfileState?.name != "Signed Out" &&
-                            !userProfileState?.name.isNullOrBlank() &&
-                            (userProfileState?.isOtpVerified == true || userProfileState?.isEmailVerified == true)
+                        val profile = userProfileState
+                        val isPlaceholderProfile = profile?.userId == "user_default" &&
+                            profile.phoneNumber.isBlank() &&
+                            profile.email.isBlank()
+                        val isLoggedIn = profile != null &&
+                            !isPlaceholderProfile &&
+                            profile.name != "Signed Out" &&
+                            profile.name.isNotBlank() &&
+                            profile.isOtpVerified &&
+                            profile.isEmailVerified
 
                         Crossfade(
                             targetState = isLoggedIn,
                             label = "AppAuthTransition"
                         ) { loggedIn ->
                             if (loggedIn) {
+                                val openLoanCloudId by openLoanCloudIdState
+                                val openLoanId by openLoanIdState
                                 MainScreen(
                                     initialOpenPending = shouldOpenPending,
-                                    onPendingConsumed = { openPendingState.value = false }
+                                    onPendingConsumed = { openPendingState.value = false },
+                                    initialLoanCloudId = openLoanCloudId,
+                                    initialLoanId = openLoanId,
+                                    onLoanOpenConsumed = {
+                                        openLoanCloudIdState.value = null
+                                        openLoanIdState.value = null
+                                    }
                                 )
                             } else {
                                 com.example.ui.screens.AuthScreen(
                                     viewModel = viewModel,
                                     onContinue = {
-                                        viewModel.markUserLoggedIn()
+                                        viewModel.syncVerificationStatusFromFirebaseAsync()
                                     }
                                 )
                             }
@@ -97,14 +127,28 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        applyOpenIntent(intent)
+    }
+
+    private fun applyOpenIntent(intent: Intent?) {
+        if (intent == null) return
         if (intent.action == BankSyncManager.ACTION_OPEN_PENDING) {
             openPendingState.value = true
+        }
+        if (intent.action == com.example.service.LoanInviteService.ACTION_OPEN_LOAN ||
+            intent.data?.host == com.example.service.LoanInviteService.DEEP_LINK_HOST
+        ) {
+            openLoanCloudIdState.value = intent.getStringExtra(com.example.service.LoanInviteService.EXTRA_LOAN_CLOUD_ID)
+                ?: intent.data?.lastPathSegment
+            val id = intent.getLongExtra(com.example.service.LoanInviteService.EXTRA_LOAN_ID, 0L)
+            openLoanIdState.value = if (id > 0L) id else null
         }
     }
 
     override fun onResume() {
         super.onResume()
-        // Ensure BankNotificationListenerService is active and bound
         BankSyncManager.ensureServiceBound(this)
+        com.example.cloud.CloudSyncOutboxManager.scheduleFlush(applicationContext)
     }
+
 }

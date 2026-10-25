@@ -26,6 +26,9 @@ import com.example.data.model.IncomeCategory
 import com.example.data.model.IncomeSource
 import com.example.data.model.MonthlyReconciliation
 import com.example.data.model.SalaryRecord
+import com.example.cloud.CloudUserContext
+import com.example.cloud.CloudUserContextResolver
+import com.example.cloud.CloudSyncOutboxManager
 import com.example.data.repository.FinMoneyRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -304,8 +307,11 @@ object BankSyncManager {
 
         scope.launch {
             try {
+                val dao = AppDatabase.getDatabase(context).finMoneyDao()
+                val cloudUser = CloudUserContextResolver.resolve(dao)
                 // 1. Insert into bank_transactions table
                 val record = BankTransactionRecord(
+                    userId = cloudUser.userId,
                     cloudId = parsed.id,
                     bankName = parsed.bankName,
                     accountNumberLast4 = parsed.accountNumberLast4,
@@ -333,12 +339,6 @@ object BankSyncManager {
                 val insertedId = dao.insertBankTransaction(record)
                 val savedRecord = record.copy(id = insertedId)
 
-                // 2. Automatically save classified transaction to Firestore
-                val userProfile = dao.getUserProfileDirect()
-                val userPhone = userProfile?.phoneNumber ?: ""
-                saveTransactionToFirestore(context, savedRecord, userPhone)
-
-                // 3. If availableBalance is present, auto-update the bank balance in Monthly Reconciliation!
                 if (parsed.availableBalance != null && parsed.availableBalance >= 0.0) {
                     updateReconciliationBankBalance(
                         dao = dao,
@@ -350,14 +350,14 @@ object BankSyncManager {
                     )
                 }
 
-                // 4. Post interactive system notification so user can "Approve from IN" (Incoming Notification)
                 postIncomingTransactionNotification(context, savedRecord)
 
-                // 5. Emit toast / snackbar announcement for in-app UI
                 val typeEmoji = if (parsed.type == BankTxType.CREDIT) "🟢 Credit" else "🔴 Debit"
                 val balStr = if (parsed.availableBalance != null) " • Avl: ₹${"%,.0f".format(parsed.availableBalance)}" else ""
                 val msg = "$typeEmoji ₹${"%,.0f".format(parsed.amount)} [${parsed.bankName}]$balStr"
                 _syncNotificationEvents.emit(msg)
+
+                saveTransactionToFirestore(context, savedRecord, cloudUser)
 
             } catch (e: Exception) {
                 android.util.Log.e("BankSyncManager", "Error saving transaction: ${e.message}", e)
@@ -386,7 +386,10 @@ object BankSyncManager {
                 notificationManager.createNotificationChannel(channel)
             }
 
-            val notifId = (record.id.toInt().let { if (it > 0) it else 1000 }) + 2000
+            val notifId = ((record.id.coerceAtLeast(1L) % 100_000L).toInt()) + 2000
+            val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE
+                else 0
 
             // Open app in Pending Transactions ("IN") screen on notification tap
             val contentIntent = Intent(context, MainActivity::class.java).apply {
@@ -397,33 +400,31 @@ object BankSyncManager {
                 context,
                 notifId,
                 contentIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                piFlags
             )
 
-            // "Approve Expense" Action Button directly on notification
-            val approveIntent = Intent(context, BankExpenseActionReceiver::class.java).apply {
-                action = BankExpenseActionReceiver.ACTION_APPROVE_EXPENSE
-                putExtra(BankExpenseActionReceiver.EXTRA_TX_ID, record.id)
-                putExtra(BankExpenseActionReceiver.EXTRA_NOTIFICATION_ID, notifId)
+            fun actionIntent(action: String): Intent {
+                return Intent(context, BankExpenseActionReceiver::class.java).apply {
+                    this.action = action
+                    putExtra(BankExpenseActionReceiver.EXTRA_TX_ID, record.id)
+                    putExtra(BankExpenseActionReceiver.EXTRA_TX_CLOUD_ID, record.cloudId)
+                    putExtra(BankExpenseActionReceiver.EXTRA_TX_FINGERPRINT, record.fingerprint)
+                    putExtra(BankExpenseActionReceiver.EXTRA_NOTIFICATION_ID, notifId)
+                }
             }
+
             val approvePendingIntent = PendingIntent.getBroadcast(
                 context,
                 notifId * 10 + 1,
-                approveIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                actionIntent(BankExpenseActionReceiver.ACTION_APPROVE_EXPENSE),
+                piFlags
             )
 
-            // "Dismiss" Action Button
-            val rejectIntent = Intent(context, BankExpenseActionReceiver::class.java).apply {
-                action = BankExpenseActionReceiver.ACTION_REJECT_EXPENSE
-                putExtra(BankExpenseActionReceiver.EXTRA_TX_ID, record.id)
-                putExtra(BankExpenseActionReceiver.EXTRA_NOTIFICATION_ID, notifId)
-            }
             val rejectPendingIntent = PendingIntent.getBroadcast(
                 context,
                 notifId * 10 + 2,
-                rejectIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                actionIntent(BankExpenseActionReceiver.ACTION_REJECT_EXPENSE),
+                piFlags
             )
 
             val isCredit = record.type.equals("CREDIT", ignoreCase = true)
@@ -478,136 +479,78 @@ object BankSyncManager {
         context: Context,
         txId: Long,
         customCategory: String? = null,
-        matchPlannedDebit: Boolean = true
+        matchPlannedDebit: Boolean = true,
+        cloudId: String = "",
+        fingerprint: String = ""
     ): String {
-        android.util.Log.d("BankSyncManager", "Approving transaction: $txId")
-        val db = AppDatabase.getDatabase(context)
+        android.util.Log.d("BankSyncManager", "Approving transaction: $txId cloud=$cloudId")
+        val db = AppDatabase.getDatabase(context.applicationContext)
         val dao = db.finMoneyDao()
-
-        val tx = dao.getBankTransactionById(txId)
+        val tx = findBankTransaction(dao, txId, cloudId, fingerprint)
             ?: return "Transaction record not found."
 
-        // Extract accurate month and year from transaction timestamp
         val cal = Calendar.getInstance().apply { timeInMillis = tx.timestamp }
         val txMonth = cal.get(Calendar.MONTH) + 1
         val txYear = cal.get(Calendar.YEAR)
         val txDay = cal.get(Calendar.DAY_OF_MONTH)
+        val monthYear = "%04d-%02d".format(txYear, txMonth)
 
-        val userProfile = dao.getUserProfileDirect()
-        val userPhone = userProfile?.phoneNumber ?: ""
-
-        // Mark transaction as confirmed and status APPROVED
-        dao.updateBankTransactionStatus(txId, true, "APPROVED")
-        val updatedTx = tx.copy(isConfirmed = true, status = "APPROVED")
-        saveTransactionToFirestore(context, updatedTx, userPhone)
-
-        // Dismiss/clear system notification and original banking alert from status bar
-        val notifId = (txId.toInt().let { if (it > 0) it else 1000 }) + 2000
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.cancel(notifId)
-        if (tx.sbnKey.isNotBlank()) {
-            BankNotificationListenerService.cancelOriginalNotification(tx.sbnKey)
-        }
+        val cloudUser = CloudUserContextResolver.resolve(dao)
+        val ownerId = cloudUser.userId.ifBlank { tx.userId }
+        val updatedTx = tx.copy(isConfirmed = true, status = "APPROVED", userId = ownerId)
+        val ledgerToken = "bankTx:${if (tx.cloudId.isNotBlank()) tx.cloudId else tx.id}"
 
         val resultMsg: String
-
-        if (tx.type.equals("DEBIT", ignoreCase = true)) {
-            // Check if it matches an existing planned debit
-            var matchedPlanned = false
-            if (matchPlannedDebit && tx.matchedDebitId != null) {
-                val planned = dao.getDebitById(tx.matchedDebitId)
-                if (planned != null) {
-                    dao.setDebitPaidStatus(planned.id, true)
-                    saveDebitToFirestore(context, planned.copy(isPaid = true), userPhone, updatedTx)
-                    matchedPlanned = true
-                }
-            }
-
-            if (matchedPlanned) {
-                resultMsg = "✓ Planned debit '${tx.matchedDebitTitle ?: "Expense"}' marked as Paid (₹${"%,.0f".format(tx.amount)})!"
-            } else {
-                // Create a new expense entry (DebitItem) in the financial ledger
-                val categoryToUse = customCategory ?: tx.category.ifBlank { DebitCategory.GENERAL.name }
-                val titleToUse = if (tx.merchant.isNotBlank()) tx.merchant else "${tx.bankName} Expense"
-
-                    val isCc = tx.isCreditCardRecord()
-                    val debitItem = DebitItem(
-                        cloudId = UUID.randomUUID().toString(),
-                        month = txMonth,
-                        year = txYear,
-                        category = categoryToUse,
-                        title = titleToUse,
-                        amount = tx.amount,
-                        dueDateDay = txDay,
-                        dueDate = tx.timestamp,
-                        isPaid = true,
-                        isPaidViaDebitCard = !isCc,
-                        isPaidViaCreditCard = isCc,
-                        notes = "Approved from ${tx.bankName} alert. Ref: ${tx.referenceNumber}",
-                        createdAt = tx.timestamp
-                    )
-
-                val newDebitId = dao.insertDebit(debitItem)
-                val insertedDebit = debitItem.copy(id = newDebitId)
-                saveDebitToFirestore(context, insertedDebit, userPhone, updatedTx)
-                resultMsg = "✓ Expense of ₹${"%,.0f".format(tx.amount)} added to $categoryToUse!"
-            }
+        if (isCreditType(tx.type)) {
+            resultMsg = createIncomeFromApprovedTx(dao, updatedTx, ownerId, txMonth, txYear, monthYear, customCategory, ledgerToken)
         } else {
-            // Credit / Income transaction: Add to Income Sources & update Salary Record
-            val existingSalary = dao.getSalaryRecordDirect(txMonth, txYear)
-            val currentSources = if (!existingSalary?.incomeSourcesJson.isNullOrBlank()) {
-                com.example.ui.FinMoneyViewModel.parseIncomeSources(existingSalary!!.incomeSourcesJson)
-            } else emptyList()
-
-            val sourceName = if (tx.merchant.isNotBlank()) tx.merchant else "${tx.bankName} Credit"
-            val categoryToUse = customCategory ?: tx.category.ifBlank { IncomeCategory.OTHER.name }
-            val newSource = IncomeSource(
-                id = UUID.randomUUID().toString(),
-                name = sourceName,
-                amount = tx.amount,
-                category = categoryToUse,
-                isReceived = true,
-                isRecurring = false,
-                receivedDateTimestamp = tx.timestamp
+            resultMsg = createExpenseFromApprovedTx(
+                dao = dao,
+                tx = updatedTx,
+                ownerId = ownerId,
+                txMonth = txMonth,
+                txYear = txYear,
+                txDay = txDay,
+                monthYear = monthYear,
+                customCategory = customCategory,
+                matchPlannedDebit = matchPlannedDebit,
+                ledgerToken = ledgerToken
             )
-
-            val updatedSources = currentSources + newSource
-            val json = com.example.data.repository.FinMoneyRepository.encodeIncomeSources(updatedSources)
-            val totalAdditional = updatedSources.sumOf { it.amount }
-
-            val updatedSalaryRecord = if (existingSalary != null) {
-                existingSalary.copy(
-                    additionalIncome = totalAdditional,
-                    incomeSourcesJson = json,
-                    updatedAt = System.currentTimeMillis()
-                )
-            } else {
-                SalaryRecord(
-                    month = txMonth,
-                    year = txYear,
-                    salaryAmount = 0.0,
-                    additionalIncome = totalAdditional,
-                    incomeSourcesJson = json,
-                    updatedAt = System.currentTimeMillis()
-                )
-            }
-            dao.insertOrUpdateSalary(updatedSalaryRecord)
-            saveSalaryToFirestore(context, updatedSalaryRecord, userPhone)
-            saveIncomeToFirestore(context, newSource, txMonth, txYear, userPhone, updatedTx)
-
-            resultMsg = "✓ Income of ₹${"%,.0f".format(tx.amount)} approved & recorded in Income Sources!"
         }
 
-        // If availableBalance exists, update reconciliation bank balance
+        dao.updateBankTransactionStatus(tx.id, true, "APPROVED")
+        dismissIncomingNotification(context, tx)
+
         if (tx.availableBalance > 0.0) {
-            updateReconciliationBankBalance(
-                dao = dao,
-                month = txMonth,
-                year = txYear,
-                bankName = tx.bankName,
-                accountLast4 = tx.accountNumberLast4,
-                newBalance = tx.availableBalance
-            )
+            try {
+                updateReconciliationBankBalance(
+                    dao = dao,
+                    month = txMonth,
+                    year = txYear,
+                    bankName = tx.bankName,
+                    accountLast4 = tx.accountNumberLast4,
+                    newBalance = tx.availableBalance
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("BankSyncManager", "Balance update skipped: ${e.message}")
+            }
+        }
+
+        try {
+            saveTransactionToFirestore(context, updatedTx, cloudUser)
+            val debit = dao.getDebitByNotesPattern("%$ledgerToken%")
+            if (debit != null) saveDebitToFirestore(context, debit.copy(userId = ownerId), cloudUser, updatedTx)
+            val salary = dao.getSalaryRecordDirect(txMonth, txYear, ownerId)
+                ?: dao.getSalaryRecordDirect(txMonth, txYear)
+            if (salary != null) {
+                saveSalaryToFirestore(context, salary.copy(userId = ownerId), cloudUser)
+                val sources = FinMoneyRepository.parseIncomeSources(salary.incomeSourcesJson)
+                sources.lastOrNull { it.id == ledgerToken }?.let { source ->
+                    saveIncomeToFirestore(context, source, txMonth, txYear, cloudUser, updatedTx)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("BankSyncManager", "Cloud queue after approval skipped: ${e.message}")
         }
 
         return resultMsg
@@ -617,29 +560,162 @@ object BankSyncManager {
      * Rejects transaction, dismisses notification, and records REJECTED status
      * to prevent re-ingestion if the banking app re-posts the notification.
      */
-    suspend fun rejectTransaction(context: Context, txId: Long) {
+    suspend fun rejectTransaction(context: Context, txId: Long, cloudId: String = "", fingerprint: String = "") {
         android.util.Log.d("BankSyncManager", "Rejecting transaction: $txId")
-        val db = AppDatabase.getDatabase(context)
+        val db = AppDatabase.getDatabase(context.applicationContext)
         val dao = db.finMoneyDao()
-        val tx = dao.getBankTransactionById(txId)
-
-        // Mark as confirmed = true, status = "REJECTED" so it is excluded from pending
-        // but preserved in database for deduplication checks
-        dao.updateBankTransactionStatus(txId, true, "REJECTED")
-
-        if (tx != null) {
-            val userProfile = dao.getUserProfileDirect()
-            val userPhone = userProfile?.phoneNumber ?: ""
-            saveTransactionToFirestore(context, tx.copy(isConfirmed = true, status = "REJECTED"), userPhone)
+        val tx = findBankTransaction(dao, txId, cloudId, fingerprint) ?: return
+        dao.updateBankTransactionStatus(tx.id, true, "REJECTED")
+        dismissIncomingNotification(context, tx)
+        try {
+            val cloudUser = CloudUserContextResolver.resolve(dao)
+            saveTransactionToFirestore(
+                context,
+                tx.copy(isConfirmed = true, status = "REJECTED", userId = cloudUser.userId.ifBlank { tx.userId }),
+                cloudUser
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("BankSyncManager", "Reject cloud sync skipped: ${e.message}")
         }
+    }
 
-        // Dismiss/clear system notification and original notification from status bar immediately
-        val notifId = (txId.toInt().let { if (it > 0) it else 1000 }) + 2000
+    private suspend fun findBankTransaction(
+        dao: FinMoneyDao,
+        txId: Long,
+        cloudId: String,
+        fingerprint: String
+    ): BankTransactionRecord? {
+        if (txId > 0L) dao.getBankTransactionById(txId)?.let { return it }
+        if (cloudId.isNotBlank()) dao.getBankTransactionByCloudId(cloudId)?.let { return it }
+        if (fingerprint.isNotBlank()) dao.getBankTransactionByFingerprint(fingerprint)?.let { return it }
+        return null
+    }
+
+    private fun isCreditType(type: String): Boolean {
+        val t = type.trim().uppercase()
+        return t == "CREDIT" || t == "CR" || t == "INCOME"
+    }
+
+    private fun dismissIncomingNotification(context: Context, tx: BankTransactionRecord) {
+        val notifId = ((tx.id.coerceAtLeast(1L) % 100_000L).toInt()) + 2000
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(notifId)
-        if (tx?.sbnKey?.isNotBlank() == true) {
+        if (tx.sbnKey.isNotBlank()) {
             BankNotificationListenerService.cancelOriginalNotification(tx.sbnKey)
         }
+    }
+
+    private suspend fun createExpenseFromApprovedTx(
+        dao: FinMoneyDao,
+        tx: BankTransactionRecord,
+        ownerId: String,
+        txMonth: Int,
+        txYear: Int,
+        txDay: Int,
+        monthYear: String,
+        customCategory: String?,
+        matchPlannedDebit: Boolean,
+        ledgerToken: String
+    ): String {
+        val existing = dao.getDebitByNotesPattern("%$ledgerToken%")
+        if (existing != null) {
+            return "✓ Expense already recorded (₹${"%,.0f".format(tx.amount)})."
+        }
+        if (matchPlannedDebit && tx.matchedDebitId != null) {
+            val planned = dao.getDebitById(tx.matchedDebitId)
+            if (planned != null) {
+                dao.setDebitPaidStatus(planned.id, true)
+                return "✓ Planned debit '${tx.matchedDebitTitle ?: planned.title}' marked as Paid (₹${"%,.0f".format(tx.amount)})."
+            }
+        }
+        val categoryToUse = customCategory ?: tx.category.ifBlank { DebitCategory.GENERAL.name }
+        val titleToUse = if (tx.merchant.isNotBlank()) tx.merchant else "${tx.bankName} Expense"
+        val isCc = tx.isCreditCardRecord()
+        val debitItem = DebitItem(
+            userId = ownerId,
+            cloudId = UUID.randomUUID().toString(),
+            month = txMonth,
+            year = txYear,
+            monthYear = monthYear,
+            category = categoryToUse,
+            title = titleToUse,
+            amount = tx.amount,
+            dueDateDay = txDay,
+            dueDate = tx.timestamp,
+            isPaid = true,
+            isPaidViaDebitCard = !isCc,
+            isPaidViaCreditCard = isCc,
+            paidDateTimestamp = tx.timestamp,
+            paidDate = tx.timestamp,
+            notes = "Approved from ${tx.bankName} alert. Ref: ${tx.referenceNumber} $ledgerToken",
+            createdAt = tx.timestamp
+        )
+        dao.insertDebit(debitItem)
+        return "✓ Expense of ₹${"%,.0f".format(tx.amount)} added to $categoryToUse."
+    }
+
+    private suspend fun createIncomeFromApprovedTx(
+        dao: FinMoneyDao,
+        tx: BankTransactionRecord,
+        ownerId: String,
+        txMonth: Int,
+        txYear: Int,
+        monthYear: String,
+        customCategory: String?,
+        ledgerToken: String
+    ): String {
+        val existingSalary = dao.getSalaryRecordDirect(txMonth, txYear, ownerId)
+            ?: dao.getSalaryRecordDirect(txMonth, txYear)
+        val currentSources = if (!existingSalary?.incomeSourcesJson.isNullOrBlank()) {
+            FinMoneyRepository.parseIncomeSources(existingSalary!!.incomeSourcesJson)
+        } else emptyList()
+        if (currentSources.any { it.id == ledgerToken }) {
+            return "✓ Income already recorded (₹${"%,.0f".format(tx.amount)})."
+        }
+        val already = currentSources.any { source ->
+            source.receivedDateTimestamp == tx.timestamp &&
+                kotlin.math.abs(source.amount - tx.amount) < 0.01 &&
+                source.name.equals(if (tx.merchant.isNotBlank()) tx.merchant else "${tx.bankName} Credit", ignoreCase = true)
+        }
+        if (already) return "✓ Income already recorded (₹${"%,.0f".format(tx.amount)})."
+
+        val sourceName = if (tx.merchant.isNotBlank()) tx.merchant else "${tx.bankName} Credit"
+        val categoryToUse = customCategory ?: tx.category.ifBlank { IncomeCategory.OTHER.name }
+        val newSource = IncomeSource(
+            id = ledgerToken,
+            name = sourceName,
+            title = sourceName,
+            amount = tx.amount,
+            category = categoryToUse,
+            isReceived = true,
+            isRecurring = false,
+            receivedDateTimestamp = tx.timestamp
+        )
+        val updatedSources = currentSources + newSource
+        val json = FinMoneyRepository.encodeIncomeSources(updatedSources)
+        val totalAdditional = updatedSources.sumOf { it.amount }
+        val updatedSalaryRecord = if (existingSalary != null) {
+            existingSalary.copy(
+                userId = ownerId.ifBlank { existingSalary.userId },
+                additionalIncome = totalAdditional,
+                incomeSourcesJson = json,
+                monthYear = existingSalary.monthYear.ifBlank { monthYear },
+                updatedAt = System.currentTimeMillis()
+            )
+        } else {
+            SalaryRecord(
+                userId = ownerId,
+                month = txMonth,
+                year = txYear,
+                monthYear = monthYear,
+                salaryAmount = 0.0,
+                additionalIncome = totalAdditional,
+                incomeSourcesJson = json,
+                updatedAt = System.currentTimeMillis()
+            )
+        }
+        dao.insertOrUpdateSalary(updatedSalaryRecord)
+        return "✓ Income of ₹${"%,.0f".format(tx.amount)} recorded."
     }
 
     private fun getFirestoreInstance(context: Context): com.google.firebase.firestore.FirebaseFirestore {
@@ -676,20 +752,28 @@ object BankSyncManager {
      */
     suspend fun checkAndEnsureIdempotentExpense(
         context: Context,
-        userPhone: String,
+        cloudUser: CloudUserContext,
         amount: Double,
         timestamp: Long,
         referenceNumber: String,
         cloudId: String
     ): Boolean {
         try {
+            if (!cloudUser.canSyncToCloud) return false
             if (com.google.firebase.FirebaseApp.getApps(context).isEmpty()) {
                 com.google.firebase.FirebaseApp.initializeApp(context)
             }
             val firestore = getFirestoreInstance(context)
-            val cleanPhone = userPhone.filter { it.isDigit() }.let { if (it.length >= 10) it.takeLast(10) else if (it.isNotBlank()) it else resolveUserPhone(context, AppDatabase.getDatabase(context).finMoneyDao()) }
+            val cleanPhone = cloudUser.phone10
+            val uid = cloudUser.userId
 
-            // 1. Check by exact cloudId / document ID
+            // 1. Check by exact cloudId / document ID (user-scoped + legacy)
+            val userDoc = firestore.collection("users").document(uid)
+                .collection("expenses").document(cloudId).get().await()
+            if (userDoc.exists()) {
+                android.util.Log.d("BankSyncManager", "Idempotency check: Expense with cloudId $cloudId already exists for user.")
+                return true
+            }
             val docRef = firestore.collection("expenses").document(cloudId).get().await()
             if (docRef.exists()) {
                 android.util.Log.d("BankSyncManager", "Idempotency check: Expense with cloudId $cloudId already exists.")
@@ -699,7 +783,7 @@ object BankSyncManager {
             // 2. Check by reference number if present
             if (referenceNumber.isNotBlank()) {
                 val refQuery = firestore.collection("expenses")
-                    .whereEqualTo("userPhone", cleanPhone)
+                    .whereEqualTo("userId", uid)
                     .whereEqualTo("referenceNumber", referenceNumber)
                     .limit(1)
                     .get()
@@ -708,13 +792,22 @@ object BankSyncManager {
                     android.util.Log.d("BankSyncManager", "Idempotency check: Expense with referenceNumber $referenceNumber already exists.")
                     return true
                 }
+                if (cleanPhone.isNotBlank()) {
+                    val refPhoneQuery = firestore.collection("expenses")
+                        .whereEqualTo("userPhone", cleanPhone)
+                        .whereEqualTo("referenceNumber", referenceNumber)
+                        .limit(1)
+                        .get()
+                        .await()
+                    if (!refPhoneQuery.isEmpty) return true
+                }
             }
 
             // 3. Check by amount and timestamp proximity (within 60 seconds tolerance for same amount)
             val startWindow = timestamp - 60000L
             val endWindow = timestamp + 60000L
             val querySnapshot = firestore.collection("expenses")
-                .whereEqualTo("userPhone", cleanPhone)
+                .whereEqualTo("userId", uid)
                 .whereEqualTo("amount", amount)
                 .whereGreaterThanOrEqualTo("timestamp", startWindow)
                 .whereLessThanOrEqualTo("timestamp", endWindow)
@@ -736,65 +829,16 @@ object BankSyncManager {
      * Saves created or updated debit item (expense) to Firestore cloud database with complete metadata.
      * Synchronously populates both 'expenses' and 'debit_items' collections.
      */
-    internal suspend fun saveDebitToFirestore(context: Context, item: DebitItem, userPhone: String, bankTxRecord: BankTransactionRecord? = null) {
+    internal suspend fun saveDebitToFirestore(
+        context: Context,
+        item: DebitItem,
+        cloudUser: CloudUserContext,
+        bankTxRecord: BankTransactionRecord? = null
+    ) {
         try {
-            if (com.google.firebase.FirebaseApp.getApps(context).isEmpty()) {
-                com.google.firebase.FirebaseApp.initializeApp(context)
-            }
-            val firestore = getFirestoreInstance(context)
-            val db = AppDatabase.getDatabase(context)
-            val cleanPhone = userPhone.filter { it.isDigit() }.let { if (it.length >= 10) it.takeLast(10) else if (it.isNotBlank()) it else resolveUserPhone(context, db.finMoneyDao()) }
-            val docId = if (item.cloudId.isNotBlank()) item.cloudId else UUID.randomUUID().toString()
-            val merchantName = if (!bankTxRecord?.merchant.isNullOrBlank()) bankTxRecord!!.merchant else item.title
-            val timestampVal = if (item.createdAt > 0) item.createdAt else System.currentTimeMillis()
-            val refNum = bankTxRecord?.referenceNumber ?: ""
-
-            // Idempotency check before writing to Firestore
-            val isAlreadyRecorded = checkAndEnsureIdempotentExpense(context, cleanPhone, item.amount, timestampVal, refNum, docId)
-            if (isAlreadyRecorded) {
-                android.util.Log.d("BankSyncManager", "Idempotency check passed: Skipping duplicate Firestore write for expense $docId")
-                return
-            }
-
-            val debitMap = hashMapOf<String, Any?>(
-                "cloudId" to docId,
-                "userPhone" to cleanPhone,
-                "month" to item.month,
-                "year" to item.year,
-                "category" to item.category,
-                "customCategoryName" to item.customCategoryName,
-                "title" to item.title,
-                "merchant" to merchantName,
-                "amount" to item.amount,
-                "dueDateDay" to item.dueDateDay,
-                "dueDate" to item.dueDate,
-                "timestamp" to timestampVal,
-                "createdAt" to timestampVal,
-                "isRecurring" to item.isRecurring,
-                "isPaid" to item.isPaid,
-                "isPaidViaCreditCard" to item.isPaidViaCreditCard,
-                "isPaidViaDebitCard" to item.isPaidViaDebitCard,
-                "notes" to item.notes,
-                "transactionType" to "EXPENSE",
-                "bankTxCloudId" to (bankTxRecord?.cloudId ?: ""),
-                "sourceBank" to (bankTxRecord?.bankName ?: ""),
-                "referenceNumber" to (bankTxRecord?.referenceNumber ?: ""),
-                "approvalSource" to "PENDING_TRANSACTIONS_SCREEN",
-                "approvedAtTimestamp" to System.currentTimeMillis()
-            )
-
-            // Synchronously write to both 'expenses' and 'debit_items' collections in Firestore
-            firestore.collection("expenses").document(docId)
-                .set(debitMap, com.google.firebase.firestore.SetOptions.merge())
-                .await()
-
-            firestore.collection("debit_items").document(docId)
-                .set(debitMap, com.google.firebase.firestore.SetOptions.merge())
-                .await()
-
-            android.util.Log.d("BankSyncManager", "Synced expense to Firestore collections ['expenses', 'debit_items'] [$docId]: $merchantName (₹${item.amount})")
+            com.example.cloud.LocalFirstCloudSync.queueExpense(context, cloudUser, item, bankTxRecord)
         } catch (e: Exception) {
-            android.util.Log.w("BankSyncManager", "Firestore debit sync warning: ${e.message}")
+            android.util.Log.w("BankSyncManager", "Expense cloud queue warning: ${e.message}")
         }
     }
 
@@ -803,82 +847,21 @@ object BankSyncManager {
         incomeSource: IncomeSource,
         month: Int,
         year: Int,
-        userPhone: String,
+        cloudUser: CloudUserContext,
         bankTxRecord: BankTransactionRecord? = null
     ) {
         try {
-            if (com.google.firebase.FirebaseApp.getApps(context).isEmpty()) {
-                com.google.firebase.FirebaseApp.initializeApp(context)
-            }
-            val firestore = getFirestoreInstance(context)
-            val db = AppDatabase.getDatabase(context)
-            val cleanPhone = userPhone.filter { it.isDigit() }.let { if (it.length >= 10) it.takeLast(10) else if (it.isNotBlank()) it else resolveUserPhone(context, db.finMoneyDao()) }
-            val docId = if (incomeSource.id.isNotBlank()) incomeSource.id else UUID.randomUUID().toString()
-            val merchantName = if (!bankTxRecord?.merchant.isNullOrBlank()) bankTxRecord!!.merchant else incomeSource.name
-            val timestampVal = if ((incomeSource.receivedDateTimestamp ?: 0L) > 0) incomeSource.receivedDateTimestamp!! else System.currentTimeMillis()
-
-            val incomeMap = hashMapOf<String, Any?>(
-                "cloudId" to docId,
-                "userPhone" to cleanPhone,
-                "month" to month,
-                "year" to year,
-                "sourceName" to incomeSource.name,
-                "merchant" to merchantName,
-                "amount" to incomeSource.amount,
-                "category" to incomeSource.category,
-                "timestamp" to timestampVal,
-                "receivedDateTimestamp" to timestampVal,
-                "isReceived" to incomeSource.isReceived,
-                "isRecurring" to incomeSource.isRecurring,
-                "transactionType" to "INCOME",
-                "bankTxCloudId" to (bankTxRecord?.cloudId ?: ""),
-                "sourceBank" to (bankTxRecord?.bankName ?: ""),
-                "referenceNumber" to (bankTxRecord?.referenceNumber ?: ""),
-                "approvalSource" to "PENDING_TRANSACTIONS_SCREEN",
-                "approvedAtTimestamp" to System.currentTimeMillis()
-            )
-
-            // Synchronously write to both 'incomes' and 'income_records' collections in Firestore
-            firestore.collection("incomes").document(docId)
-                .set(incomeMap, com.google.firebase.firestore.SetOptions.merge())
-                .await()
-
-            firestore.collection("income_records").document(docId)
-                .set(incomeMap, com.google.firebase.firestore.SetOptions.merge())
-                .await()
-
-            android.util.Log.d("BankSyncManager", "Synced income to Firestore collections ['incomes', 'income_records'] [$docId]: $merchantName (₹${incomeSource.amount})")
+            com.example.cloud.LocalFirstCloudSync.queueIncome(context, cloudUser, incomeSource, month, year, bankTxRecord)
         } catch (e: Exception) {
-            android.util.Log.w("BankSyncManager", "Firestore income save warning: ${e.message}")
+            android.util.Log.w("BankSyncManager", "Income cloud queue warning: ${e.message}")
         }
     }
 
-    internal suspend fun saveSalaryToFirestore(context: Context, record: SalaryRecord, userPhone: String) {
+    internal suspend fun saveSalaryToFirestore(context: Context, record: SalaryRecord, cloudUser: CloudUserContext) {
         try {
-            if (com.google.firebase.FirebaseApp.getApps(context).isEmpty()) {
-                com.google.firebase.FirebaseApp.initializeApp(context)
-            }
-            val firestore = getFirestoreInstance(context)
-            val db = AppDatabase.getDatabase(context)
-            val cleanPhone = userPhone.filter { it.isDigit() }.let { if (it.length >= 10) it.takeLast(10) else if (it.isNotBlank()) it else resolveUserPhone(context, db.finMoneyDao()) }
-            val docId = "salary_${cleanPhone}_${record.month}_${record.year}"
-
-            val salaryMap = hashMapOf<String, Any?>(
-                "userPhone" to cleanPhone,
-                "month" to record.month,
-                "year" to record.year,
-                "salaryAmount" to record.salaryAmount,
-                "additionalIncome" to record.additionalIncome,
-                "notes" to record.notes,
-                "incomeSourcesJson" to record.incomeSourcesJson,
-                "updatedAt" to record.updatedAt
-            )
-
-            firestore.collection("salary_records").document(docId)
-                .set(salaryMap, com.google.firebase.firestore.SetOptions.merge())
-                .await()
+            com.example.cloud.LocalFirstCloudSync.queueSalary(context, cloudUser, record)
         } catch (e: Exception) {
-            android.util.Log.w("BankSyncManager", "Firestore salary save bypassed: ${e.message}")
+            android.util.Log.w("BankSyncManager", "Salary cloud queue warning: ${e.message}")
         }
     }
 
@@ -938,46 +921,15 @@ object BankSyncManager {
         dao.insertOrUpdateReconciliation(newRec)
     }
 
-    internal suspend fun saveTransactionToFirestore(context: Context, record: BankTransactionRecord, userPhone: String) {
+    internal suspend fun saveTransactionToFirestore(
+        context: Context,
+        record: BankTransactionRecord,
+        cloudUser: CloudUserContext
+    ) {
         try {
-            if (com.google.firebase.FirebaseApp.getApps(context).isEmpty()) {
-                com.google.firebase.FirebaseApp.initializeApp(context)
-            }
-            val firestore = getFirestoreInstance(context)
-            val db = AppDatabase.getDatabase(context)
-            val cleanPhone = userPhone.filter { it.isDigit() }.let { if (it.length >= 10) it.takeLast(10) else if (it.isNotBlank()) it else resolveUserPhone(context, db.finMoneyDao()) }
-            val docId = if (record.cloudId.isNotBlank()) record.cloudId else UUID.randomUUID().toString()
-
-            val txData = hashMapOf<String, Any?>(
-                "cloudId" to docId,
-                "userPhone" to cleanPhone,
-                "bankName" to record.bankName,
-                "accountNumberLast4" to record.accountNumberLast4,
-                "amount" to record.amount,
-                "type" to record.type,
-                "classification" to record.classification,
-                "category" to record.category,
-                "merchant" to record.merchant,
-                "referenceNumber" to record.referenceNumber,
-                "availableBalance" to record.availableBalance,
-                "originalText" to record.originalText,
-                "source" to record.source,
-                "timestamp" to record.timestamp,
-                "isConfirmed" to record.isConfirmed,
-                "matchedDebitId" to record.matchedDebitId,
-                "matchedDebitTitle" to record.matchedDebitTitle,
-                "isDuplicate" to record.isDuplicate,
-                "duplicateReason" to record.duplicateReason,
-                "isIncorrect" to record.isIncorrect,
-                "incorrectReason" to record.incorrectReason,
-                "approvedAtTimestamp" to System.currentTimeMillis()
-            )
-
-            firestore.collection("bank_transactions").document(docId)
-                .set(txData, com.google.firebase.firestore.SetOptions.merge())
-                .await()
+            com.example.cloud.LocalFirstCloudSync.queueBankTransaction(context, cloudUser, record)
         } catch (e: Exception) {
-            android.util.Log.w("BankSyncManager", "Firestore save bypassed gracefully: ${e.message}")
+            android.util.Log.w("BankSyncManager", "Bank tx cloud queue warning: ${e.message}")
         }
     }
 

@@ -47,13 +47,18 @@ import java.util.*
 @Composable
 fun PendingTransactionsScreen(
     viewModel: FinMoneyViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenLoan: (loanId: Long, cloudId: String, notificationId: Long) -> Unit = { _, _, _ -> }
 ) {
     BackHandler { onBack() }
 
     val currencySymbol by viewModel.currencySymbol.collectAsStateWithLifecycle()
     val pendingTransactions by viewModel.pendingBankTransactions.collectAsStateWithLifecycle()
     val allTransactions by viewModel.bankTransactions.collectAsStateWithLifecycle()
+    val notifications by viewModel.notifications.collectAsStateWithLifecycle()
+    val loanActions = remember(notifications) {
+        notifications.filter { it.type == "LOAN_ACTION" && !it.isRead }
+    }
 
     val context = LocalContext.current
     val isListenerConnected by BankSyncManager.isListenerConnected.collectAsStateWithLifecycle()
@@ -177,6 +182,34 @@ fun PendingTransactionsScreen(
             verticalArrangement = Arrangement.spacedBy(AppTheme.dimensions.medium)
         ) {
             Spacer(modifier = Modifier.height(AppTheme.dimensions.extraSmall))
+
+            if (loanActions.isNotEmpty()) {
+                Text(
+                    "Lent & borrowed actions",
+                    fontWeight = FontWeight.Bold,
+                    color = IndNavyHeader,
+                    fontSize = 14.sp
+                )
+                loanActions.forEach { note ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onOpenLoan(note.relatedLoanId ?: 0L, "", note.id)
+                            },
+                        colors = CardDefaults.cardColors(containerColor = IndBlueLight),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text(note.title, fontWeight = FontWeight.Bold, color = IndBlue, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(note.message, fontSize = 12.sp, color = IndTextSecondary, maxLines = 3)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Open record", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = IndBlue)
+                        }
+                    }
+                }
+            }
 
             // Listener Connection & Self-Healing Status Banner
             if (!isPermissionGranted) {

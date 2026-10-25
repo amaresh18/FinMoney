@@ -5,6 +5,7 @@ import android.util.Log
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreSettings
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +23,9 @@ class FinMoneyApplication : Application() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val db = com.example.data.local.AppDatabase.getDatabase(this@FinMoneyApplication)
-                com.example.data.local.DatabaseHealthGuard.verifyAndRepairDatabase(db.finMoneyDao(), forceReset = false)
+                val dao = db.finMoneyDao()
+                com.example.data.local.DatabaseHealthGuard.verifyAndRepairDatabase(dao, forceReset = false)
+                com.example.cloud.CloudSyncOutboxManager.flushPending(this@FinMoneyApplication, dao)
             } catch (e: Exception) {
                 Log.e(TAG, "Error running DatabaseHealthGuard on app launch", e)
             }
@@ -48,6 +51,13 @@ class FinMoneyApplication : Application() {
                 try {
                     val firestoreDbId = try { getString(R.string.firestore_database_id) } catch (e: Exception) { "" }
                     val firestore = if (firestoreDbId.isNotBlank()) FirebaseFirestore.getInstance(firestoreDbId) else FirebaseFirestore.getInstance()
+                    try {
+                        firestore.firestoreSettings = FirebaseFirestoreSettings.Builder()
+                            .setPersistenceEnabled(true)
+                            .build()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Firestore offline persistence already configured: ${e.message}")
+                    }
                     Log.i(TAG, "✅ [DIAGNOSTIC] FirebaseFirestore is available. Database: ${firestore.app.name}")
                 } catch (e: Exception) {
                     Log.e(TAG, "❌ [DIAGNOSTIC] FirebaseFirestore initialization check failed: ${e.message}", e)

@@ -152,6 +152,24 @@ interface FinMoneyDao {
     @Query("UPDATE loan_transactions SET status = 'SETTLED', settledAmount = totalAmount, updatedAt = :updatedAt WHERE id = :id")
     suspend fun settleLoan(id: Long, updatedAt: Long = System.currentTimeMillis())
 
+    @Query("SELECT * FROM loan_ledger_entries WHERE userId = :userId OR :userId = '' ORDER BY createdAt ASC")
+    fun observeLedgerEntries(userId: String = ""): Flow<List<LoanLedgerEntry>>
+
+    @Query("SELECT * FROM loan_ledger_entries WHERE loanId = :loanId ORDER BY createdAt ASC")
+    suspend fun listLedgerEntries(loanId: Long): List<LoanLedgerEntry>
+
+    @Query("SELECT * FROM loan_ledger_entries WHERE id = :id LIMIT 1")
+    suspend fun getLedgerEntry(id: Long): LoanLedgerEntry?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLedgerEntry(entry: LoanLedgerEntry): Long
+
+    @Update
+    suspend fun updateLedgerEntry(entry: LoanLedgerEntry)
+
+    @Query("DELETE FROM loan_ledger_entries WHERE id = :id")
+    suspend fun deleteLedgerEntry(id: Long)
+
     // --- App Notifications ---
     @Query("SELECT * FROM app_notifications WHERE userId = :userId OR :userId = '' ORDER BY timestamp DESC")
     fun getAllNotifications(userId: String = ""): Flow<List<AppNotification>>
@@ -224,6 +242,12 @@ interface FinMoneyDao {
     @Query("SELECT * FROM bank_transactions WHERE id = :id LIMIT 1")
     suspend fun getBankTransactionById(id: Long): BankTransactionRecord?
 
+    @Query("SELECT * FROM bank_transactions WHERE cloudId = :cloudId AND cloudId != '' LIMIT 1")
+    suspend fun getBankTransactionByCloudId(cloudId: String): BankTransactionRecord?
+
+    @Query("SELECT * FROM debit_items WHERE notes LIKE :notePattern ORDER BY id DESC LIMIT 1")
+    suspend fun getDebitByNotesPattern(notePattern: String): DebitItem?
+
     @Query("SELECT * FROM bank_transactions WHERE referenceNumber = :ref AND referenceNumber != '' LIMIT 1")
     suspend fun getBankTransactionByReference(ref: String): BankTransactionRecord?
 
@@ -275,4 +299,50 @@ interface FinMoneyDao {
 
     @Query("DELETE FROM raw_notifications")
     suspend fun clearAllRawNotifications()
+
+    // --- Scope legacy unassigned rows to authenticated Firebase uid ---
+    @Query("UPDATE bank_transactions SET userId = :uid WHERE userId = '' OR userId = 'user_default'")
+    suspend fun scopeOrphanBankTransactionsToUser(uid: String)
+
+    @Query("UPDATE debit_items SET userId = :uid WHERE userId = '' OR userId = 'user_default'")
+    suspend fun scopeOrphanDebitsToUser(uid: String)
+
+    @Query("UPDATE loan_transactions SET userId = :uid WHERE userId = '' OR userId = 'user_default'")
+    suspend fun scopeOrphanLoansToUser(uid: String)
+
+    @Query("UPDATE salary_records SET userId = :uid WHERE userId = '' OR userId = 'user_default'")
+    suspend fun scopeOrphanSalaryRecordsToUser(uid: String)
+
+    @Query("UPDATE monthly_reconciliations SET userId = :uid WHERE userId = '' OR userId = 'user_default'")
+    suspend fun scopeOrphanReconciliationsToUser(uid: String)
+
+    @Query("UPDATE app_notifications SET userId = :uid WHERE userId = '' OR userId = 'user_default'")
+    suspend fun scopeOrphanNotificationsToUser(uid: String)
+
+    @Query("UPDATE custom_categories SET userId = :uid WHERE userId = '' OR userId = 'user_default'")
+    suspend fun scopeOrphanCustomCategoriesToUser(uid: String)
+
+    // --- Cloud sync outbox (retry when offline / before auth) ---
+    @Query(
+        "DELETE FROM cloud_sync_outbox WHERE userId = :uid AND subcollection = :subcollection AND documentId = :documentId"
+    )
+    suspend fun deleteCloudSyncOutboxEntry(uid: String, subcollection: String, documentId: String)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCloudSyncOutbox(entry: CloudSyncOutboxEntry): Long
+
+    @Query("SELECT * FROM cloud_sync_outbox WHERE userId = :uid ORDER BY createdAt ASC LIMIT 100")
+    suspend fun getCloudSyncOutboxForUser(uid: String): List<CloudSyncOutboxEntry>
+
+    @Query("SELECT COUNT(*) FROM cloud_sync_outbox WHERE userId = :uid")
+    suspend fun countCloudSyncOutboxForUser(uid: String): Int
+
+    @Query("DELETE FROM cloud_sync_outbox WHERE id = :id")
+    suspend fun deleteCloudSyncOutboxById(id: Long)
+
+    @Query(
+        "UPDATE cloud_sync_outbox SET attempts = :attempts, lastError = :error, updatedAt = :updatedAt " +
+            "WHERE id = :id"
+    )
+    suspend fun updateCloudSyncOutboxAttempt(id: Long, attempts: Int, error: String?, updatedAt: Long)
 }

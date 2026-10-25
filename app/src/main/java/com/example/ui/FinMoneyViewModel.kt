@@ -18,24 +18,66 @@ import com.example.domain.usecase.ReconcileTransactionUseCase
 import com.example.domain.usecase.ValidateLoanLifecycleUseCase
 import com.example.service.BankSyncManager
 import com.example.service.EntryIntegrityEngine
+import com.example.service.FinMoneyAuthService
 import com.example.service.LoanAgreementService
+import com.example.service.LoanInviteService
+import com.example.cloud.CloudUserContextResolver
+import com.example.cloud.CloudSyncOutboxManager
+import com.example.cloud.LocalFirstCloudSync
+import com.example.cloud.UserCloudDataRepository
+import com.example.cloud.UserLocalDataScoping
+import com.example.identity.UserIdentityBindingEngine
+import com.example.identity.UserIdentityBindingEngine.BindPhase
+import android.app.Activity
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import com.example.domain.usecase.LoanLedgerMath
+import com.example.domain.usecase.LoanPartyAuth
+import com.example.domain.usecase.ValidateLoanLifecycleUseCase.ValidationResult
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.text.DateFormatSymbols
 
 class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     val repository: FinMoneyRepository = FinMoneyRepository(AppDatabase.getDatabase(app).finMoneyDao())
     private val dao = AppDatabase.getDatabase(app).finMoneyDao()
+    private val identityBinding = UserIdentityBindingEngine(app.applicationContext, dao)
+    private val userCloudRepository = UserCloudDataRepository()
     private val groqApiClient = GroqApiClient(app)
 
     // Domain Use Cases
     val calculateBudgetHealthUseCase = CalculateBudgetHealthUseCase()
     val validateLoanLifecycleUseCase = ValidateLoanLifecycleUseCase()
+
+    private val _loanActionMessage = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val loanActionMessage = _loanActionMessage.asSharedFlow()
+    private val _userNotice = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val userNotice = _userNotice.asSharedFlow()
+
+    private suspend fun notifyUser(message: String) {
+        _userNotice.emit(message)
+        _loanActionMessage.emit(message)
+    }
+
+    private suspend fun currentUserPhone10(): String {
+        val profile = dao.getUserProfileDirect()
+        val fbPhone = try {
+            com.example.service.FinMoneyAuthService.phoneDigitsFromFirebase(com.google.firebase.Firebase.auth.currentUser)
+        } catch (_: Throwable) {
+            ""
+        }
+        return LoanPartyAuth.phone10(fbPhone.ifBlank { profile?.phoneNumber ?: "" })
+    }
+
+    private suspend fun emitLoanDenied(result: ValidationResult) {
+        if (result is ValidationResult.Denied) {
+            _loanActionMessage.emit(result.reason)
+        }
+    }
     val reconcileTransactionUseCase = ReconcileTransactionUseCase()
 
     val userProfile: StateFlow<UserProfile?> = dao.getUserProfile()
@@ -111,6 +153,11 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     @OptIn(ExperimentalCoroutinesApi::class)
     val allLoans: StateFlow<List<LoanTransaction>> = userProfile
         .flatMapLatest { u -> dao.getAllLoans(u?.userId ?: getActiveUserId()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val loanLedgerEntries: StateFlow<List<LoanLedgerEntry>> = userProfile
+        .flatMapLatest { u -> dao.observeLedgerEntries(u?.userId ?: getActiveUserId()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -319,23 +366,31 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val pending = dao.getPendingBankTransactionsDirect(getActiveUserId())
             val audit = EntryIntegrityEngine.auditPendingTransactions(pending)
-            pending.filter { tx -> audit[tx.id]?.isDuplicate != true }.forEach { tx ->
-                BankSyncManager.approveTransactionAndCreateExpense(
+            val toApprove = pending.filter { tx -> audit[tx.id]?.isDuplicate != true }
+            var ok = 0
+            toApprove.forEach { tx ->
+                val msg = BankSyncManager.approveTransactionAndCreateExpense(
                     context = app,
                     txId = tx.id,
                     customCategory = tx.category
                 )
+                if (!msg.contains("not found", ignoreCase = true)) ok++
             }
+            notifyUser(
+                if (ok == 0) "Nothing to approve."
+                else "Saved $ok ${if (ok == 1) "entry" else "entries"} on this device. Cloud will follow."
+            )
         }
     }
 
     fun approvePendingTransaction(id: Long, category: String = "GENERAL") {
         viewModelScope.launch {
-            BankSyncManager.approveTransactionAndCreateExpense(
+            val msg = BankSyncManager.approveTransactionAndCreateExpense(
                 context = app,
                 txId = id,
                 customCategory = category
             )
+            notifyUser(msg)
         }
     }
 
@@ -349,6 +404,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 context = app,
                 txId = id
             )
+            notifyUser("Dismissed. It will not be added to expenses or income.")
         }
     }
 
@@ -473,15 +529,17 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     ) {
         viewModelScope.launch {
             val activeUid = getActiveUserId()
-            repository.insertDebit(
+            persistExpense(
                 DebitItem(
                     userId = activeUid,
+                    cloudId = java.util.UUID.randomUUID().toString(),
                     title = title,
                     amount = amount,
                     category = category.uppercase(),
                     dueDateDay = dueDateDay,
                     month = month,
                     year = year,
+                    monthYear = "%04d-%02d".format(year, month),
                     notes = notes,
                     principalAmount = principalAmount,
                     interestRate = interestRate,
@@ -491,6 +549,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                     isRecurring = isRecurring
                 )
             )
+            notifyUser("Expense saved on this device.")
         }
     }
 
@@ -535,7 +594,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 }
 
                 if (newDebitsToInsert.isNotEmpty()) {
-                    dao.insertDebits(newDebitsToInsert)
+                    newDebitsToInsert.forEach { persistExpense(it) }
                     Log.i("FinMoneyViewModel", "Prefilled ${newDebitsToInsert.size} recurring debits into $targetMonth/$targetYear for $activeUid")
                 }
 
@@ -549,22 +608,24 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val updated = item.copy(isRecurring = !item.isRecurring)
             repository.updateDebit(updated)
+            queueCloudAfterLocal { user -> LocalFirstCloudSync.queueExpense(app, user, updated) }
         }
     }
 
     fun insertDebit(item: DebitItem) {
         viewModelScope.launch {
-            val activeUid = getActiveUserId()
-            val itemWithUid = if (item.userId.isBlank()) item.copy(userId = activeUid) else item
-            repository.insertDebit(itemWithUid)
+            persistExpense(item)
+            notifyUser("Expense saved on this device.")
         }
     }
 
     fun insertDebits(items: List<DebitItem>) {
         viewModelScope.launch {
-            val activeUid = getActiveUserId()
-            val itemsWithUid = items.map { if (it.userId.isBlank()) it.copy(userId = activeUid) else it }
-            repository.insertDebits(itemsWithUid)
+            items.forEach { persistExpense(it) }
+            notifyUser(
+                if (items.size == 1) "Expense saved on this device."
+                else "${items.size} expenses saved on this device."
+            )
         }
     }
 
@@ -577,24 +638,28 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     fun updateDebit(item: DebitItem) {
         viewModelScope.launch {
             repository.updateDebit(item)
+            queueCloudAfterLocal { user -> LocalFirstCloudSync.queueExpense(app, user, item) }
         }
     }
 
     fun toggleDebitCreditCardStatus(item: DebitItem) {
         viewModelScope.launch {
             val newCcStatus = !item.isActualCreditCardTransaction()
-            repository.updateDebit(
-                item.copy(
-                    isPaidViaCreditCard = newCcStatus,
-                    isPaidViaDebitCard = if (newCcStatus) false else item.isPaidViaDebitCard
-                )
+            val updated = item.copy(
+                isPaidViaCreditCard = newCcStatus,
+                isPaidViaDebitCard = if (newCcStatus) false else item.isPaidViaDebitCard
             )
+            repository.updateDebit(updated)
+            queueCloudAfterLocal { user -> LocalFirstCloudSync.queueExpense(app, user, updated) }
         }
     }
 
     fun toggleDebitPaid(item: DebitItem) {
         viewModelScope.launch {
-            dao.setDebitPaidStatus(item.id, !item.isPaid)
+            val paid = !item.isPaid
+            dao.setDebitPaidStatus(item.id, paid)
+            val updated = dao.getDebitById(item.id) ?: item.copy(isPaid = paid)
+            queueCloudAfterLocal { user -> LocalFirstCloudSync.queueExpense(app, user, updated) }
         }
     }
 
@@ -651,6 +716,12 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             )
         }
         repository.insertOrUpdateSalary(updatedRecord)
+        queueCloudAfterLocal { user ->
+            LocalFirstCloudSync.queueSalary(app, user, updatedRecord)
+            sources.forEach { source ->
+                LocalFirstCloudSync.queueIncome(app, user, source, month, year)
+            }
+        }
     }
 
     fun addIncomeCredit(
@@ -688,6 +759,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             )
             currentSources.add(newSource)
             saveUpdatedIncomeSources(existing, currentSources, m, y)
+            notifyUser("Income saved on this device.")
         }
     }
 
@@ -851,14 +923,17 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             val activeUid = getActiveUserId()
+            val creatorPhone = currentUserPhone10()
             val draft = LoanTransaction(
                 userId = activeUid,
+                creatorPhone = creatorPhone,
                 personName = personName,
                 counterpartyName = personName,
                 personContact = phone,
                 counterpartyContact = phone,
                 totalAmount = amount,
                 principalAmount = amount,
+                outstandingAmount = amount,
                 type = loanType,
                 status = LoanApprovalStatus.PENDING_APPROVAL,
                 counterpartyApproved = false,
@@ -868,11 +943,13 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 dueDateTimestamp = returnDate,
                 dueDate = returnDate,
                 proofPaths = proofPaths,
-                agreementText = ""
+                agreementText = "",
+                cloudId = "loan_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(8)}"
             )
             val id = repository.insertLoan(draft)
+            queueCloudAfterLocal { LocalFirstCloudSync.queueLoan(app, it, draft.copy(id = id)) }
             if (sendNow) {
-                LoanAgreementService.notifyCounterparty(getApplication(), draft.copy(id = id))
+                inviteCounterparty(draft.copy(id = id), LoanInviteService.Action.APPROVE_RECORD)
             }
         }
     }
@@ -881,20 +958,39 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val loan = dao.getLoanById(loanId) ?: return@launch
             if (loan.status == LoanApprovalStatus.REJECTED || loan.status == LoanApprovalStatus.SETTLED) return@launch
-            if (loan.counterpartyApproved && loan.status != LoanApprovalStatus.PENDING_APPROVAL &&
+            if (loan.counterpartyApproved && !loan.amendmentPending &&
+                loan.status != LoanApprovalStatus.PENDING_APPROVAL &&
                 loan.status != LoanApprovalStatus.PENDING_SETTLEMENT
             ) {
                 return@launch
             }
-            LoanAgreementService.notifyCounterparty(getApplication(), loan)
+            val action = when {
+                loan.amendmentPending -> LoanInviteService.Action.APPROVE_CHANGE
+                loan.status == LoanApprovalStatus.PENDING_SETTLEMENT -> LoanInviteService.Action.CONFIRM_SETTLE
+                else -> LoanInviteService.Action.APPROVE_RECORD
+            }
+            inviteCounterparty(loan, action)
         }
     }
 
     fun approveLoan(loanId: Long) {
         viewModelScope.launch {
             val loan = dao.getLoanById(loanId) ?: return@launch
+            val userPhone = currentUserPhone10()
+            val check = validateLoanLifecycleUseCase.validateApprovalPermission(
+                creatorPhone = loan.creatorPhone,
+                counterpartyPhone = loan.personContact.ifBlank { loan.counterpartyContact },
+                userPhone = userPhone,
+                creatorUserId = loan.userId,
+                activeUserId = getActiveUserId(),
+                currentStatus = loan.status
+            )
+            if (check is ValidationResult.Denied) {
+                emitLoanDenied(check)
+                return@launch
+            }
             val agreed = LoanAgreementService.buildAgreement(loan)
-            repository.updateLoan(
+            persistLoan(
                 loan.copy(
                     status = LoanApprovalStatus.MUTUAL_APPROVED,
                     counterpartyApproved = true,
@@ -902,51 +998,280 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                     updatedAt = System.currentTimeMillis()
                 )
             )
+            refreshLoanBalance(loanId)
+            _loanActionMessage.emit("Mutual agreement created. You can download it now.")
         }
     }
 
     fun rejectLoan(loanId: Long) {
         viewModelScope.launch {
+            val loan = dao.getLoanById(loanId) ?: return@launch
+            val check = validateLoanLifecycleUseCase.validateRejectPermission(
+                creatorPhone = loan.creatorPhone,
+                counterpartyPhone = loan.personContact.ifBlank { loan.counterpartyContact },
+                userPhone = currentUserPhone10(),
+                creatorUserId = loan.userId,
+                activeUserId = getActiveUserId(),
+                currentStatus = loan.status
+            )
+            if (check is ValidationResult.Denied) {
+                emitLoanDenied(check)
+                return@launch
+            }
             dao.updateLoanApproval(loanId, LoanApprovalStatus.REJECTED.name, false)
         }
     }
 
-    fun settleLoan(loanId: Long) {
+    fun requestLoanSettlement(loanId: Long) {
         viewModelScope.launch {
-            dao.settleLoan(loanId)
+            val loan = dao.getLoanById(loanId) ?: return@launch
+            val check = validateLoanLifecycleUseCase.validateSettlementRequest(
+                creatorPhone = loan.creatorPhone,
+                userPhone = currentUserPhone10(),
+                creatorUserId = loan.userId,
+                activeUserId = getActiveUserId(),
+                currentStatus = loan.status,
+                amendmentPending = loan.amendmentPending
+            )
+            if (check is ValidationResult.Denied) {
+                emitLoanDenied(check)
+                return@launch
+            }
+            val entries = dao.listLedgerEntries(loanId)
+            if (LoanLedgerMath.hasOpenChild(entries)) {
+                _loanActionMessage.emit("Approve or decline open payments before closing this record.")
+                return@launch
+            }
+            val left = LoanLedgerMath.outstanding(loan.totalAmount, entries).coerceAtLeast(0.0)
+            persistLoan(
+                loan.copy(
+                    status = LoanApprovalStatus.PENDING_SETTLEMENT,
+                    outstandingAmount = left,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+            val note = if (left > 0.009) {
+                "Settlement request: close the remaining ₹${"%,.0f".format(left)} and mark this record settled."
+            } else {
+                "Settlement request: balance is already clear. Please confirm this record is settled."
+            }
+            inviteCounterparty(
+                dao.getLoanById(loanId) ?: loan,
+                LoanInviteService.Action.CONFIRM_SETTLE,
+                message = note
+            )
         }
     }
 
-    fun requestEditApproval(loanId: Long, newAmount: Double, newNotes: String) {
+    fun confirmLoanSettlement(loanId: Long) {
         viewModelScope.launch {
-            val loan = dao.getLoanById(loanId)
-            if (loan != null) {
-                val updated = loan.copy(
-                    totalAmount = newAmount,
-                    principalAmount = newAmount,
-                    notes = newNotes,
-                    status = LoanApprovalStatus.PENDING_APPROVAL,
-                    counterpartyApproved = false,
-                    agreementText = "",
+            val loan = dao.getLoanById(loanId) ?: return@launch
+            val check = validateLoanLifecycleUseCase.validateSettlementConfirm(
+                creatorPhone = loan.creatorPhone,
+                counterpartyPhone = loan.personContact.ifBlank { loan.counterpartyContact },
+                userPhone = currentUserPhone10(),
+                creatorUserId = loan.userId,
+                activeUserId = getActiveUserId(),
+                currentStatus = loan.status
+            )
+            if (check is ValidationResult.Denied) {
+                emitLoanDenied(check)
+                return@launch
+            }
+            val entries = dao.listLedgerEntries(loanId)
+            if (LoanLedgerMath.hasOpenChild(entries)) {
+                _loanActionMessage.emit("Approve or decline open payments before closing this record.")
+                return@launch
+            }
+            val left = LoanLedgerMath.outstanding(loan.totalAmount, entries)
+            if (left > 0.009) {
+                dao.insertLedgerEntry(
+                    LoanLedgerEntry(
+                        loanId = loan.id,
+                        userId = loan.userId,
+                        proposerPhone = loan.creatorPhone,
+                        proposerIsCreator = true,
+                        kind = LoanLedgerKind.CLEARING,
+                        amount = left,
+                        notes = "Remaining balance closed because both parties settled",
+                        status = LoanApprovalStatus.MUTUAL_APPROVED,
+                        agreementText = "Both parties agreed to close the remaining ₹${"%,.2f".format(left)}.",
+                        createdAt = System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+            val closed = dao.getLoanById(loanId) ?: return@launch
+            persistLoan(
+                closed.copy(
+                    status = LoanApprovalStatus.SETTLED,
+                    counterpartyApproved = true,
                     updatedAt = System.currentTimeMillis()
                 )
-                repository.updateLoan(updated)
-                LoanAgreementService.notifyCounterparty(getApplication(), updated)
+            )
+            refreshLoanBalance(loanId)
+            _loanActionMessage.emit("Loan marked as settled.")
+        }
+    }
+
+    fun downloadLoanAgreement(loanId: Long) {
+        viewModelScope.launch {
+            val loan = dao.getLoanById(loanId) ?: return@launch
+            if (loan.agreementText.isBlank() && loan.status != LoanApprovalStatus.MUTUAL_APPROVED) {
+                _loanActionMessage.emit("Agreement is available only after counterparty approval.")
+                return@launch
             }
+            LoanAgreementService.shareAgreement(getApplication(), loan)
+        }
+    }
+
+    fun requestEditApproval(
+        loanId: Long,
+        newAmount: Double,
+        newNotes: String,
+        newName: String,
+        newPhone: String
+    ) {
+        viewModelScope.launch {
+            val loan = dao.getLoanById(loanId) ?: return@launch
+            if (!LoanPartyAuth.isCreator(loan.creatorPhone, currentUserPhone10(), loan.userId, getActiveUserId())) {
+                _loanActionMessage.emit("Only the creator can edit this record.")
+                return@launch
+            }
+            if (loan.status == LoanApprovalStatus.SETTLED || loan.status == LoanApprovalStatus.PENDING_SETTLEMENT) {
+                _loanActionMessage.emit("Finish settlement before changing this record.")
+                return@launch
+            }
+            val mutuallyAgreed = loan.status == LoanApprovalStatus.MUTUAL_APPROVED ||
+                loan.status == LoanApprovalStatus.APPROVED
+            if (mutuallyAgreed) {
+                val proposed = loan.copy(
+                    proposedAmount = newAmount,
+                    proposedNotes = newNotes,
+                    proposedPersonName = newName,
+                    proposedPersonContact = newPhone,
+                    amendmentPending = true,
+                    updatedAt = System.currentTimeMillis()
+                )
+                persistLoan(proposed)
+                inviteCounterparty(proposed, LoanInviteService.Action.APPROVE_CHANGE)
+                return@launch
+            }
+            val updated = loan.copy(
+                personName = newName.ifBlank { loan.personName },
+                counterpartyName = newName.ifBlank { loan.counterpartyName },
+                personContact = newPhone,
+                counterpartyContact = newPhone,
+                totalAmount = newAmount,
+                principalAmount = newAmount,
+                notes = newNotes,
+                status = LoanApprovalStatus.PENDING_APPROVAL,
+                counterpartyApproved = false,
+                agreementText = "",
+                amendmentPending = false,
+                proposedAmount = 0.0,
+                proposedNotes = "",
+                proposedPersonName = "",
+                proposedPersonContact = "",
+                updatedAt = System.currentTimeMillis()
+            )
+            persistLoan(updated)
+            refreshLoanBalance(loanId)
+            inviteCounterparty(updated, LoanInviteService.Action.APPROVE_RECORD)
+        }
+    }
+
+    fun approveLoanAmendment(loanId: Long) {
+        viewModelScope.launch {
+            val loan = dao.getLoanById(loanId) ?: return@launch
+            val check = validateLoanLifecycleUseCase.validateAmendmentApproval(
+                creatorPhone = loan.creatorPhone,
+                counterpartyPhone = loan.personContact.ifBlank { loan.counterpartyContact },
+                userPhone = currentUserPhone10(),
+                creatorUserId = loan.userId,
+                activeUserId = getActiveUserId(),
+                amendmentPending = loan.amendmentPending
+            )
+            if (check is ValidationResult.Denied) {
+                emitLoanDenied(check)
+                return@launch
+            }
+            val entries = dao.listLedgerEntries(loanId)
+            val projected = LoanLedgerMath.outstanding(loan.proposedAmount, entries)
+            if (projected < -0.009) {
+                _loanActionMessage.emit("Approved repayments are already higher than this new amount.")
+                return@launch
+            }
+            val applied = loan.copy(
+                totalAmount = loan.proposedAmount,
+                principalAmount = loan.proposedAmount,
+                notes = loan.proposedNotes,
+                personName = loan.proposedPersonName.ifBlank { loan.personName },
+                counterpartyName = loan.proposedPersonName.ifBlank { loan.counterpartyName },
+                personContact = loan.proposedPersonContact.ifBlank { loan.personContact },
+                counterpartyContact = loan.proposedPersonContact.ifBlank { loan.counterpartyContact },
+                proposedAmount = 0.0,
+                proposedNotes = "",
+                proposedPersonName = "",
+                proposedPersonContact = "",
+                amendmentPending = false,
+                status = LoanApprovalStatus.MUTUAL_APPROVED,
+                counterpartyApproved = true,
+                updatedAt = System.currentTimeMillis()
+            )
+            val agreed = applied.copy(agreementText = LoanAgreementService.buildAgreement(applied))
+            persistLoan(agreed)
+            refreshLoanBalance(loanId)
+            _loanActionMessage.emit("Change approved. The agreed amount is now updated.")
+        }
+    }
+
+    fun rejectLoanAmendment(loanId: Long) {
+        viewModelScope.launch {
+            val loan = dao.getLoanById(loanId) ?: return@launch
+            if (!loan.amendmentPending) {
+                _loanActionMessage.emit("There is no change waiting for approval.")
+                return@launch
+            }
+            val isCreator = LoanPartyAuth.isCreator(loan.creatorPhone, currentUserPhone10(), loan.userId, getActiveUserId())
+            val isCounterparty = LoanPartyAuth.isCounterparty(
+                loan.personContact.ifBlank { loan.counterpartyContact },
+                currentUserPhone10()
+            )
+            if (!isCreator && !isCounterparty) {
+                _loanActionMessage.emit("Only the creator or counterparty can cancel this change.")
+                return@launch
+            }
+            persistLoan(
+                loan.copy(
+                    proposedAmount = 0.0,
+                    proposedNotes = "",
+                    proposedPersonName = "",
+                    proposedPersonContact = "",
+                    amendmentPending = false,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+            _loanActionMessage.emit(
+                if (isCreator) "Change withdrawn. The agreed amount is unchanged."
+                else "Change declined. The agreed amount is unchanged."
+            )
         }
     }
 
     fun requestDeleteApproval(loanId: Long) {
         viewModelScope.launch {
-            val loan = dao.getLoanById(loanId)
-            if (loan != null) {
-                val updated = loan.copy(
-                    status = LoanApprovalStatus.PENDING_SETTLEMENT,
-                    counterpartyApproved = false,
-                    updatedAt = System.currentTimeMillis()
-                )
-                repository.updateLoan(updated)
-                LoanAgreementService.notifyCounterparty(getApplication(), updated)
+            val loan = dao.getLoanById(loanId) ?: return@launch
+            val check = validateLoanLifecycleUseCase.validateDeletePermission(
+                creatorPhone = loan.creatorPhone,
+                userPhone = currentUserPhone10(),
+                creatorUserId = loan.userId,
+                activeUserId = getActiveUserId(),
+                currentStatus = loan.status
+            )
+            when (check) {
+                is ValidationResult.Valid -> repository.deleteLoanById(loanId)
+                is ValidationResult.Denied -> _loanActionMessage.emit(check.reason)
             }
         }
     }
@@ -957,13 +1282,296 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun submitLedgerEntry(loanId: Long, kind: LoanLedgerKind, amount: Double, notes: String, proofPaths: String) {
+        viewModelScope.launch {
+            val loan = dao.getLoanById(loanId) ?: return@launch
+            if (amount <= 0.0) {
+                _loanActionMessage.emit("Enter an amount greater than zero.")
+                return@launch
+            }
+            val open = loan.status == LoanApprovalStatus.MUTUAL_APPROVED || loan.status == LoanApprovalStatus.APPROVED
+            if (!open || loan.amendmentPending) {
+                _loanActionMessage.emit("Payments can be added only while the main agreement is active and has no pending change.")
+                return@launch
+            }
+            val phone = currentUserPhone10()
+            val isCreator = LoanPartyAuth.isCreator(loan.creatorPhone, phone, loan.userId, getActiveUserId())
+            val isCounterparty = LoanPartyAuth.isCounterparty(loan.personContact.ifBlank { loan.counterpartyContact }, phone)
+            if (!isCreator && !isCounterparty) {
+                _loanActionMessage.emit("Only the two people on this record can add a payment.")
+                return@launch
+            }
+            val entries = dao.listLedgerEntries(loanId)
+            if (kind == LoanLedgerKind.CLEARING) {
+                val left = (LoanLedgerMath.outstanding(loan.totalAmount, entries) - LoanLedgerMath.reservedClearing(entries)).coerceAtLeast(0.0)
+                if (amount - left > 0.009) {
+                    _loanActionMessage.emit("Remaining is ₹${"%,.0f".format(left)}. A clearing payment cannot be more than that.")
+                    return@launch
+                }
+            }
+            val entryId = dao.insertLedgerEntry(
+                LoanLedgerEntry(
+                    loanId = loanId,
+                    userId = loan.userId,
+                    proposerPhone = phone,
+                    proposerIsCreator = isCreator,
+                    kind = kind,
+                    amount = amount,
+                    notes = notes,
+                    proofPaths = proofPaths,
+                    status = LoanApprovalStatus.PENDING_APPROVAL
+                )
+            )
+            dao.getLedgerEntry(entryId)?.let { saved ->
+                queueCloudAfterLocal { user -> LocalFirstCloudSync.queueLedgerEntry(app, user, saved) }
+            }
+            val label = if (kind == LoanLedgerKind.ADDITIONAL) "extra amount" else "clearing payment"
+            inviteCounterparty(
+                loan,
+                LoanInviteService.Action.APPROVE_PAYMENT,
+                entry = dao.getLedgerEntry(entryId),
+                message = "FinMoney $label of ₹${"%,.0f".format(amount)} is waiting for approval. The balance does not change until you approve."
+            )
+        }
+    }
+
+    fun approveLedgerEntry(entryId: Long) {
+        viewModelScope.launch {
+            val entry = dao.getLedgerEntry(entryId) ?: return@launch
+            val loan = dao.getLoanById(entry.loanId) ?: return@launch
+            if (!canCounterpartyActOnEntry(loan, entry)) {
+                _loanActionMessage.emit("Only the other person can approve this payment.")
+                return@launch
+            }
+            if (!LoanLedgerMath.isPending(entry.status)) {
+                _loanActionMessage.emit("This payment is not waiting for approval.")
+                return@launch
+            }
+            val entries = dao.listLedgerEntries(entry.loanId)
+            if (entry.kind == LoanLedgerKind.CLEARING) {
+                val after = LoanLedgerMath.outstandingAfter(loan.totalAmount, entries, entry.id, entry.kind, entry.amount)
+                if (!LoanLedgerMath.clearingFits(after)) {
+                    _loanActionMessage.emit("This repayment is now more than the remaining balance.")
+                    return@launch
+                }
+            }
+            val agreed = entry.copy(
+                status = LoanApprovalStatus.MUTUAL_APPROVED,
+                agreementText = LoanAgreementService.entryAgreement(loan, entry),
+                updatedAt = System.currentTimeMillis()
+            )
+            dao.updateLedgerEntry(agreed)
+            refreshLoanBalance(loan.id)
+            _loanActionMessage.emit("Payment approved. The balance is updated.")
+        }
+    }
+
+    fun declineLedgerEntry(entryId: Long) {
+        viewModelScope.launch {
+            val entry = dao.getLedgerEntry(entryId) ?: return@launch
+            val loan = dao.getLoanById(entry.loanId) ?: return@launch
+            val phone = currentUserPhone10()
+            val isProposer = isLedgerProposer(loan, entry, phone)
+            val isOther = canCounterpartyActOnEntry(loan, entry)
+            if (!isProposer && !isOther) {
+                _loanActionMessage.emit("Only the two people on this record can decline this payment.")
+                return@launch
+            }
+            if (!LoanLedgerMath.isPending(entry.status)) {
+                _loanActionMessage.emit("This payment is not waiting for approval.")
+                return@launch
+            }
+            dao.updateLedgerEntry(
+                entry.copy(status = LoanApprovalStatus.REJECTED, updatedAt = System.currentTimeMillis())
+            )
+            _loanActionMessage.emit(if (isProposer) "Payment withdrawn." else "Payment declined. The balance is unchanged.")
+        }
+    }
+
+    fun editLedgerEntry(entryId: Long, newAmount: Double, newNotes: String, newProofs: String?) {
+        viewModelScope.launch {
+            val entry = dao.getLedgerEntry(entryId) ?: return@launch
+            val loan = dao.getLoanById(entry.loanId) ?: return@launch
+            if (!isLedgerProposer(loan, entry, currentUserPhone10())) {
+                _loanActionMessage.emit("Only the person who added this payment can edit it.")
+                return@launch
+            }
+            if (newAmount <= 0.0) {
+                _loanActionMessage.emit("Enter an amount greater than zero.")
+                return@launch
+            }
+            if (loan.status == LoanApprovalStatus.SETTLED || loan.status == LoanApprovalStatus.PENDING_SETTLEMENT) {
+                _loanActionMessage.emit("This record is closing, so payments cannot be edited.")
+                return@launch
+            }
+            val entries = dao.listLedgerEntries(entry.loanId)
+            if (LoanLedgerMath.countsTowardBalance(entry.status)) {
+                val after = LoanLedgerMath.outstandingAfter(loan.totalAmount, entries, entry.id, entry.kind, newAmount)
+                if (entry.kind == LoanLedgerKind.CLEARING && !LoanLedgerMath.clearingFits(after)) {
+                    _loanActionMessage.emit("That amount would clear more than the remaining balance.")
+                    return@launch
+                }
+                dao.updateLedgerEntry(
+                    entry.copy(
+                        proposedAmount = newAmount,
+                        proposedNotes = newNotes,
+                        proposedProofPaths = newProofs ?: entry.proofPaths,
+                        amendmentPending = true,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+                inviteCounterparty(
+                    loan,
+                    LoanInviteService.Action.APPROVE_PAYMENT,
+                    entry = dao.getLedgerEntry(entryId),
+                    message = "A payment change from ₹${"%,.0f".format(entry.amount)} to ₹${"%,.0f".format(newAmount)} is waiting. The balance keeps the old amount until you approve."
+                )
+            } else if (LoanLedgerMath.isPending(entry.status)) {
+                if (entry.kind == LoanLedgerKind.CLEARING) {
+                    val left = (LoanLedgerMath.outstanding(loan.totalAmount, entries) - LoanLedgerMath.reservedClearing(entries, entry.id)).coerceAtLeast(0.0)
+                    if (newAmount - left > 0.009) {
+                        _loanActionMessage.emit("That amount would clear more than the remaining balance.")
+                        return@launch
+                    }
+                }
+                dao.updateLedgerEntry(
+                    entry.copy(
+                        amount = newAmount,
+                        notes = newNotes,
+                        proofPaths = newProofs ?: entry.proofPaths,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+                _loanActionMessage.emit("Payment updated. It still needs the other person's approval.")
+            } else {
+                _loanActionMessage.emit("This payment cannot be edited.")
+            }
+        }
+    }
+
+    fun approveLedgerAmendment(entryId: Long) {
+        viewModelScope.launch {
+            val entry = dao.getLedgerEntry(entryId) ?: return@launch
+            val loan = dao.getLoanById(entry.loanId) ?: return@launch
+            if (!entry.amendmentPending) {
+                _loanActionMessage.emit("There is no change waiting on this payment.")
+                return@launch
+            }
+            if (!canCounterpartyActOnEntry(loan, entry)) {
+                _loanActionMessage.emit("Only the other person can approve this change.")
+                return@launch
+            }
+            val entries = dao.listLedgerEntries(entry.loanId)
+            if (entry.kind == LoanLedgerKind.CLEARING) {
+                val after = LoanLedgerMath.outstandingAfter(loan.totalAmount, entries, entry.id, entry.kind, entry.proposedAmount)
+                if (!LoanLedgerMath.clearingFits(after)) {
+                    _loanActionMessage.emit("That change would clear more than the remaining balance.")
+                    return@launch
+                }
+            }
+            val applied = entry.copy(
+                amount = entry.proposedAmount,
+                notes = entry.proposedNotes,
+                proofPaths = entry.proposedProofPaths.ifBlank { entry.proofPaths },
+                proposedAmount = 0.0,
+                proposedNotes = "",
+                proposedProofPaths = "",
+                amendmentPending = false,
+                updatedAt = System.currentTimeMillis()
+            )
+            dao.updateLedgerEntry(applied.copy(agreementText = LoanAgreementService.entryAgreement(loan, applied)))
+            refreshLoanBalance(loan.id)
+            _loanActionMessage.emit("Payment change approved. The balance is updated.")
+        }
+    }
+
+    fun declineLedgerAmendment(entryId: Long) {
+        viewModelScope.launch {
+            val entry = dao.getLedgerEntry(entryId) ?: return@launch
+            val loan = dao.getLoanById(entry.loanId) ?: return@launch
+            if (!entry.amendmentPending) return@launch
+            val phone = currentUserPhone10()
+            if (!isLedgerProposer(loan, entry, phone) && !canCounterpartyActOnEntry(loan, entry)) {
+                _loanActionMessage.emit("Only the two people on this record can cancel this change.")
+                return@launch
+            }
+            dao.updateLedgerEntry(
+                entry.copy(
+                    proposedAmount = 0.0,
+                    proposedNotes = "",
+                    proposedProofPaths = "",
+                    amendmentPending = false,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+            _loanActionMessage.emit("Change cancelled. The previous payment amount stays.")
+        }
+    }
+
+    fun deleteLedgerEntry(entryId: Long) {
+        viewModelScope.launch {
+            val entry = dao.getLedgerEntry(entryId) ?: return@launch
+            val loan = dao.getLoanById(entry.loanId) ?: return@launch
+            if (!isLedgerProposer(loan, entry, currentUserPhone10())) {
+                _loanActionMessage.emit("Only the person who added this payment can delete it.")
+                return@launch
+            }
+            val canDelete = LoanLedgerMath.isPending(entry.status) ||
+                entry.status == LoanApprovalStatus.REJECTED ||
+                loan.status == LoanApprovalStatus.SETTLED
+            if (!canDelete) {
+                _loanActionMessage.emit("An approved payment stays on the record until both parties settle it.")
+                return@launch
+            }
+            dao.deleteLedgerEntry(entryId)
+            refreshLoanBalance(loan.id)
+            _loanActionMessage.emit("Payment deleted.")
+        }
+    }
+
+    private fun isLedgerProposer(loan: LoanTransaction, entry: LoanLedgerEntry, phone: String): Boolean {
+        return if (entry.proposerIsCreator) {
+            LoanPartyAuth.isCreator(loan.creatorPhone, phone, loan.userId, getActiveUserId())
+        } else {
+            LoanPartyAuth.isCounterparty(loan.personContact.ifBlank { loan.counterpartyContact }, phone)
+        }
+    }
+
+    private suspend fun canCounterpartyActOnEntry(loan: LoanTransaction, entry: LoanLedgerEntry): Boolean {
+        val phone = currentUserPhone10()
+        val creator = LoanPartyAuth.isCreator(loan.creatorPhone, phone, loan.userId, getActiveUserId())
+        val counterparty = LoanPartyAuth.isCounterparty(loan.personContact.ifBlank { loan.counterpartyContact }, phone)
+        if (creator && counterparty) return false
+        return if (entry.proposerIsCreator) counterparty else creator
+    }
+
+    private suspend fun refreshLoanBalance(loanId: Long) {
+        val loan = dao.getLoanById(loanId) ?: return
+        val entries = dao.listLedgerEntries(loanId)
+        val closed = loan.status == LoanApprovalStatus.SETTLED || loan.status == LoanApprovalStatus.REJECTED
+        val outstanding = if (closed) 0.0 else LoanLedgerMath.outstanding(loan.totalAmount, entries).coerceAtLeast(0.0)
+        val cleared = LoanLedgerMath.cleared(entries)
+        val added = LoanLedgerMath.added(entries)
+        persistLoan(
+            loan.copy(
+                outstandingAmount = outstanding,
+                paidAmount = cleared,
+                settledAmount = if (loan.status == LoanApprovalStatus.SETTLED) loan.totalAmount + added else cleared,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+        queueCloudAfterLocal { user ->
+            entries.forEach { LocalFirstCloudSync.queueLedgerEntry(app, user, it) }
+        }
+    }
+
     fun saveUserProfile(
         name: String = "You",
         email: String = "",
         phoneNumber: String = "",
         profilePicUri: String? = null,
-        isOtpVerified: Boolean = true,
-        isEmailVerified: Boolean = true,
+        isOtpVerified: Boolean = false,
+        isEmailVerified: Boolean = false,
         monthlyBudget: Double? = null,
         currencySymbol: String? = null
     ) {
@@ -971,24 +1579,36 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             val cleanPhone = phoneNumber.filter { it.isDigit() }.takeLast(10)
             val cleanEmail = email.trim().lowercase()
             val existing = dao.getUserProfileDirect()
+            val fbUid = try {
+                Firebase.auth.currentUser?.uid
+            } catch (_: Throwable) {
+                null
+            }
+            val bindUid = fbUid ?: existing?.userId
 
-            if (cleanPhone.isNotBlank()) {
-                val byPhone = dao.getUserByPhone(cleanPhone)
-                if (byPhone != null && byPhone.userId != existing?.userId && cleanEmail.isNotBlank() && byPhone.email.isNotBlank() && byPhone.email.lowercase() != cleanEmail) {
-                    Log.w("FinMoneyViewModel", "Profile save collision: phone $cleanPhone already registered to ${byPhone.email}")
+            if (cleanPhone.isNotBlank() || cleanEmail.isNotBlank()) {
+                val phase = if (isOtpVerified && isEmailVerified) BindPhase.COMMIT_PAIR else BindPhase.PRE_EMAIL_BIND
+                val bindCheck = identityBinding.assertCanBind(cleanPhone, cleanEmail, phase, bindUid)
+                if (bindCheck.isFailure) {
+                    Log.w("FinMoneyViewModel", "Profile save blocked: ${bindCheck.exceptionOrNull()?.message}")
                     return@launch
+                }
+                if (phase == BindPhase.COMMIT_PAIR) {
+                    val commit = identityBinding.commitVerifiedPair(
+                        phone = cleanPhone,
+                        email = cleanEmail,
+                        phoneVerified = isOtpVerified,
+                        emailVerified = isEmailVerified,
+                        uid = bindUid
+                    )
+                    if (commit.isFailure) {
+                        Log.w("FinMoneyViewModel", "Profile registry commit failed: ${commit.exceptionOrNull()?.message}")
+                        return@launch
+                    }
                 }
             }
 
-            if (cleanEmail.isNotBlank()) {
-                val byEmail = dao.getUserByEmail(cleanEmail)
-                if (byEmail != null && byEmail.userId != existing?.userId && cleanPhone.isNotBlank() && byEmail.phoneNumber.isNotBlank() && byEmail.phoneNumber != cleanPhone) {
-                    Log.w("FinMoneyViewModel", "Profile save collision: email $cleanEmail already registered to phone ${byEmail.phoneNumber}")
-                    return@launch
-                }
-            }
-
-            val activeUid = existing?.userId ?: "user_${cleanPhone.ifBlank { cleanEmail.replace("@", "_").replace(".", "_") }}"
+            val activeUid = bindUid ?: "user_${cleanPhone.ifBlank { cleanEmail.replace("@", "_").replace(".", "_") }}"
             val cleanExistingName = if (existing?.name != null && existing.name != "Signed Out" && existing.name.isNotBlank()) existing.name else "FinMoney Member"
             val finalName = if (name.isNotBlank() && name != "Signed Out") name else cleanExistingName
             val finalEmail = cleanEmail.ifBlank { existing?.email ?: "" }
@@ -1016,11 +1636,208 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
+    suspend fun validateIdentifierOwnership(
+        phone: String,
+        email: String,
+        phase: BindPhase = BindPhase.PRE_PHONE_OTP
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val uid = try {
+            Firebase.auth.currentUser?.uid
+        } catch (_: Throwable) {
+            null
+        } ?: dao.getUserProfileDirect()?.userId
+        identityBinding.assertCanBind(phone, email, phase, uid)
+    }
+
+    suspend fun sendLoginPhoneOtp(activity: Activity, phone: String, forceResend: Boolean = false): Result<FinMoneyAuthService.PhoneOtpDispatchResult> {
+        return FinMoneyAuthService.sendPhoneOtp(activity, phone, forceResend)
+    }
+
+    suspend fun confirmLoginPhoneOtp(verificationId: String, otpCode: String, phone: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            val verified = FinMoneyAuthService.verifyPhoneOtpCode(verificationId, otpCode)
+            if (verified.isFailure) return@withContext Result.failure(verified.exceptionOrNull()!!)
+            val cleanPhone = phone.filter { it.isDigit() }.takeLast(10)
+            identityBinding.reservePhoneAfterOtp(cleanPhone).getOrElse { return@withContext Result.failure(it) }
+            syncVerificationStatusFromFirebase().getOrElse { return@withContext Result.failure(it) }
+            Result.success(Unit)
+        }
+
+    suspend fun linkGoogleIdToken(idToken: String): Result<Unit> {
+        return FinMoneyAuthService.linkGoogleIdToken(idToken).map { }
+    }
+
+    suspend fun bindEmailAndSendVerification(email: String): Result<Unit> {
+        return FinMoneyAuthService.updateEmailAndSendVerification(email)
+    }
+
+    suspend fun refreshEmailVerificationStatus(): Result<Boolean> {
+        return FinMoneyAuthService.reloadEmailVerified()
+    }
+
+    suspend fun reservePhoneAfterVerification(phone: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            val cleanPhone = phone.filter { it.isDigit() }.takeLast(10)
+            identityBinding.reservePhoneAfterOtp(cleanPhone).getOrElse { return@withContext Result.failure(it) }
+            syncVerificationStatusFromFirebase().getOrElse { return@withContext Result.failure(it) }
+            Result.success(Unit)
+        }
+
+    /**
+     * Reload Firebase user and mirror phone/email verification flags into Room (source of truth for gating).
+     */
+    suspend fun syncVerificationStatusFromFirebase(): Result<UserProfile?> = withContext(Dispatchers.IO) {
+        try {
+            val user = try {
+                Firebase.auth.currentUser
+            } catch (_: Throwable) {
+                null
+            }
+            if (user == null) {
+                return@withContext Result.success(dao.getUserProfileDirect())
+            }
+            try {
+                user.reload().await()
+            } catch (e: Exception) {
+                Log.w("FinMoneyViewModel", "Firebase user reload skipped: ${e.message}")
+            }
+            val refreshed = Firebase.auth.currentUser ?: user
+            val phone10 = FinMoneyAuthService.phoneDigitsFromFirebase(refreshed)
+            val phoneVerified = FinMoneyAuthService.isPhoneLinkedOnFirebase(refreshed)
+            val emailVerified = FinMoneyAuthService.isEmailVerifiedOnFirebase(refreshed)
+            val existing = dao.getUserProfileDirect()
+            val finalEmail = refreshed.email?.trim()?.lowercase().orEmpty()
+                .ifBlank { existing?.email ?: "" }
+            val profile = UserProfile(
+                userId = refreshed.uid,
+                name = existing?.name?.takeIf { it.isNotBlank() && it != "Signed Out" }
+                    ?: refreshed.displayName?.takeIf { it.isNotBlank() }
+                    ?: "FinMoney Member",
+                email = finalEmail,
+                phoneNumber = phone10.ifBlank { existing?.phoneNumber ?: "" },
+                profilePicUri = refreshed.photoUrl?.toString() ?: existing?.profilePicUri,
+                profileImageUri = refreshed.photoUrl?.toString() ?: existing?.profileImageUri,
+                isOtpVerified = phoneVerified,
+                isEmailVerified = emailVerified,
+                isCurrentActive = true,
+                monthlyBudget = existing?.monthlyBudget ?: 0.0,
+                currencySymbol = existing?.currencySymbol ?: "₹",
+                lastLoginAt = System.currentTimeMillis()
+            )
+            dao.insertOrUpdateUserProfile(profile)
+            UserLocalDataScoping.assignOrphanedRowsToUser(dao, refreshed.uid)
+            val cloudCtx = CloudUserContextResolver.fromProfile(profile, refreshed.uid)
+            val profileCloud = userCloudRepository.upsertUserProfileSnapshot(cloudCtx, profile)
+            if (profileCloud.isFailure) {
+                CloudSyncOutboxManager.enqueue(
+                    dao = dao,
+                    cloudUser = cloudCtx,
+                    subcollection = "account",
+                    documentId = "profile",
+                    data = mapOf(
+                        "name" to profile.name,
+                        "email" to cloudCtx.email,
+                        "phone" to cloudCtx.phone10,
+                        "phoneVerified" to profile.isOtpVerified,
+                        "emailVerified" to profile.isEmailVerified,
+                        "currencySymbol" to profile.currencySymbol,
+                        "monthlyBudget" to profile.monthlyBudget
+                    ),
+                    legacyCollections = emptyList(),
+                    error = profileCloud.exceptionOrNull()?.message
+                )
+            }
+            CloudSyncOutboxManager.flushPending(app.applicationContext, dao)
+            try {
+                LoanInviteService.pullInbox(app)
+            } catch (e: Exception) {
+                Log.w("FinMoneyViewModel", "Loan inbox pull skipped: ${e.message}")
+            }
+            Result.success(profile)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun syncVerificationStatusFromFirebaseAsync() {
+        viewModelScope.launch(Dispatchers.IO) {
+            syncVerificationStatusFromFirebase()
+            flushPendingCloudSync()
+        }
+    }
+
+    suspend fun flushPendingCloudSync(): Int = withContext(Dispatchers.IO) {
+        CloudSyncOutboxManager.flushPending(app.applicationContext, dao)
+    }
+
+    fun flushPendingCloudSyncAsync() {
+        viewModelScope.launch(Dispatchers.IO) {
+            flushPendingCloudSync()
+        }
+    }
+
+    private suspend fun persistExpense(item: DebitItem): Long {
+        val activeUid = getActiveUserId()
+        val ready = item.copy(
+            userId = item.userId.ifBlank { activeUid },
+            cloudId = item.cloudId.ifBlank { java.util.UUID.randomUUID().toString() },
+            monthYear = item.monthYear.ifBlank { "%04d-%02d".format(item.year, item.month) }
+        )
+        val id = repository.insertDebit(ready)
+        val saved = ready.copy(id = id)
+        queueCloudAfterLocal { user -> LocalFirstCloudSync.queueExpense(app, user, saved) }
+        return id
+    }
+
+    private fun queueCloudAfterLocal(block: suspend (com.example.cloud.CloudUserContext) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val user = CloudUserContextResolver.resolve(dao)
+                block(user)
+            } catch (e: Exception) {
+                Log.w("FinMoneyViewModel", "Cloud queue skipped: ${e.message}")
+            }
+        }
+    }
+
+    private suspend fun persistLoan(loan: LoanTransaction) {
+        repository.updateLoan(loan)
+        queueCloudAfterLocal { LocalFirstCloudSync.queueLoan(app, it, loan) }
+    }
+
+    private suspend fun inviteCounterparty(
+        loan: LoanTransaction,
+        action: LoanInviteService.Action,
+        entry: LoanLedgerEntry? = null,
+        message: String? = null
+    ) {
+        val result = LoanInviteService.dispatch(app, loan, action, entry, message)
+        notifyUser(result)
+    }
+
+    fun markLoanNotificationRead(notificationId: Long) {
+        viewModelScope.launch {
+            dao.markNotificationRead(notificationId)
+        }
+    }
+
+    fun pullLoanInboxAsync() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                LoanInviteService.pullInbox(app)
+            } catch (e: Exception) {
+                Log.w("FinMoneyViewModel", "Loan inbox pull skipped: ${e.message}")
+            }
+        }
+    }
+
     suspend fun registerOrAuthenticateUser(
         name: String,
         email: String,
         phone: String,
-        profilePicUri: String? = null
+        profilePicUri: String? = null,
+        isOtpVerified: Boolean = false,
+        isEmailVerified: Boolean = false
     ): Result<UserProfile> = withContext(Dispatchers.IO) {
         try {
             val cleanPhone = phone.filter { it.isDigit() }.takeLast(10)
@@ -1029,21 +1846,30 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             val existingByPhone = if (cleanPhone.isNotBlank()) dao.getUserByPhone(cleanPhone) else null
             val existingByEmail = if (cleanEmail.isNotBlank()) dao.getUserByEmail(cleanEmail) else null
 
-            // Prevent duplicate registration collisions across users
-            if (existingByPhone != null && cleanEmail.isNotBlank() && existingByPhone.email.isNotBlank() && existingByPhone.email.lowercase() != cleanEmail) {
-                return@withContext Result.failure(
-                    IllegalArgumentException("Mobile number +91 $cleanPhone is already registered to ${existingByPhone.email}. Please sign in with your registered email or use a different phone number.")
-                )
-            }
+            val fbUser = try { com.google.firebase.Firebase.auth.currentUser } catch (_: Throwable) { null }
+            val provisionalUid = fbUser?.uid
+                ?: existingByPhone?.userId
+                ?: existingByEmail?.userId
 
-            if (existingByEmail != null && cleanPhone.isNotBlank() && existingByEmail.phoneNumber.isNotBlank() && existingByEmail.phoneNumber != cleanPhone) {
-                return@withContext Result.failure(
-                    IllegalArgumentException("Email address $cleanEmail is already registered to phone +91 ${existingByEmail.phoneNumber}. Please sign in with your registered phone number.")
-                )
+            val bindPhase = when {
+                isOtpVerified && isEmailVerified -> BindPhase.COMMIT_PAIR
+                cleanEmail.isNotBlank() -> BindPhase.PRE_EMAIL_BIND
+                else -> BindPhase.PRE_PHONE_OTP
+            }
+            identityBinding.assertCanBind(cleanPhone, cleanEmail, bindPhase, provisionalUid).getOrElse {
+                return@withContext Result.failure(it)
+            }
+            if (bindPhase == BindPhase.COMMIT_PAIR && !provisionalUid.isNullOrBlank()) {
+                identityBinding.commitVerifiedPair(
+                    phone = cleanPhone,
+                    email = cleanEmail,
+                    phoneVerified = isOtpVerified,
+                    emailVerified = isEmailVerified,
+                    uid = provisionalUid
+                ).getOrElse { return@withContext Result.failure(it) }
             }
 
             // Determine unique userId
-            val fbUser = try { com.google.firebase.Firebase.auth.currentUser } catch (_: Throwable) { null }
             val userId = fbUser?.uid?.ifBlank { null }
                 ?: existingByPhone?.userId?.ifBlank { null }
                 ?: existingByEmail?.userId?.ifBlank { null }
@@ -1056,14 +1882,25 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             val finalPhone = cleanPhone.ifBlank { fbUser?.phoneNumber ?: existingByPhone?.phoneNumber ?: "" }
             val pic = profilePicUri ?: fbUser?.photoUrl?.toString() ?: existingByPhone?.profilePicUri ?: existingByEmail?.profilePicUri
 
+            val phoneVerified = if (fbUser != null) {
+                FinMoneyAuthService.isPhoneLinkedOnFirebase(fbUser)
+            } else {
+                isOtpVerified
+            }
+            val emailVerified = if (fbUser != null) {
+                FinMoneyAuthService.isEmailVerifiedOnFirebase(fbUser)
+            } else {
+                isEmailVerified
+            }
+
             val newProfile = UserProfile(
                 userId = userId,
                 name = finalName,
                 email = finalEmail,
                 phoneNumber = finalPhone,
                 profilePicUri = pic,
-                isOtpVerified = true,
-                isEmailVerified = true,
+                isOtpVerified = phoneVerified,
+                isEmailVerified = emailVerified,
                 isCurrentActive = true,
                 lastLoginAt = System.currentTimeMillis()
             )
@@ -1076,8 +1913,9 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun signOut() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
+                flushPendingCloudSync()
                 dao.deactivateAllUserProfiles()
                 try {
                     com.google.firebase.Firebase.auth.signOut()
@@ -1153,8 +1991,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                     phoneNumber = finalPhone,
                     profilePicUri = fbPhotoUri ?: existing?.profilePicUri ?: existing?.profileImageUri,
                     profileImageUri = fbPhotoUri ?: existing?.profileImageUri ?: existing?.profilePicUri,
-                    isOtpVerified = finalPhone.isNotBlank() || (existing?.isOtpVerified == true),
-                    isEmailVerified = user.isEmailVerified || finalEmail.isNotBlank(),
+                    isOtpVerified = FinMoneyAuthService.isPhoneLinkedOnFirebase(user),
+                    isEmailVerified = FinMoneyAuthService.isEmailVerifiedOnFirebase(user),
                     isCurrentActive = true,
                     monthlyBudget = existing?.monthlyBudget ?: 0.0,
                     currencySymbol = existing?.currencySymbol ?: "₹",

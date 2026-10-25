@@ -44,6 +44,9 @@ import java.util.Locale
 @Composable
 fun LoanRecordWizard(
     currencySymbol: String,
+    initialName: String = "",
+    initialPhone: String = "",
+    lockContact: Boolean = false,
     onDismiss: () -> Unit,
     onSaveAndSend: (
         type: String,
@@ -60,8 +63,8 @@ fun LoanRecordWizard(
     val context = LocalContext.current
     var step by remember { mutableIntStateOf(0) }
     var loanType by remember { mutableStateOf("LENT") }
-    var name by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initialName) }
+    var phone by remember { mutableStateOf(initialPhone) }
     var amountStr by remember { mutableStateOf("") }
     var interestStr by remember { mutableStateOf("0") }
     var notes by remember { mutableStateOf("") }
@@ -177,7 +180,9 @@ fun LoanRecordWizard(
                     if (step < 3) {
                         if (step == 1 && name.isBlank()) return@Button
                         if (step == 2 && (amountStr.toDoubleOrNull() ?: 0.0) <= 0.0) return@Button
-                        step += 1
+                        var next = step + 1
+                        if (lockContact && next == 1) next = 2
+                        step = next
                     } else {
                         val amount = amountStr.toDoubleOrNull() ?: return@Button
                         val proofs = LoanAgreementService.persistProofs(context, proofUris)
@@ -200,7 +205,14 @@ fun LoanRecordWizard(
             }
         },
         dismissButton = {
-            TextButton(onClick = { if (step == 0) onDismiss() else step -= 1 }) {
+            TextButton(onClick = {
+                if (step == 0) onDismiss()
+                else {
+                    var prev = step - 1
+                    if (lockContact && prev == 1) prev = 0
+                    step = prev
+                }
+            }) {
                 Text(if (step == 0) "Cancel" else "Back")
             }
         }

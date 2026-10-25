@@ -56,7 +56,10 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import com.example.BuildConfig
 import com.example.R
+import com.example.identity.UserIdentityBindingEngine.BindPhase
+import com.example.service.FinMoneyAuthService
 import com.example.ui.FinMoneyViewModel
 import com.example.ui.theme.*
 import com.example.util.DetectedSim
@@ -114,101 +117,132 @@ private fun AuthScreenContent(
     var profilePicUri by remember { mutableStateOf("") }
 
     var otpInput by remember { mutableStateOf("") }
-    var generatedOtp by remember { mutableStateOf("") }
+    var phoneVerificationId by remember { mutableStateOf("") }
+    var isSendingOtp by remember { mutableStateOf(false) }
     var isPhoneVerified by remember { mutableStateOf(false) }
+    var isEmailVerificationPending by remember { mutableStateOf(false) }
     var isGoogleSignedIn by remember { mutableStateOf(false) }
     var isGoogleLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
-    var showSmsBanner by remember { mutableStateOf(false) }
-
     // Onboarding Step State:
     // 0 = Feature Highlights Carousel / Landing
     // 1 = Phone Number Entry
     // 2 = OTP Verification
     // 3 = Profile Personalization
+    // 4 = Email verification (Firebase)
     var currentStep by remember { mutableStateOf(0) }
 
-    val postNotificationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        Log.d("AuthScreen", "POST_NOTIFICATIONS runtime permission granted: $isGranted")
-    }
-
-    fun dispatchRealSystemOtpNotification(phoneNumber: String, otpCode: String) {
-        try {
-            val notificationManager = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-            val channelId = "finmoney_otp_channel"
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val channel = android.app.NotificationChannel(
-                    channelId,
-                    "FinMoney OTP Verification",
-                    android.app.NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "High-priority OTP authentication messages for FinMoney"
-                }
-                notificationManager.createNotificationChannel(channel)
-            }
-
-            val builder = androidx.core.app.NotificationCompat.Builder(context, channelId)
-                .setSmallIcon(com.example.R.drawable.app_icon_logo)
-                .setContentTitle("FinMoney Security Code: $otpCode")
-                .setContentText("Your single-use 6-digit login OTP for +91 ${phoneNumber.takeLast(10)} is $otpCode.")
-                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
-                .setDefaults(androidx.core.app.NotificationCompat.DEFAULT_ALL)
-                .setAutoCancel(true)
-
-            notificationManager.notify((1000..9999).random(), builder.build())
-        } catch (e: Exception) {
-            Log.w("AuthScreen", "OTP Notification error: ${e.message}")
-        }
-    }
-
-    fun triggerOtpDispatch(phoneNumber: String) {
-        val digits = phoneNumber.filter { it.isDigit() }
+    fun triggerOtpDispatch(phoneNumber: String, forceResend: Boolean = false) {
+        val digits = phoneNumber.filter { it.isDigit() }.takeLast(10)
         if (digits.length < 10) {
             errorText = "Please enter a valid 10-digit mobile number."
             return
         }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            try {
-                postNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            } catch (e: Exception) {
-                Log.w("AuthScreen", "Permission launch error: ${e.message}")
-            }
+        val activity = context as? Activity
+        if (activity == null) {
+            errorText = "Unable to start phone verification on this device."
+            return
         }
 
-        val newOtp = (100000..999999).random().toString()
-        generatedOtp = newOtp
-        otpInput = ""
-        dispatchRealSystemOtpNotification(digits, newOtp)
-        showSmsBanner = true
-        statusMessage = "SMS OTP sent to +91 ${digits.takeLast(10)}!"
+        isSendingOtp = true
         errorText = null
-        currentStep = 2
-
+        statusMessage = null
+        otpInput = ""
+        phoneVerificationId = ""
         coroutineScope.launch {
-            delay(1200)
-            if (otpInput.isBlank() && generatedOtp == newOtp) {
-                otpInput = newOtp
-                statusMessage = "SMS OTP auto-detected & filled! ✓"
+            val collision = viewModel.validateIdentifierOwnership(phone = digits, email = emailInput.trim())
+            if (collision.isFailure) {
+                errorText = collision.exceptionOrNull()?.message
+                isSendingOtp = false
+                return@launch
             }
+
+            val dispatch = viewModel.sendLoginPhoneOtp(activity, digits, forceResend)
+            isSendingOtp = false
+            if (dispatch.isFailure) {
+                errorText = dispatch.exceptionOrNull()?.localizedMessage
+                    ?: "Could not send OTP. Check your number and try again."
+                return@launch
+            }
+
+            val result = dispatch.getOrThrow()
+            if (result.instantSignIn) {
+                val reserve = viewModel.reservePhoneAfterVerification(digits)
+                if (reserve.isFailure) {
+                    errorText = reserve.exceptionOrNull()?.message
+                    return@launch
+                }
+                isPhoneVerified = true
+                statusMessage = "Mobile number verified successfully! ✓"
+                currentStep = 3
+                return@launch
+            }
+
+            phoneVerificationId = result.verificationId ?: ""
+            statusMessage = "OTP sent via SMS to +91 ${digits.takeLast(10)}."
+            currentStep = 2
         }
     }
 
-    // Always keep form fields blank until user enters credentials
     LaunchedEffect(Unit) {
-        currentStep = 0
-        nameInput = ""
-        phoneInput = ""
-        emailInput = ""
-        otpInput = ""
-        generatedOtp = ""
-        isPhoneVerified = false
-        isGoogleSignedIn = false
-        errorText = null
-        statusMessage = null
+        coroutineScope.launch {
+            viewModel.syncVerificationStatusFromFirebase()
+        }
+    }
+
+    // Resume INDmoney-style verification if user dropped off mid onboarding
+    LaunchedEffect(
+        currentUser?.userId,
+        currentUser?.isOtpVerified,
+        currentUser?.isEmailVerified,
+        currentUser?.phoneNumber,
+        currentUser?.email
+    ) {
+        val profile = currentUser ?: return@LaunchedEffect
+        val isPlaceholder = profile.userId == "user_default" &&
+            profile.phoneNumber.isBlank() &&
+            profile.email.isBlank()
+        if (isPlaceholder || (profile.isOtpVerified && profile.isEmailVerified)) return@LaunchedEffect
+
+        if (profile.name.isNotBlank() && profile.name != "Signed Out") {
+            nameInput = profile.name
+        }
+        if (profile.phoneNumber.isNotBlank()) phoneInput = profile.phoneNumber
+        if (profile.email.isNotBlank()) emailInput = profile.email
+        isPhoneVerified = profile.isOtpVerified
+
+        statusMessage = "Complete mobile & email verification to access FinMoney."
+        when {
+            !profile.isOtpVerified -> currentStep = 1
+            !profile.isEmailVerified -> currentStep = if (profile.email.isBlank()) 3 else 4
+        }
+    }
+
+    fun routeAfterIdentityProviders(name: String, email: String, phoneDigits: String) {
+        val gUser = Firebase.auth.currentUser
+        val phoneLinked = FinMoneyAuthService.isPhoneLinkedOnFirebase(gUser)
+        val emailVerified = FinMoneyAuthService.isEmailVerifiedOnFirebase(gUser)
+        if (phoneDigits.isNotBlank()) phoneInput = phoneDigits
+        when {
+            !phoneLinked -> {
+                statusMessage = "Verify your mobile number with OTP (required)."
+                currentStep = 1
+            }
+            !emailVerified -> {
+                emailInput = email
+                isEmailVerificationPending = true
+                currentStep = if (email.isBlank()) 3 else 4
+                statusMessage = "Verify your email to activate FinMoney."
+            }
+            else -> {
+                coroutineScope.launch {
+                    viewModel.syncVerificationStatusFromFirebase()
+                    statusMessage = "Signed in as $name ✓"
+                    onContinue()
+                }
+            }
+        }
     }
 
     var activeCarouselIndex by remember { mutableStateOf(0) }
@@ -237,10 +271,9 @@ private fun AuthScreenContent(
             val selectedPhone = SimDetectionHelper.extractPhoneNumberFromHintIntent(context as Activity, result.data)
             if (!selectedPhone.isNullOrBlank()) {
                 phoneInput = selectedPhone
-                isPhoneVerified = true
-                statusMessage = "Device SIM selected: +91 ${selectedPhone.takeLast(10)} ✓"
+                isPhoneVerified = false
+                statusMessage = "Number selected. Tap Get OTP to verify via SMS."
                 errorText = null
-                if (currentStep == 1) currentStep = 2
             }
         }
     }
@@ -341,15 +374,17 @@ private fun AuthScreenContent(
                         isGoogleSignedIn = true
 
                         val cleanPhone = phoneInput.filter { it.isDigit() }
+                        val phoneDigits = FinMoneyAuthService.phoneDigitsFromFirebase(fbUser).ifBlank { cleanPhone.takeLast(10) }
                         val regResult = viewModel.registerOrAuthenticateUser(
                             name = gName,
                             email = gEmail,
-                            phone = cleanPhone,
-                            profilePicUri = gPhoto
+                            phone = phoneDigits,
+                            profilePicUri = gPhoto,
+                            isOtpVerified = FinMoneyAuthService.isPhoneLinkedOnFirebase(fbUser),
+                            isEmailVerified = FinMoneyAuthService.isEmailVerifiedOnFirebase(fbUser)
                         )
                         if (regResult.isSuccess) {
-                            statusMessage = "Signed in as $gName ✓"
-                            onContinue()
+                            routeAfterIdentityProviders(gName, gEmail, phoneDigits)
                         } else {
                             errorText = regResult.exceptionOrNull()?.message
                         }
@@ -365,10 +400,13 @@ private fun AuthScreenContent(
                 if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                     val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data)
                     val idToken = googleIdToken.idToken
-                    val authCredential = GoogleAuthProvider.getCredential(idToken, null)
-                    val authResult = Firebase.auth.signInWithCredential(authCredential).await()
+                    val linkResult = viewModel.linkGoogleIdToken(idToken)
+                    if (linkResult.isFailure) {
+                        errorText = linkResult.exceptionOrNull()?.localizedMessage ?: "Google sign-in failed."
+                        return@launch
+                    }
 
-                    val gUser = authResult.user
+                    val gUser = Firebase.auth.currentUser
                     val detectedName = gUser?.displayName ?: googleIdToken.displayName ?: nameInput.ifBlank { "FinMoney User" }
                     val detectedEmail = gUser?.email ?: googleIdToken.id ?: emailInput
                     val detectedPhoto = gUser?.photoUrl?.toString() ?: googleIdToken.profilePictureUri?.toString() ?: profilePicUri
@@ -379,16 +417,30 @@ private fun AuthScreenContent(
                     isGoogleSignedIn = true
 
                     val cleanPhone = phoneInput.filter { it.isDigit() }
+                    val phoneDigits = FinMoneyAuthService.phoneDigitsFromFirebase(gUser).ifBlank { cleanPhone.takeLast(10) }
+                    if (phoneDigits.isNotBlank()) phoneInput = phoneDigits
+
+                    val googleBindCheck = viewModel.validateIdentifierOwnership(
+                        phoneDigits,
+                        detectedEmail,
+                        BindPhase.PRE_EMAIL_BIND
+                    )
+                    if (googleBindCheck.isFailure) {
+                        errorText = googleBindCheck.exceptionOrNull()?.message
+                        return@launch
+                    }
+
                     val regResult = viewModel.registerOrAuthenticateUser(
                         name = detectedName,
                         email = detectedEmail,
-                        phone = cleanPhone,
-                        profilePicUri = detectedPhoto
+                        phone = phoneDigits,
+                        profilePicUri = detectedPhoto,
+                        isOtpVerified = FinMoneyAuthService.isPhoneLinkedOnFirebase(gUser),
+                        isEmailVerified = FinMoneyAuthService.isEmailVerifiedOnFirebase(gUser)
                     )
 
                     if (regResult.isSuccess) {
-                        statusMessage = "Signed in as $detectedName ✓"
-                        onContinue()
+                        routeAfterIdentityProviders(detectedName, detectedEmail, phoneDigits)
                     } else {
                         errorText = regResult.exceptionOrNull()?.message
                     }
@@ -405,14 +457,16 @@ private fun AuthScreenContent(
                     val gName = fbUser.displayName ?: "FinMoney User"
                     val gEmail = fbUser.email!!
                     val cleanPhone = phoneInput.filter { it.isDigit() }
+                    val phoneDigits = FinMoneyAuthService.phoneDigitsFromFirebase(fbUser).ifBlank { cleanPhone.takeLast(10) }
                     val regResult = viewModel.registerOrAuthenticateUser(
                         name = gName,
                         email = gEmail,
-                        phone = cleanPhone
+                        phone = phoneDigits,
+                        isOtpVerified = FinMoneyAuthService.isPhoneLinkedOnFirebase(fbUser),
+                        isEmailVerified = FinMoneyAuthService.isEmailVerifiedOnFirebase(fbUser)
                     )
                     if (regResult.isSuccess) {
-                        statusMessage = "Signed in as $gName ✓"
-                        onContinue()
+                        routeAfterIdentityProviders(gName, gEmail, phoneDigits)
                         return@launch
                     }
                 }
@@ -436,7 +490,9 @@ private fun AuthScreenContent(
             val result = viewModel.registerOrAuthenticateUser(
                 name = reviewerName,
                 email = reviewerEmail,
-                phone = reviewerPhone
+                phone = reviewerPhone,
+                isOtpVerified = true,
+                isEmailVerified = true
             )
             if (result.isSuccess) {
                 statusMessage = "Logged in as Play Store Reviewer ✓"
@@ -483,79 +539,6 @@ private fun AuthScreenContent(
             .navigationBarsPadding()
             .imePadding()
     ) {
-        // Floating Incoming SMS Received Banner Overlay
-        AnimatedVisibility(
-            visible = showSmsBanner && generatedOtp.isNotBlank() && currentStep == 2,
-            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 10.dp, start = 12.dp, end = 12.dp)
-                .zIndex(100f)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF1E293B),
-                border = androidx.compose.foundation.BorderStroke(1.5.dp, IndCyan),
-                shadowElevation = 10.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        otpInput = generatedOtp
-                        showSmsBanner = false
-                    }
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(IndBlue),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Filled.Sms, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("💬 SMS • VK-FINMNY", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndCyan)
-                            Text("Now", fontSize = 10.sp, color = FinAuthTextSecondary)
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "<#> FinMoney login OTP is $generatedOtp for +91 ${phoneInput.takeLast(10)}. Do not share. rN28v8y1sA2",
-                            fontSize = 11.sp,
-                            color = Color.White,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = IndCyan,
-                        modifier = Modifier.clickable {
-                            otpInput = generatedOtp
-                            showSmsBanner = false
-                        }
-                    ) {
-                        Text(
-                            text = "Auto-fill",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.Black,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-            }
-        }
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -698,27 +681,33 @@ private fun AuthScreenContent(
                     2 -> FinAuthOtpVerificationStep(
                         phoneNumber = phoneInput,
                         otpInput = otpInput,
-                        generatedOtp = generatedOtp,
                         onOtpChange = { otpInput = it },
                         resendTimerSeconds = resendTimerSeconds,
                         onResendOtp = {
                             val digits = phoneInput.filter { it.isDigit() }
-                            triggerOtpDispatch(digits)
+                            triggerOtpDispatch(digits, forceResend = true)
                             resendTimerSeconds = 30
                         },
                         onVerifyOtp = {
-                            val cleanPhone = phoneInput.filter { it.isDigit() }
-                            if (otpInput.length == 6 && (otpInput == generatedOtp || (cleanPhone == "9876543210" && otpInput == "123456"))) {
-                                isPhoneVerified = true
-                                statusMessage = "Mobile number verified successfully! ✓"
-                                errorText = null
-                                if (nameInput.isBlank() && cleanPhone == "9876543210") {
+                            coroutineScope.launch {
+                                val cleanPhone = phoneInput.filter { it.isDigit() }.takeLast(10)
+                                val confirm = viewModel.confirmLoginPhoneOtp(phoneVerificationId, otpInput, cleanPhone)
+                                if (confirm.isSuccess) {
+                                    isPhoneVerified = true
+                                    statusMessage = "Mobile number verified successfully! ✓"
+                                    errorText = null
+                                    currentStep = 3
+                                    return@launch
+                                }
+                                if (BuildConfig.DEBUG && cleanPhone == "9876543210" && otpInput == "123456") {
+                                    isPhoneVerified = true
                                     nameInput = "Play Store Reviewer"
                                     emailInput = "demo.reviewer@finmoney.app"
+                                    currentStep = 3
+                                    return@launch
                                 }
-                                currentStep = 3
-                            } else {
-                                errorText = "Invalid 6-digit OTP. Please enter the correct code from the SMS notification."
+                                errorText = confirm.exceptionOrNull()?.localizedMessage
+                                    ?: "Invalid OTP. Enter the 6-digit code from SMS."
                             }
                         },
                         onEditPhone = { currentStep = 1 },
@@ -742,23 +731,95 @@ private fun AuthScreenContent(
                                 errorText = "Please accept the terms to proceed."
                                 return@FinAuthProfileSetupStep
                             }
-                            val cleanPhone = phoneInput.filter { it.isDigit() }
+                            val cleanEmail = emailInput.trim().lowercase()
+                            if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
+                                errorText = "Please enter a valid email address."
+                                return@FinAuthProfileSetupStep
+                            }
+                            val cleanPhone = phoneInput.filter { it.isDigit() }.takeLast(10)
+                            if (!isPhoneVerified) {
+                                errorText = "Verify your mobile number before continuing."
+                                currentStep = 1
+                                return@FinAuthProfileSetupStep
+                            }
                             coroutineScope.launch {
+                                val collision = viewModel.validateIdentifierOwnership(
+                                    cleanPhone,
+                                    cleanEmail,
+                                    BindPhase.PRE_EMAIL_BIND
+                                )
+                                if (collision.isFailure) {
+                                    errorText = collision.exceptionOrNull()?.message
+                                    return@launch
+                                }
+                                val bind = viewModel.bindEmailAndSendVerification(cleanEmail)
+                                if (bind.isFailure) {
+                                    errorText = bind.exceptionOrNull()?.localizedMessage ?: "Could not send verification email."
+                                    return@launch
+                                }
+                                val emailVerifiedNow = viewModel.refreshEmailVerificationStatus().getOrDefault(false)
                                 val result = viewModel.registerOrAuthenticateUser(
                                     name = nameInput.trim(),
-                                    email = emailInput.trim(),
+                                    email = cleanEmail,
                                     phone = cleanPhone,
-                                    profilePicUri = profilePicUri
+                                    profilePicUri = profilePicUri,
+                                    isOtpVerified = true,
+                                    isEmailVerified = emailVerifiedNow
                                 )
-                                if (result.isSuccess) {
-                                    errorText = null
+                                if (result.isFailure) {
+                                    errorText = result.exceptionOrNull()?.message ?: "Registration failed."
+                                    return@launch
+                                }
+                                errorText = null
+                                if (emailVerifiedNow) {
+                                    viewModel.syncVerificationStatusFromFirebase().getOrNull()
                                     onContinue()
                                 } else {
-                                    errorText = result.exceptionOrNull()?.message ?: "Registration failed."
+                                    isEmailVerificationPending = true
+                                    statusMessage = "Verification link sent to $cleanEmail"
+                                    currentStep = 4
                                 }
                             }
                         },
                         errorText = errorText
+                    )
+
+                    4 -> FinAuthEmailVerificationStep(
+                        email = emailInput.trim(),
+                        statusMessage = statusMessage,
+                        errorText = errorText,
+                        onResendEmail = {
+                            coroutineScope.launch {
+                                val resend = viewModel.bindEmailAndSendVerification(emailInput.trim())
+                                statusMessage = if (resend.isSuccess) {
+                                    "Verification email resent."
+                                } else {
+                                    null
+                                }
+                                errorText = resend.exceptionOrNull()?.localizedMessage
+                            }
+                        },
+                        onRefreshVerified = {
+                            coroutineScope.launch {
+                                val verified = viewModel.refreshEmailVerificationStatus().getOrDefault(false)
+                                if (!verified) {
+                                    errorText = "Email not verified yet. Open the link in your inbox, then tap again."
+                                    return@launch
+                                }
+                                val cleanPhone = phoneInput.filter { it.isDigit() }.takeLast(10)
+                                viewModel.registerOrAuthenticateUser(
+                                    name = nameInput.trim(),
+                                    email = emailInput.trim(),
+                                    phone = cleanPhone,
+                                    profilePicUri = profilePicUri,
+                                    isOtpVerified = true,
+                                    isEmailVerified = true
+                                )
+                                viewModel.syncVerificationStatusFromFirebase()
+                                errorText = null
+                                onContinue()
+                            }
+                        }
                     )
                 }
             }
@@ -828,19 +889,9 @@ private fun AuthScreenContent(
                                     .fillMaxWidth()
                                     .clickable {
                                         phoneInput = sim.cleanDigits
-                                        isPhoneVerified = true
+                                        isPhoneVerified = false
                                         showSimSelectionDialog = false
-                                        val currentName = nameInput.trim().ifBlank { "FinMoney Member" }
-                                        viewModel.saveUserProfile(
-                                            name = currentName,
-                                            email = emailInput.trim(),
-                                            phoneNumber = sim.cleanDigits,
-                                            profilePicUri = profilePicUri,
-                                            isOtpVerified = true,
-                                            isEmailVerified = emailInput.isNotBlank()
-                                        )
-                                        statusMessage = "Logged in with ${sim.displayName} (${sim.formattedDisplay}) ✓"
-                                        currentStep = 3
+                                        triggerOtpDispatch(sim.cleanDigits)
                                     }
                             ) {
                                 Row(
@@ -1285,7 +1336,6 @@ private fun FinAuthMobileInputStep(
 private fun FinAuthOtpVerificationStep(
     phoneNumber: String,
     otpInput: String,
-    generatedOtp: String = "",
     onOtpChange: (String) -> Unit,
     resendTimerSeconds: Int,
     onResendOtp: () -> Unit,
@@ -1329,55 +1379,6 @@ private fun FinAuthOtpVerificationStep(
                     .size(16.dp)
                     .clickable { onEditPhone() }
             )
-        }
-
-        // Interactive Auto-fill Real-Time OTP Banner Card
-        if (generatedOtp.isNotBlank()) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = IndBlue.copy(alpha = 0.2f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, IndCyan),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOtpChange(generatedOtp) }
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(IndBlue),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Filled.MarkEmailRead, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                        }
-                        Column {
-                            Text("Security OTP Code Dispatched", fontSize = 11.sp, color = FinAuthTextSecondary)
-                            Text(generatedOtp, fontSize = 18.sp, fontWeight = FontWeight.Black, color = IndCyan, letterSpacing = 2.sp)
-                        }
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = IndCyan
-                    ) {
-                        Text(
-                            text = "Auto-fill OTP",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.Black,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                        )
-                    }
-                }
-            }
         }
 
         // 6-Digit Code Display Boxes
@@ -1547,6 +1548,72 @@ private fun FinAuthProfileSetupStep(
             Text("Complete Profile & Enter App", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             Spacer(modifier = Modifier.width(8.dp))
             Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+@Composable
+private fun FinAuthEmailVerificationStep(
+    email: String,
+    statusMessage: String?,
+    errorText: String?,
+    onResendEmail: () -> Unit,
+    onRefreshVerified: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Brush.linearGradient(listOf(IndBlue, IndBlueDark))),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Filled.MarkEmailUnread, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
+        }
+
+        Text(
+            text = "Verify your email",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = FinAuthTextPrimary,
+            textAlign = TextAlign.Center
+        )
+
+        Text(
+            text = "We sent a secure verification link to $email. Open it on this device, then return here.",
+            fontSize = 13.sp,
+            color = FinAuthTextSecondary,
+            textAlign = TextAlign.Center
+        )
+
+        if (statusMessage != null) {
+            Text(statusMessage, color = IndGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        }
+        if (errorText != null) {
+            Text(errorText, color = IndRed, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        }
+
+        OutlinedButton(
+            onClick = onResendEmail,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(28.dp)
+        ) {
+            Text("Resend verification email")
+        }
+
+        Button(
+            onClick = onRefreshVerified,
+            shape = RoundedCornerShape(28.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = IndBlue, contentColor = Color.White),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+        ) {
+            Text("I've verified — Continue", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
     }
 }

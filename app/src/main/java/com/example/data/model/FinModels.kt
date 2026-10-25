@@ -1,6 +1,8 @@
 package com.example.data.model
 
 import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 enum class DebitCategory {
@@ -94,8 +96,8 @@ data class UserProfile(
     val email: String = "",
     val phoneNumber: String = "",
     val profilePicUri: String? = null,
-    val isOtpVerified: Boolean = true,
-    val isEmailVerified: Boolean = true,
+    val isOtpVerified: Boolean = false,
+    val isEmailVerified: Boolean = false,
     val isCurrentActive: Boolean = true,
     val monthlyBudget: Double = 0.0,
     val currencySymbol: String = "₹",
@@ -162,6 +164,13 @@ data class CustomCategory(
     val displayName: String = ""
 )
 
+enum class LoanLedgerKind {
+    /** Increases the outstanding balance (another lend or borrow on the same record). */
+    ADDITIONAL,
+    /** Reduces the outstanding balance (repayment or return). */
+    CLEARING
+}
+
 enum class LoanType {
     LENT,
     BORROWED,
@@ -185,6 +194,8 @@ typealias ApprovalStatus = LoanApprovalStatus
 data class LoanTransaction(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val userId: String = "",
+    /** Phone of the FinMoney user who created this record (cannot self-approve). */
+    val creatorPhone: String = "",
     val cloudId: String = "",
     val personName: String = "",
     val personContact: String = "",
@@ -192,6 +203,8 @@ data class LoanTransaction(
     val totalAmount: Double = 0.0,
     val settledAmount: Double = 0.0,
     val paidAmount: Double = 0.0,
+    /** Running balance after approved partial payments. Zero when settled or rejected. */
+    val outstandingAmount: Double = 0.0,
     val interestRatePercent: Double = 0.0,
     val principalAmount: Double = 0.0,
     val isMonthlyInterest: Boolean = false,
@@ -204,11 +217,49 @@ data class LoanTransaction(
     val dueDateTimestamp: Long? = null,
     val dueDate: Long? = null,
     val notes: String = "",
+    /** Last mutually accepted amount stays in totalAmount until the counterparty accepts a change. */
+    val proposedAmount: Double = 0.0,
+    val proposedNotes: String = "",
+    val proposedPersonName: String = "",
+    val proposedPersonContact: String = "",
+    val amendmentPending: Boolean = false,
     val updatedAt: Long = System.currentTimeMillis(),
     /** Local copies of image/PDF proofs, one path per line. */
     val proofPaths: String = "",
     /** Frozen text of the mutual agreement after both sides accept. */
     val agreementText: String = ""
+)
+
+@Entity(
+    tableName = "loan_ledger_entries",
+    foreignKeys = [
+        ForeignKey(
+            entity = LoanTransaction::class,
+            parentColumns = ["id"],
+            childColumns = ["loanId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index("loanId")]
+)
+data class LoanLedgerEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val loanId: Long = 0L,
+    val userId: String = "",
+    val proposerPhone: String = "",
+    val proposerIsCreator: Boolean = true,
+    val kind: LoanLedgerKind = LoanLedgerKind.CLEARING,
+    val amount: Double = 0.0,
+    val proposedAmount: Double = 0.0,
+    val notes: String = "",
+    val proposedNotes: String = "",
+    val amendmentPending: Boolean = false,
+    val proofPaths: String = "",
+    val proposedProofPaths: String = "",
+    val status: LoanApprovalStatus = LoanApprovalStatus.PENDING_APPROVAL,
+    val agreementText: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "app_notifications")
@@ -271,6 +322,25 @@ data class BankTransactionRecord(
 
 fun BankTransactionRecord.isCreditCardRecord(): Boolean =
     classification.equals("Credit Card", ignoreCase = true) || bankName.contains("Credit Card", ignoreCase = true)
+
+@Entity(
+    tableName = "cloud_sync_outbox",
+    indices = [
+        androidx.room.Index(value = ["userId", "subcollection", "documentId"], unique = true)
+    ]
+)
+data class CloudSyncOutboxEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val userId: String = "",
+    val subcollection: String = "",
+    val documentId: String = "",
+    val payloadJson: String = "",
+    val legacyCollectionsJson: String = "[]",
+    val attempts: Int = 0,
+    val lastError: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
 
 @Entity(tableName = "raw_notifications")
 data class RawNotificationRecord(
