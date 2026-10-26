@@ -101,6 +101,9 @@ interface FinMoneyDao {
     @Query("DELETE FROM debit_items WHERE id = :id")
     suspend fun deleteDebitById(id: Long)
 
+    @Query("DELETE FROM debit_items WHERE cloudId = :cloudId AND cloudId != ''")
+    suspend fun deleteDebitByCloudId(cloudId: String)
+
     @Query("DELETE FROM debit_items WHERE userId = :userId OR :userId = ''")
     suspend fun clearAllDebits(userId: String = "")
 
@@ -126,6 +129,9 @@ interface FinMoneyDao {
     @Delete
     suspend fun deleteCustomCategory(category: CustomCategory)
 
+    @Query("DELETE FROM custom_categories WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) AND (userId = :userId OR :userId = '')")
+    suspend fun deleteCustomCategoryByName(name: String, userId: String = "")
+
     // --- Custom expense tags (subcategories) ---
     @Query("SELECT * FROM custom_expense_tags WHERE userId = :userId OR :userId = '' ORDER BY id DESC")
     fun getAllCustomExpenseTags(userId: String = ""): Flow<List<CustomExpenseTag>>
@@ -135,6 +141,9 @@ interface FinMoneyDao {
 
     @Query("SELECT * FROM custom_expense_tags WHERE (userId = :userId OR :userId = '') AND LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
     suspend fun getCustomExpenseTagByName(name: String, userId: String = ""): CustomExpenseTag?
+
+    @Query("DELETE FROM custom_expense_tags WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) AND (userId = :userId OR :userId = '')")
+    suspend fun deleteCustomExpenseTagByName(name: String, userId: String = "")
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCustomExpenseTag(tag: CustomExpenseTag): Long
@@ -325,6 +334,9 @@ interface FinMoneyDao {
 
     @Query("DELETE FROM bank_transactions WHERE id = :id")
     suspend fun deleteBankTransaction(id: Long)
+
+    @Query("DELETE FROM bank_transactions WHERE cloudId = :cloudId AND cloudId != ''")
+    suspend fun deleteBankTransactionByCloudId(cloudId: String)
 
     @Query("DELETE FROM bank_transactions WHERE userId = :userId OR :userId = ''")
     suspend fun clearAllBankTransactions(userId: String = "")

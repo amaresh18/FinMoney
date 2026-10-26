@@ -20,6 +20,7 @@ class BootReceiver : BroadcastReceiver() {
         try {
             BankNotificationListenerService.requestRebindService(context)
             BankSyncManager.ensureServiceBound(context)
+            DailyReminderReceiver.scheduleNext1030PmAlarm(context)
         } catch (e: Exception) {
             Log.e(TAG, "Error rebinding BankNotificationListenerService on $action: ${e.message}", e)
         }

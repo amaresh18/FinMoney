@@ -133,10 +133,16 @@ fun UserProfileScreen(
         }
     }
 
-    // Notification Settings States
-    var enableSmsInterceptor by remember { mutableStateOf(true) }
-    var enableInstantAlerts by remember { mutableStateOf(true) }
-    var enableDueReminders by remember { mutableStateOf(true) }
+    // Notification Settings States (enabled by default for all users)
+    var enableSmsInterceptor by remember {
+        mutableStateOf(com.example.util.FinMoneyPrefs.isSmsInterceptorEnabled(context))
+    }
+    var enableInstantAlerts by remember {
+        mutableStateOf(com.example.util.FinMoneyPrefs.isInstantAlertsEnabled(context))
+    }
+    var enableDueReminders by remember {
+        mutableStateOf(com.example.util.FinMoneyPrefs.isDueRemindersEnabled(context))
+    }
 
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
@@ -571,7 +577,10 @@ fun UserProfileScreen(
                         title = "Bank SMS & UPI interceptor",
                         subtitle = "HDFC, SBI, PhonePe, GPay & more",
                         checked = enableSmsInterceptor,
-                        onCheckedChange = { enableSmsInterceptor = it }
+                        onCheckedChange = {
+                            enableSmsInterceptor = it
+                            com.example.util.FinMoneyPrefs.setSmsInterceptorEnabled(context, it)
+                        }
                     )
 
                     HorizontalDivider(color = IndBorderSubtle, modifier = Modifier.padding(vertical = 4.dp))
@@ -580,7 +589,10 @@ fun UserProfileScreen(
                         title = "Instant approval alerts",
                         subtitle = "1-tap approve or dismiss in notification shade",
                         checked = enableInstantAlerts,
-                        onCheckedChange = { enableInstantAlerts = it }
+                        onCheckedChange = {
+                            enableInstantAlerts = it
+                            com.example.util.FinMoneyPrefs.setInstantAlertsEnabled(context, it)
+                        }
                     )
 
                     HorizontalDivider(color = IndBorderSubtle, modifier = Modifier.padding(vertical = 4.dp))
@@ -589,7 +601,10 @@ fun UserProfileScreen(
                         title = "Monthly due reminders",
                         subtitle = "EMI, rent & bills — 2 days before due",
                         checked = enableDueReminders,
-                        onCheckedChange = { enableDueReminders = it }
+                        onCheckedChange = {
+                            enableDueReminders = it
+                            com.example.util.FinMoneyPrefs.setDueRemindersEnabled(context, it)
+                        }
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -611,6 +626,37 @@ fun UserProfileScreen(
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Grant Notification Listener Permission", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = IndBlue)
                     }
+                }
+            }
+
+            // Daily System Reminders Card
+            var is1030PmReminderEnabled by remember {
+                mutableStateOf(com.example.util.FinMoneyPrefs.isDailyReminderEnabled(context))
+            }
+            IndCard(modifier = Modifier.fillMaxWidth().testTag("profile_daily_reminders_card")) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ProfileSectionTitle(
+                        title = "Daily & System Reminders",
+                        subtitle = "10:30 PM review & financial health check-ins",
+                        icon = Icons.Filled.Schedule
+                    )
+
+                    ProfileSettingsToggleRow(
+                        title = "Daily 10:30 PM Review Reminder",
+                        subtitle = "Get a gentle nightly notification to review today's expenses & income",
+                        checked = is1030PmReminderEnabled,
+                        onCheckedChange = { enabled ->
+                            is1030PmReminderEnabled = enabled
+                            com.example.util.FinMoneyPrefs.setDailyReminderEnabled(context, enabled)
+                            if (enabled) {
+                                viewModel.scheduleDaily1030PmReminder(context)
+                                android.widget.Toast.makeText(context, "Daily 10:30 PM reminder scheduled! ⏰", android.widget.Toast.LENGTH_SHORT).show()
+                            } else {
+                                viewModel.cancelDailyReminder(context)
+                                android.widget.Toast.makeText(context, "Daily reminder disabled.", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
                 }
             }
 

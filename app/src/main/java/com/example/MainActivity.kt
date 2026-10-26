@@ -210,7 +210,6 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         BankSyncManager.ensureServiceBound(this)
-        com.example.cloud.CloudSyncOutboxManager.scheduleFlush(applicationContext)
     }
 }
 

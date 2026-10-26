@@ -51,6 +51,14 @@ class FinMoneyApplication : Application() {
                 } catch (e: Exception) {
                     Log.e(TAG, "❌ [DIAGNOSTIC] FirebaseFirestore initialization check failed: ${e.message}", e)
                 }
+
+                try {
+                    val crashlytics = com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance()
+                    crashlytics.setCrashlyticsCollectionEnabled(false)
+                    Log.i(TAG, "✅ [DIAGNOSTIC] FirebaseCrashlytics initialized safely.")
+                } catch (e: Exception) {
+                    Log.w(TAG, "⚠️ [DIAGNOSTIC] FirebaseCrashlytics initialization skipped: ${e.message}")
+                }
             } else {
                 Log.w(TAG, "⚠️ [DIAGNOSTIC] FirebaseApp.initializeApp returned null.")
             }
@@ -58,19 +66,24 @@ class FinMoneyApplication : Application() {
             Log.e(TAG, "❌ [DIAGNOSTIC] Exception during FirebaseApp initialization in Application.onCreate: ${e.message}", e)
         }
 
-        // After Firebase is ready: repair local DB, then pull cloud backup + flush outbox (premium cold-start sync).
+        // Verify local database health on app launch (No automatic cloud backup call; manual sync via Profile page)
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val db = com.example.data.local.AppDatabase.getDatabase(this@FinMoneyApplication)
                 val dao = db.finMoneyDao()
                 com.example.data.local.DatabaseHealthGuard.verifyAndRepairDatabase(dao, forceReset = false)
-                com.example.cloud.UserCloudBackupOrchestrator.runFullAccountSync(
-                    this@FinMoneyApplication,
-                    dao
-                )
             } catch (e: Exception) {
                 Log.e(TAG, "Error running DatabaseHealthGuard on app launch", e)
             }
+        }
+
+        // Schedule daily 10:30 PM expense & income review reminder by default
+        try {
+            if (com.example.util.FinMoneyPrefs.isDailyReminderEnabled(this)) {
+                com.example.service.DailyReminderReceiver.scheduleNext1030PmAlarm(this)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error scheduling daily 10:30 PM reminder: ${e.message}")
         }
     }
 }

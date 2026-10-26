@@ -17,6 +17,7 @@ import com.example.domain.usecase.CalculateBudgetHealthUseCase
 import com.example.domain.usecase.ReconcileTransactionUseCase
 import com.example.domain.usecase.ValidateLoanLifecycleUseCase
 import com.example.service.BankSyncManager
+import com.example.service.TransactionParser
 import com.example.service.EntryIntegrityEngine
 import com.example.service.FinMoneyAuthService
 import com.example.service.LoanAgreementService
@@ -139,14 +140,12 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         _isFinancialSafetyVisible.value = !_isFinancialSafetyVisible.value
     }
 
-    fun previousMonth() {
-        if (_currentMonth.value == 1) {
-            _currentMonth.value = 12
-            _currentYear.value -= 1
-        } else {
-            _currentMonth.value -= 1
-        }
-    }
+
+    private val _selectedStartDay = MutableStateFlow<Int?>(null)
+    val selectedStartDay: StateFlow<Int?> = _selectedStartDay.asStateFlow()
+
+    private val _selectedEndDay = MutableStateFlow<Int?>(null)
+    val selectedEndDay: StateFlow<Int?> = _selectedEndDay.asStateFlow()
 
     fun nextMonth() {
         if (_currentMonth.value == 12) {
@@ -155,12 +154,53 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         } else {
             _currentMonth.value += 1
         }
+        clearDateFilter()
+    }
+
+    fun previousMonth() {
+        if (_currentMonth.value == 1) {
+            _currentMonth.value = 12
+            _currentYear.value -= 1
+        } else {
+            _currentMonth.value -= 1
+        }
+        clearDateFilter()
     }
 
     fun setMonthYear(month: Int, year: Int, day: Int? = null) {
         _currentMonth.value = month.coerceIn(1, 12)
         _currentYear.value = year
         _selectedSpecificDay.value = day
+        _selectedStartDay.value = day
+        _selectedEndDay.value = day
+    }
+
+    fun setDateRangeFilter(month: Int, year: Int, startDay: Int?, endDay: Int?) {
+        _currentMonth.value = month.coerceIn(1, 12)
+        _currentYear.value = year
+        if (startDay != null && endDay != null) {
+            val minD = minOf(startDay, endDay)
+            val maxD = maxOf(startDay, endDay)
+            _selectedStartDay.value = minD
+            _selectedEndDay.value = maxD
+            _selectedSpecificDay.value = minD
+        } else {
+            _selectedStartDay.value = startDay
+            _selectedEndDay.value = endDay
+            _selectedSpecificDay.value = startDay
+        }
+    }
+
+    fun clearDateFilter() {
+        _selectedStartDay.value = null
+        _selectedEndDay.value = null
+        _selectedSpecificDay.value = null
+    }
+
+    fun setSelectedSpecificDay(day: Int?) {
+        _selectedSpecificDay.value = day
+        _selectedStartDay.value = day
+        _selectedEndDay.value = day
     }
 
     fun getActiveUserId(): String {
@@ -367,6 +407,18 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         _isAutoExpenseTrackingReady.value = ready
     }
 
+    fun triggerCreativeNotification(context: Context, topicType: String = com.example.service.DailyReminderReceiver.TOPIC_DAILY_REVIEW) {
+        com.example.service.DailyReminderReceiver.triggerCreativeNotification(context, topicType)
+    }
+
+    fun scheduleDaily1030PmReminder(context: Context) {
+        com.example.service.DailyReminderReceiver.scheduleNext1030PmAlarm(context)
+    }
+
+    fun cancelDailyReminder(context: Context) {
+        com.example.service.DailyReminderReceiver.cancelDailyAlarm(context)
+    }
+
     fun saveReconciliation(
         month: Int = 10,
         year: Int = 2026,
@@ -397,13 +449,18 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun deleteBankTransaction(id: Long) {
         launchSafe {
+            val tx = dao.getBankTransactionById(id)
             dao.deleteBankTransaction(id)
+            if (tx != null) {
+                queueCloudAfterLocal { user -> LocalFirstCloudSync.queueBankTransactionDeletion(app, user, tx) }
+            }
         }
     }
 
     fun deleteBankTransaction(tx: BankTransactionRecord) {
         launchSafe {
             dao.deleteBankTransaction(tx.id)
+            queueCloudAfterLocal { user -> LocalFirstCloudSync.queueBankTransactionDeletion(app, user, tx) }
         }
     }
 
@@ -425,41 +482,70 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     fun parseAndProcessCustomAlert(text: String, title: String = "", context: Context? = null) {
         val targetContext = context ?: app
         launchSafe {
-            val result = com.example.service.gemini.GeminiNotificationClassificationService.parseAndCategorize(
-                text = text,
-                senderOrTitle = title
+            val parseResult = TransactionParser.parse(
+                rawText = text,
+                senderOrTitle = title,
+                sourcePackage = "com.example.custom.alert"
             )
-            if (result.isFinancial && result.amount > 0.0) {
+            if (parseResult.isFinancialNotification && (parseResult.amount ?: 0.0) > 0.0) {
                 BankSyncManager.processNotification(
                     context = targetContext,
-                    title = result.sender.ifBlank { title.ifBlank { "Bank Alert" } },
+                    title = title.ifBlank { "Bank Alert" },
                     text = text,
                     packageName = "com.example.custom.alert",
-                    timestamp = result.date
+                    timestamp = parseResult.timestamp
                 )
-                notifyUser("Classified via Gemini: ${result.summaryText}")
+                notifyUser("Processed transaction: ₹${parseResult.amount} (${parseResult.merchantName.ifBlank { parseResult.bankName }})")
             } else {
-                notifyUser("Non-financial alert ignored.")
+                notifyUser("Non-financial alert ignored: ${parseResult.debugReason ?: "Non-financial content"}")
             }
         }
     }
 
     fun reclassifyTransactionWithGemini(txId: Long) {
         launchSafe {
-            val res = com.example.service.gemini.GeminiNotificationClassificationService.updateTransactionClassification(app, txId)
-            if (res.isSuccess) {
-                val detail = res.getOrNull()
-                notifyUser("Updated via Gemini: ${detail?.summaryText}")
-            } else {
-                notifyUser("Could not reclassify: ${res.exceptionOrNull()?.message}")
+            val tx = dao.getBankTransactionById(txId)
+            if (tx != null) {
+                val parseResult = TransactionParser.parse(
+                    rawText = tx.originalText,
+                    senderOrTitle = tx.bankName,
+                    sourcePackage = tx.source
+                )
+                if (parseResult.amount != null && parseResult.amount > 0.0) {
+                    val catStr: String = parseResult.category
+                    val updated = tx.copy(
+                        bankName = parseResult.bankName,
+                        amount = parseResult.amount,
+                        type = parseResult.transactionType.name,
+                        category = catStr,
+                        merchant = parseResult.merchantName,
+                        classification = parseResult.classification
+                    )
+                    dao.insertBankTransaction(updated)
+                    notifyUser("Updated transaction: ${parseResult.merchantName} • ₹${parseResult.amount}")
+                }
             }
         }
     }
 
     fun batchRefineWithGemini() {
         launchSafe {
-            val count = com.example.service.gemini.GeminiNotificationClassificationService.batchRefinePendingTransactions(app)
-            notifyUser("Gemini refined $count pending transactions.")
+            val pendingList = dao.getRecentBankTransactionsDirect(100).filter { !it.isConfirmed }
+            var updatedCount = 0
+            for (tx in pendingList) {
+                val parseResult = TransactionParser.parse(rawText = tx.originalText, senderOrTitle = tx.bankName)
+                if (parseResult.amount != null && parseResult.amount > 0.0) {
+                    val catStr: String = parseResult.category
+                    val updated = tx.copy(
+                        category = catStr,
+                        merchant = parseResult.merchantName,
+                        classification = parseResult.classification
+                    )
+                    dao.insertBankTransaction(updated)
+                    updatedCount++
+                }
+            }
+            notifyUser("Refined $updatedCount pending transactions using local rule engine.")
         }
     }
 
@@ -876,7 +962,9 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     fun deleteCustomCategory(category: CustomCategory) {
         launchSafe {
             val uid = getActiveUserId()
-            dao.deleteCustomCategory(category.copy(userId = category.userId.ifBlank { uid }))
+            val target = category.copy(userId = category.userId.ifBlank { uid })
+            dao.deleteCustomCategory(target)
+            queueCloudAfterLocal { user -> LocalFirstCloudSync.queueCustomCategoryDeletion(app, user, target) }
             notifyUser("Category \"${category.name}\" removed.")
         }
     }
@@ -944,6 +1032,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     fun deleteCustomExpenseTag(tag: CustomExpenseTag) {
         launchSafe {
             dao.deleteCustomExpenseTag(tag)
+            queueCloudAfterLocal { user -> LocalFirstCloudSync.queueCustomExpenseTagDeletion(app, user, tag) }
             notifyUser("Tag \"${tag.name}\" removed.")
         }
     }
@@ -951,6 +1040,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     fun deleteDebit(item: DebitItem) {
         launchSafe {
             repository.deleteDebit(item)
+            queueCloudAfterLocal { user -> LocalFirstCloudSync.queueExpenseDeletion(app, user, item) }
         }
     }
 
@@ -1622,7 +1712,11 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun deleteLoan(id: Long) {
         launchSafe {
+            val loan = dao.getLoanById(id)
             repository.deleteLoanById(id)
+            if (loan != null) {
+                queueCloudAfterLocal { user -> LocalFirstCloudSync.queueLoanDeletion(app, user, loan) }
+            }
         }
     }
 
@@ -1868,6 +1962,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 return@launchSafe
             }
             dao.deleteLedgerEntry(entryId)
+            queueCloudAfterLocal { user -> LocalFirstCloudSync.queueLedgerEntryDeletion(app, user, entry) }
             refreshLoanBalance(loan.id)
             _loanActionMessage.emit("Payment deleted.")
         }
@@ -2005,28 +2100,10 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     suspend fun confirmLoginPhoneOtp(verificationId: String, otpCode: String, phone: String): Result<Unit> =
         withContext(Dispatchers.IO) {
             val cleanPhone = phone.filter { it.isDigit() }.takeLast(10)
-            if (verificationId.startsWith("fallback_sec_") || otpCode == "123456") {
-                identityBinding.reservePhoneAfterOtp(cleanPhone).getOrElse { return@withContext Result.failure(it) }
-                val current = dao.getUserProfileDirect()
-                if (current != null) {
-                    dao.insertOrUpdateUserProfile(current.copy(phoneNumber = cleanPhone, isOtpVerified = true))
-                }
-                syncVerificationStatusFromFirebase().getOrElse { return@withContext Result.failure(it) }
-                return@withContext Result.success(Unit)
-            }
             val verified = FinMoneyAuthService.verifyPhoneOtpCode(verificationId, otpCode)
             if (verified.isFailure) {
-                if (otpCode == "123456") {
-                    identityBinding.reservePhoneAfterOtp(cleanPhone).getOrElse { return@withContext Result.failure(it) }
-                    val current = dao.getUserProfileDirect()
-                    if (current != null) {
-                        dao.insertOrUpdateUserProfile(current.copy(phoneNumber = cleanPhone, isOtpVerified = true))
-                    }
-                    syncVerificationStatusFromFirebase().getOrElse { return@withContext Result.failure(it) }
-                    return@withContext Result.success(Unit)
-                }
                 return@withContext Result.failure(
-                    verified.exceptionOrNull() ?: IllegalStateException("Phone verification failed.")
+                    verified.exceptionOrNull() ?: IllegalStateException("Invalid OTP code. Please check SMS and try again.")
                 )
             }
             identityBinding.reservePhoneAfterOtp(cleanPhone).getOrElse { return@withContext Result.failure(it) }
@@ -2520,7 +2597,6 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     init {
         launchSafe(Dispatchers.IO) {
             DatabaseHealthGuard.verifyAndRepairDatabase(dao, forceReset = false)
-            com.example.service.gemini.GeminiNotificationClassificationService.sweepPromotionalMessages(app)
         }
         try {
             com.google.firebase.Firebase.auth.addAuthStateListener(authStateListener)

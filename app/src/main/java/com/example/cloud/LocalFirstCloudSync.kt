@@ -221,4 +221,78 @@ object LocalFirstCloudSync {
             legacyCollections = emptyList()
         )
     }
+
+    // --- Deletion Queuing ---
+
+    suspend fun queueExpenseDeletion(context: Context, cloudUser: CloudUserContext, item: DebitItem) {
+        val docId = item.cloudId.ifBlank { "debit_${item.id}" }
+        CloudSyncOutboxManager.enqueueAndSchedule(
+            context = context,
+            cloudUser = cloudUser,
+            subcollection = "expenses",
+            documentId = docId,
+            data = mapOf("actionType" to "DELETE", "isDeleted" to true, "cloudId" to docId),
+            legacyCollections = listOf("expenses", "debit_items")
+        )
+    }
+
+    suspend fun queueLoanDeletion(context: Context, cloudUser: CloudUserContext, loan: LoanTransaction) {
+        val docId = loan.cloudId.ifBlank { "loan_${loan.id}" }
+        CloudSyncOutboxManager.enqueueAndSchedule(
+            context = context,
+            cloudUser = cloudUser,
+            subcollection = "loans",
+            documentId = docId,
+            data = mapOf("actionType" to "DELETE", "isDeleted" to true, "cloudId" to docId),
+            legacyCollections = listOf("loans")
+        )
+    }
+
+    suspend fun queueBankTransactionDeletion(context: Context, cloudUser: CloudUserContext, record: BankTransactionRecord) {
+        val docId = record.cloudId.ifBlank { "bank_${record.id}" }
+        CloudSyncOutboxManager.enqueueAndSchedule(
+            context = context,
+            cloudUser = cloudUser,
+            subcollection = "bank_transactions",
+            documentId = docId,
+            data = mapOf("actionType" to "DELETE", "isDeleted" to true, "cloudId" to docId),
+            legacyCollections = listOf("bank_transactions")
+        )
+    }
+
+    suspend fun queueCustomCategoryDeletion(context: Context, cloudUser: CloudUserContext, category: com.example.data.model.CustomCategory) {
+        val docId = "cat_${category.id}_${category.name.trim().lowercase().replace(" ", "_")}"
+        CloudSyncOutboxManager.enqueueAndSchedule(
+            context = context,
+            cloudUser = cloudUser,
+            subcollection = "custom_categories",
+            documentId = docId,
+            data = mapOf("actionType" to "DELETE", "isDeleted" to true, "name" to category.name),
+            legacyCollections = emptyList()
+        )
+    }
+
+    suspend fun queueCustomExpenseTagDeletion(context: Context, cloudUser: CloudUserContext, tag: com.example.data.model.CustomExpenseTag) {
+        val docId = "tag_${tag.id}_${tag.name.trim().lowercase().replace(" ", "_")}"
+        CloudSyncOutboxManager.enqueueAndSchedule(
+            context = context,
+            cloudUser = cloudUser,
+            subcollection = "custom_expense_tags",
+            documentId = docId,
+            data = mapOf("actionType" to "DELETE", "isDeleted" to true, "name" to tag.name),
+            legacyCollections = emptyList()
+        )
+    }
+
+    suspend fun queueLedgerEntryDeletion(context: Context, cloudUser: CloudUserContext, entry: LoanLedgerEntry) {
+        val docId = "loan_entry_${entry.loanId}_${entry.id}"
+        CloudSyncOutboxManager.enqueueAndSchedule(
+            context = context,
+            cloudUser = cloudUser,
+            subcollection = "loan_ledger",
+            documentId = docId,
+            data = mapOf("actionType" to "DELETE", "isDeleted" to true),
+            legacyCollections = emptyList()
+        )
+    }
 }

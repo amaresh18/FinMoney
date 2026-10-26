@@ -333,8 +333,12 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             lower.contains("order placed") || lower.contains("preparing your order") || 
             lower.contains("dispatched") || lower.contains("arriving soon") || 
             lower.contains("track delivery") || lower.contains("driver is on") ||
-            lower.contains("track your order")) {
-            return "Matches delivery/order status tracking pattern"
+            lower.contains("track your order") || lower.contains("order confirmed") ||
+            lower.contains("item shipped") || lower.contains("package arriving") ||
+            lower.contains("delivery update") || lower.contains("table booked")) {
+            if (!lower.contains("debited") && !lower.contains("paid rs") && !lower.contains("paid ₹")) {
+                return "Matches delivery/order status tracking pattern"
+            }
         }
 
         // 2. Personal Chats & Peer Messages
@@ -358,9 +362,10 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             lower.contains("pay before") || lower.contains("reminder: pay") ||
             lower.contains("minimum amount due") || lower.contains("total amount due") ||
             lower.contains("statement is ready") || lower.contains("statement generated") ||
-            lower.contains("avoid late fee")) {
+            lower.contains("avoid late fee") || lower.contains("overdue")) {
             val isAlreadyPaid = lower.contains("has been debited") || lower.contains("debited from") ||
-                lower.contains("successfully paid") || lower.contains("payment received")
+                lower.contains("successfully paid") || lower.contains("payment received") ||
+                lower.contains("bill paid") || lower.contains("paid successfully")
             if (!isAlreadyPaid) {
                 return "Matches bill due/generated reminder pattern"
             }
@@ -376,7 +381,7 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             lower.contains("100% daily data") || lower.contains("unlimited calls and") ||
             lower.contains("topup now")) {
             val isAlreadyRecharged = lower.contains("recharge successful") ||
-                lower.contains("recharge of rs") && lower.contains("successful") ||
+                (lower.contains("recharge of rs") && lower.contains("successful")) ||
                 (lower.contains("debited") && lower.contains("recharge"))
             if (!isAlreadyRecharged) {
                 return "Matches recharge prompt / plan expiry alert"
@@ -396,7 +401,10 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             lower.contains("use code") || lower.contains("flat 50% off") ||
             lower.contains("flat 40% off") || lower.contains("flat 30% off") ||
             lower.contains("flat 20% off") || lower.contains("flat 10% off") ||
-            lower.contains("save up to") || lower.contains("deals starting") ||
+            lower.contains("save up to") || lower.contains("save upto") ||
+            lower.contains("get up to") || lower.contains("discount of") ||
+            lower.contains("voucher of") || lower.contains("coupon of") ||
+            lower.contains("off on your") || lower.contains("deals starting") ||
             lower.contains("hurry") || lower.contains("don't miss") ||
             lower.contains("limited period offer") || lower.contains("limited time offer") ||
             lower.contains("exclusive deal") || lower.contains("special offer") ||
@@ -429,6 +437,8 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
         // 7. Collect / Payment Requests (Unsettled incoming requests)
         if (lower.contains("payment request") || lower.contains("collect request") ||
             lower.contains("has requested") || lower.contains("is requesting") ||
+            lower.contains("requested rs") || lower.contains("requested ₹") ||
+            lower.contains("request for rs") || lower.contains("request for ₹") ||
             lower.contains("money request") || lower.contains("upi request") ||
             lower.contains("awaiting your approval") || lower.contains("approve request") ||
             lower.contains("request pending") || lower.contains("tap to pay")) {
@@ -499,6 +509,9 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
      */
     fun extractTransactionAmount(text: String): Double? {
         val normalizedText = text.replace("&nbsp;", " ").replace("\u00A0", " ")
+        val lowerText = normalizedText.lowercase()
+
+        val isOtpMsg = lowerText.contains("otp") || lowerText.contains("verification code") || lowerText.contains("login code")
 
         val regexes = listOf(
             // 1. Explicit payment phrases: payment of Rs 500, paid Rs 300, order payment of ₹450
@@ -525,8 +538,16 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
                 if (isBalanceOrLimitPrefix(prefix) || isPromotionalAmountPrefix(prefix)) {
                     continue
                 }
-                val num = cleanNumber(match.groupValues[1])
-                if (num != null && num > 0.0) return num
+                val rawValStr = match.groupValues[1]
+                val num = cleanNumber(rawValStr) ?: continue
+
+                // OTP Safeguard: If message is OTP and amount is 6-digit integer, skip unless currency symbol directly attached
+                if (isOtpMsg && rawValStr.length == 6 && !rawValStr.contains(".") &&
+                    !match.value.lowercase().contains("rs") && !match.value.contains("₹") && !match.value.lowercase().contains("inr")) {
+                    continue
+                }
+
+                if (num > 0.0) return num
             }
         }
         return null
@@ -663,59 +684,66 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
     }
 
     fun determineTransactionType(lowerText: String): BankTxType {
-        // High-confidence credit indicators
-        val isCredit = lowerText.contains("credited") || lowerText.contains("credit of") ||
-            lowerText.contains("is credited") || lowerText.contains("was credited") ||
-            lowerText.contains("has been credited") || lowerText.contains("credited with") ||
-            lowerText.contains("credited to") || lowerText.contains("credited by") ||
-            lowerText.contains("credited in") || lowerText.contains("inward credit") ||
-            lowerText.contains("received") || lowerText.contains("recd") || lowerText.contains("rec'd") ||
-            lowerText.contains("money received") || lowerText.contains("payment received") ||
-            lowerText.contains("you received") || lowerText.contains("you have received") ||
-            lowerText.contains("deposited") || lowerText.contains("deposit of") ||
-            lowerText.contains("refund") || lowerText.contains("refunded") ||
-            lowerText.contains("reversal") || lowerText.contains("reversed") ||
-            lowerText.contains("cashback credited") || lowerText.contains("cashback received") ||
-            lowerText.contains("cashback of") || lowerText.contains("salary") || lowerText.contains("stipend") ||
-            lowerText.contains("incoming") || lowerText.contains("transferred to your") ||
-            lowerText.contains("transferred to you") || lowerText.contains("sent you") ||
-            lowerText.contains("paid you") || lowerText.contains("added to account") ||
-            lowerText.contains("added to wallet") || lowerText.contains("added to your") ||
-            Regex("""\bcr[:.]|\bcr\s""").containsMatchIn(lowerText) ||
-            Regex("""(?:upi|imps|neft)[/-]cr[/-]""").containsMatchIn(lowerText)
-
-        val hasDebit = lowerText.contains("debited") || lowerText.contains("debit of") ||
+        val hasExplicitDebit = lowerText.contains("debited") || lowerText.contains("debit of") ||
             lowerText.contains("is debited") || lowerText.contains("was debited") ||
             lowerText.contains("has been debited") || lowerText.contains("debited from") ||
             lowerText.contains("debited by") || lowerText.contains("debited with") ||
             lowerText.contains("paid") || lowerText.contains("you paid") ||
-            lowerText.contains("payment of") || lowerText.contains("payment to") ||
-            lowerText.contains("payment for") || lowerText.contains("payment done") ||
-            lowerText.contains("payment successful") || lowerText.contains("successfully paid") ||
+            lowerText.contains("payment to") || lowerText.contains("payment at") ||
             lowerText.contains("spent") || lowerText.contains("spent on") || lowerText.contains("spent at") ||
             lowerText.contains("sent to") || lowerText.contains("money sent") ||
             lowerText.contains("withdrawn") || lowerText.contains("withdrawal") ||
-            lowerText.contains("charged") || lowerText.contains("purchase of") || lowerText.contains("purchased at") ||
+            lowerText.contains("charged") || lowerText.contains("purchased at") || lowerText.contains("purchase of") ||
             lowerText.contains("autopay") || lowerText.contains("mandate") ||
             Regex("""\bdr[:.]|\bdr\s""").containsMatchIn(lowerText) ||
             Regex("""(?:upi|imps|neft)[/-]dr[/-]""").containsMatchIn(lowerText)
 
-        // Conflict handling:
-        if (hasDebit && isCredit) {
-            if (lowerText.contains("refund") || lowerText.contains("cashback credited") ||
-                lowerText.contains("cashback received") ||
-                lowerText.contains("salary") || lowerText.contains("received from") ||
-                lowerText.contains("credited with") || lowerText.contains("credited by")) {
-                return BankTxType.CREDIT
-            }
-            if (lowerText.contains("debited from") || lowerText.contains("debited by") ||
-                lowerText.contains("spent on") || lowerText.contains("paid to") ||
-                lowerText.contains("you paid") || lowerText.contains("withdrawn")) {
+        val hasExplicitCredit = lowerText.contains("credited to your") ||
+            lowerText.contains("credited to a/c") || lowerText.contains("credited to account") ||
+            lowerText.contains("credited in your") || lowerText.contains("credited in a/c") ||
+            lowerText.contains("credited with") || lowerText.contains("credited by") ||
+            lowerText.contains("is credited to your") || lowerText.contains("was credited to your") ||
+            lowerText.contains("has been credited to your") || lowerText.contains("inward credit") ||
+            lowerText.contains("received from") || lowerText.contains("received in") ||
+            lowerText.contains("recd from") || lowerText.contains("money received from") ||
+            lowerText.contains("payment received from") || lowerText.contains("you received") ||
+            lowerText.contains("you have received") || lowerText.contains("deposited to") ||
+            lowerText.contains("deposited in") || lowerText.contains("refund credited") ||
+            lowerText.contains("refund of") || lowerText.contains("refunded to") ||
+            lowerText.contains("reversal credited") || lowerText.contains("cashback credited") ||
+            lowerText.contains("salary credited") || lowerText.contains("salary of") ||
+            lowerText.contains("stipend credited") || lowerText.contains("transferred to your") ||
+            lowerText.contains("transferred to you") || lowerText.contains("sent you") ||
+            lowerText.contains("paid you") || lowerText.contains("added to account") ||
+            lowerText.contains("added to wallet") ||
+            Regex("""\bcr[:.]|\bcr\s""").containsMatchIn(lowerText) ||
+            Regex("""(?:upi|imps|neft)[/-]cr[/-]""").containsMatchIn(lowerText)
+
+        if (hasExplicitDebit && !hasExplicitCredit) {
+            return BankTxType.DEBIT
+        }
+        if (hasExplicitCredit && !hasExplicitDebit) {
+            return BankTxType.CREDIT
+        }
+        if (hasExplicitDebit && hasExplicitCredit) {
+            val userDebited = lowerText.contains("debited from") || lowerText.contains("debited by") ||
+                lowerText.contains("debited with") || lowerText.contains("spent on") ||
+                lowerText.contains("spent at") || lowerText.contains("paid to") ||
+                lowerText.contains("you paid") || lowerText.contains("withdrawn from")
+            val userCredited = lowerText.contains("credited to your") || lowerText.contains("credited to account") ||
+                lowerText.contains("credited to a/c") || lowerText.contains("refund credited") ||
+                lowerText.contains("cashback credited") || lowerText.contains("salary credited")
+            if (userDebited && !userCredited) {
                 return BankTxType.DEBIT
+            }
+            if (userCredited && !userDebited) {
+                return BankTxType.CREDIT
             }
         }
 
-        if (isCredit) return BankTxType.CREDIT
+        val generalCredit = lowerText.contains("credited") || lowerText.contains("credit") || lowerText.contains("received") || lowerText.contains("refund")
+        if (generalCredit && !hasExplicitDebit) return BankTxType.CREDIT
+
         return BankTxType.DEBIT
     }
 

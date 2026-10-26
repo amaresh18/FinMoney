@@ -335,22 +335,28 @@ fun AddEditDebitDialog(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun IndGoogleCalendarDatePicker(
     currentMonth: Int,
     currentYear: Int,
     currentSelectedDay: Int?,
+    currentStartDay: Int? = null,
+    currentEndDay: Int? = null,
     onDismiss: () -> Unit,
-    onSelectDate: (month: Int, year: Int, day: Int?) -> Unit
+    onSelectDate: (month: Int, year: Int, day: Int?) -> Unit,
+    onSelectDateRange: (month: Int, year: Int, startDay: Int?, endDay: Int?) -> Unit = { m, y, s, e ->
+        onSelectDate(m, y, s)
+    }
 ) {
     var selectedYear by remember { mutableStateOf(currentYear) }
     var selectedMonth by remember { mutableStateOf(currentMonth) } // 1..12
-    var selectedDay by remember { mutableStateOf(currentSelectedDay) } // null or 1..31
-    var viewMode by remember { mutableStateOf(if (currentSelectedDay != null) "DAY" else "MONTH") }
+    var startDay by remember { mutableStateOf(currentStartDay ?: currentSelectedDay) } // null or 1..31
+    var endDay by remember { mutableStateOf(currentEndDay ?: if (currentStartDay != null && currentEndDay != currentStartDay) currentEndDay else null) } // null or 1..31
 
     val months = listOf(
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December"
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
     )
 
     val daysInMonth = remember(selectedMonth, selectedYear) {
@@ -365,171 +371,325 @@ fun IndGoogleCalendarDatePicker(
         cal.get(java.util.Calendar.DAY_OF_WEEK) - 1
     }
 
-    IndDialog(
-        onDismiss = onDismiss,
-        title = "Google Calendar Date Filter",
-        subtitle = "Select month or exact calendar date",
-        icon = Icons.Filled.CalendarMonth,
-        iconTint = IndBlue,
-        headerGradient = listOf(IndBlueLight, AppTheme.colors.surface),
-        testTag = "google_calendar_picker_dialog",
-        confirmButtonText = "Apply Filter",
-        confirmButtonTag = "apply_calendar_filter_button",
-        onConfirm = {
-            onSelectDate(selectedMonth, selectedYear, selectedDay)
+    fun applySelectionAndDismiss() {
+        val minD = if (startDay != null && endDay != null) minOf(startDay!!, endDay!!) else startDay ?: endDay
+        val maxD = if (startDay != null && endDay != null) maxOf(startDay!!, endDay!!) else endDay ?: startDay
+        if (minD != null && maxD != null && minD != maxD) {
+            onSelectDateRange(selectedMonth, selectedYear, minD, maxD)
+        } else {
+            onSelectDateRange(selectedMonth, selectedYear, minD, minD)
+            onSelectDate(selectedMonth, selectedYear, minD)
         }
+        onDismiss()
+    }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FilterChip(
-                selected = viewMode == "MONTH",
-                onClick = { viewMode = "MONTH"; selectedDay = null },
-                label = { Text("📅 Month View", fontSize = 11.sp) },
-                modifier = Modifier.weight(1f)
-            )
-            FilterChip(
-                selected = viewMode == "DAY",
-                onClick = { viewMode = "DAY" },
-                label = { Text("🗓️ Specific Date", fontSize = 11.sp) },
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(IndBlueLight)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f))
+                .clickable { onDismiss() },
+            contentAlignment = Alignment.BottomCenter
         ) {
-            IconButton(onClick = {
-                if (selectedMonth == 1) {
-                    selectedMonth = 12
-                    selectedYear--
-                } else {
-                    selectedMonth--
-                }
-                selectedDay = null
-            }) {
-                Icon(Icons.Filled.ChevronLeft, contentDescription = "Prev", tint = IndBlue)
-            }
-            Text(
-                text = "${months[selectedMonth - 1]} $selectedYear" + if (selectedDay != null) " (Day $selectedDay)" else "",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = IndNavyHeader
-            )
-            IconButton(onClick = {
-                if (selectedMonth == 12) {
-                    selectedMonth = 1
-                    selectedYear++
-                } else {
-                    selectedMonth++
-                }
-                selectedDay = null
-            }) {
-                Icon(Icons.Filled.ChevronRight, contentDescription = "Next", tint = IndBlue)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        if (viewMode == "MONTH") {
-            val monthRows = months.chunked(3)
-            monthRows.forEachIndexed { rowIndex, rowMonths ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight()
+                    .clickable(enabled = false) {}, // prevent click-through
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                color = IndSurface,
+                shadowElevation = 16.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    rowMonths.forEachIndexed { colIndex, monthName ->
-                        val monthIndex = rowIndex * 3 + colIndex + 1
-                        val isSelected = monthIndex == selectedMonth
+                    // TOP HEADER ROW WITH DONE BUTTON AT TOP SIDE
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Custom Date Filter",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = IndNavyHeader
+                            )
+                            Text(
+                                text = "Select start & end date to apply filter",
+                                fontSize = 11.sp,
+                                color = IndTextSecondary
+                            )
+                        }
+
+                        // PROMINENT GREEN DONE BUTTON AT TOP SIDE OF CALENDAR
+                        Button(
+                            onClick = { applySelectionAndDismiss() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF00B050) // INDmoney Vibrant Green
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                            modifier = Modifier.testTag("top_done_calendar_button")
+                        ) {
+                            Text(
+                                text = "Done",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    // FROM / TO DATE BOXES (INDmoney Custom Date Range Style)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // From Box
                         Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (isSelected) IndBlue else IndSurface,
-                            border = BorderStroke(1.dp, if (isSelected) IndBlue else IndBorder),
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (startDay != null) Color(0xFFEBF5FF) else AppTheme.colors.surface,
+                            border = BorderStroke(1.dp, if (startDay != null) IndBlue else IndBorder),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(44.dp)
-                                .clickable { selectedMonth = monthIndex; selectedDay = null }
-                                .testTag("month_grid_$monthIndex")
+                                .clickable {
+                                    startDay = null
+                                    endDay = null
+                                }
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = monthName.take(3),
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 12.sp,
-                                    color = if (isSelected) Color.White else IndTextPrimary
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                Text("From", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = IndTextMuted)
+                                Spacer(Modifier.height(2.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = if (startDay != null) "%02d/%02d/%02d".format(startDay, selectedMonth, selectedYear % 100) else "Select date",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (startDay != null) IndNavyHeader else IndTextSecondary
+                                    )
+                                    Icon(Icons.Filled.CalendarToday, contentDescription = null, tint = IndBlue, modifier = Modifier.size(14.dp))
+                                }
+                            }
+                        }
+
+                        // To Box
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (endDay != null) Color(0xFFEBF5FF) else AppTheme.colors.surface,
+                            border = BorderStroke(1.dp, if (endDay != null) IndBlue else IndBorder),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    if (startDay != null && endDay != null) {
+                                        endDay = null
+                                    }
+                                }
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                Text("To", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = IndTextMuted)
+                                Spacer(Modifier.height(2.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = if (endDay != null) "%02d/%02d/%02d".format(endDay, selectedMonth, selectedYear % 100) else if (startDay != null) "Select end date" else "Select date",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (endDay != null) IndNavyHeader else IndTextSecondary
+                                    )
+                                    Icon(Icons.Filled.CalendarToday, contentDescription = null, tint = IndBlue, modifier = Modifier.size(14.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    // Month & Year Navigator (< Oct 2026 >)
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFFF1F5F9),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    if (selectedMonth == 1) {
+                                        selectedMonth = 12
+                                        selectedYear--
+                                    } else {
+                                        selectedMonth--
+                                    }
+                                    startDay = null
+                                    endDay = null
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.ChevronLeft,
+                                    contentDescription = "Previous Month",
+                                    tint = IndBlue,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            Text(
+                                text = "${months[selectedMonth - 1]} $selectedYear",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = IndNavyHeader,
+                                fontSize = 15.sp
+                            )
+
+                            IconButton(
+                                onClick = {
+                                    if (selectedMonth == 12) {
+                                        selectedMonth = 1
+                                        selectedYear++
+                                    } else {
+                                        selectedMonth++
+                                    }
+                                    startDay = null
+                                    endDay = null
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.ChevronRight,
+                                    contentDescription = "Next Month",
+                                    tint = IndBlue,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
                     }
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-            }
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceAround
-            ) {
-                listOf("Su", "Mo", "Tu", "We", "Th", "Fr", "Sa").forEach { dayLabel ->
-                    Text(
-                        text = dayLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = IndTextSecondary,
-                        modifier = Modifier.width(32.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-            }
 
-            Spacer(modifier = Modifier.height(6.dp))
+                    // Days of Week Row (Sun, Mon, Tue, Wed, Thu, Fri, Sat)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").forEach { dayLabel ->
+                            Text(
+                                text = dayLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = IndTextSecondary,
+                                modifier = Modifier.width(40.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
 
-            val totalCells = startDayOfWeek + daysInMonth
-            val weeks = if (totalCells % 7 == 0) totalCells / 7 else (totalCells / 7) + 1
+                    // Calendar Days Grid
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        val totalCells = startDayOfWeek + daysInMonth
+                        val weeks = (totalCells + 6) / 7
 
-            for (week in 0 until weeks) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceAround
-                ) {
-                    for (dayOfWeek in 0 until 7) {
-                        val cellIndex = week * 7 + dayOfWeek
-                        val dayNum = cellIndex - startDayOfWeek + 1
-                        val isValidDay = dayNum in 1..daysInMonth
+                        val minSelectedDay = if (startDay != null && endDay != null) minOf(startDay!!, endDay!!) else null
+                        val maxSelectedDay = if (startDay != null && endDay != null) maxOf(startDay!!, endDay!!) else null
 
-                        if (isValidDay) {
-                            val isSelected = selectedDay == dayNum
-                            Surface(
-                                shape = CircleShape,
-                                color = if (isSelected) IndBlue else Color.Transparent,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clickable { selectedDay = dayNum }
-                                    .testTag("day_cell_$dayNum")
+                        for (week in 0 until weeks) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceAround
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = "$dayNum",
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        fontSize = 12.sp,
-                                        color = if (isSelected) Color.White else IndTextPrimary
-                                    )
+                                for (dayOfWeek in 0 until 7) {
+                                    val cellIndex = week * 7 + dayOfWeek
+                                    val dayNum = cellIndex - startDayOfWeek + 1
+                                    val isValidDay = dayNum in 1..daysInMonth
+
+                                    if (isValidDay) {
+                                        val isStart = startDay == dayNum
+                                        val isEnd = endDay == dayNum
+                                        val isBetween = minSelectedDay != null && maxSelectedDay != null && dayNum in (minSelectedDay + 1)..<maxSelectedDay
+
+                                        val cellBg = when {
+                                            isStart || isEnd -> Color(0xFF00B050) // INDmoney Green accent for boundary dates
+                                            isBetween -> Color(0xFFE6F4EA) // Soft green highlight in between
+                                            else -> Color.Transparent
+                                        }
+
+                                        val textColor = when {
+                                            isStart || isEnd -> Color.White
+                                            isBetween -> Color(0xFF00B050)
+                                            else -> IndNavyHeader
+                                        }
+
+                                        Surface(
+                                            shape = if (isStart || isEnd) CircleShape else RoundedCornerShape(8.dp),
+                                            color = cellBg,
+                                            modifier = Modifier
+                                                .size(38.dp)
+                                                .clickable {
+                                                    if (startDay == null) {
+                                                        startDay = dayNum
+                                                        endDay = null
+                                                    } else if (endDay == null) {
+                                                        if (dayNum < startDay!!) {
+                                                            endDay = startDay
+                                                            startDay = dayNum
+                                                        } else {
+                                                            endDay = dayNum
+                                                        }
+                                                        // Automatically apply filter after selecting two dates
+                                                        val minD = minOf(startDay!!, endDay!!)
+                                                        val maxD = maxOf(startDay!!, endDay!!)
+                                                        onSelectDateRange(selectedMonth, selectedYear, minD, maxD)
+                                                        onSelectDate(selectedMonth, selectedYear, minD)
+                                                        onDismiss()
+                                                    } else {
+                                                        // Restart range selection with new start day
+                                                        startDay = dayNum
+                                                        endDay = null
+                                                    }
+                                                }
+                                                .testTag("day_cell_$dayNum")
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    text = "$dayNum",
+                                                    fontWeight = if (isStart || isEnd || isBetween) FontWeight.Bold else FontWeight.Medium,
+                                                    fontSize = 13.sp,
+                                                    color = textColor
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        Spacer(modifier = Modifier.size(38.dp))
+                                    }
                                 }
                             }
-                        } else {
-                            Spacer(modifier = Modifier.size(36.dp))
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
             }
         }
     }

@@ -42,12 +42,31 @@ object CloudAccountRestore {
         var restoredLoans = 0
         var restoredBankTx = 0
 
+        val pendingOutbox = dao.getCloudSyncOutboxForUser(uid)
+        val pendingDeletedDocIds = pendingOutbox.filter {
+            it.payloadJson.contains("\"actionType\":\"DELETE\"") || it.payloadJson.contains("\"isDeleted\":true")
+        }.map { it.documentId }.toSet()
+
         onProgress(CloudSyncProgress(CloudSyncStage.DOWNLOADING_EXPENSES, "Downloading expenses & bills…"))
         val expenses = cloud.listUserSubcollection(uid, "expenses")
         for ((docId, data) in expenses) {
             val cloudId = str(data["cloudId"]).ifBlank { docId }
-            if (dao.getDebitByCloudId(cloudId) != null) continue
-            dao.insertDebit(debitFromCloud(uid, cloudId, data))
+            val isDeleted = bool(data["isDeleted"]) || str(data["actionType"]) == "DELETE" || docId in pendingDeletedDocIds || cloudId in pendingDeletedDocIds
+            if (isDeleted) {
+                dao.deleteDebitByCloudId(cloudId)
+                continue
+            }
+            val existing = dao.getDebitByCloudId(cloudId)
+            val cloudItem = debitFromCloud(uid, cloudId, data)
+            if (existing != null) {
+                val cloudTime = lng(data["updatedAt"]).takeIf { it > 0 } ?: cloudItem.createdAt
+                val localTime = existing.createdAt
+                if (cloudTime > localTime) {
+                    dao.updateDebit(cloudItem.copy(id = existing.id))
+                }
+                continue
+            }
+            dao.insertDebit(cloudItem)
             restoredExpenses++
         }
 
@@ -78,9 +97,14 @@ object CloudAccountRestore {
         }
 
         onProgress(CloudSyncProgress(CloudSyncStage.DOWNLOADING_CATEGORIES, "Downloading categories & tags…"))
-        for ((_, data) in cloud.listUserSubcollection(uid, "custom_categories")) {
+        for ((docId, data) in cloud.listUserSubcollection(uid, "custom_categories")) {
             val name = str(data["name"]).trim()
             if (name.isBlank()) continue
+            val isDeleted = bool(data["isDeleted"]) || str(data["actionType"]) == "DELETE" || docId in pendingDeletedDocIds
+            if (isDeleted) {
+                dao.deleteCustomCategoryByName(name, uid)
+                continue
+            }
             if (dao.getCustomCategoryByName(name, uid) != null) continue
             dao.insertCustomCategory(
                 CustomCategory(
@@ -93,9 +117,14 @@ object CloudAccountRestore {
             )
         }
 
-        for ((_, data) in cloud.listUserSubcollection(uid, "custom_expense_tags")) {
+        for ((docId, data) in cloud.listUserSubcollection(uid, "custom_expense_tags")) {
             val name = str(data["name"]).trim()
             if (name.isBlank()) continue
+            val isDeleted = bool(data["isDeleted"]) || str(data["actionType"]) == "DELETE" || docId in pendingDeletedDocIds
+            if (isDeleted) {
+                dao.deleteCustomExpenseTagByName(name, uid)
+                continue
+            }
             if (dao.getCustomExpenseTagByName(name, uid) != null) continue
             dao.insertCustomExpenseTag(
                 CustomExpenseTag(
@@ -111,8 +140,20 @@ object CloudAccountRestore {
         val loanDocs = cloud.listUserSubcollection(uid, "loans")
         for ((docId, data) in loanDocs) {
             val cloudId = str(data["cloudId"]).ifBlank { docId }
-            if (dao.getLoanByCloudId(cloudId) != null) continue
-            dao.insertLoan(loanFromCloud(uid, cloudId, data))
+            val isDeleted = bool(data["isDeleted"]) || str(data["actionType"]) == "DELETE" || docId in pendingDeletedDocIds || cloudId in pendingDeletedDocIds
+            if (isDeleted) {
+                dao.deleteLoanByCloudId(cloudId)
+                continue
+            }
+            val existing = dao.getLoanByCloudId(cloudId)
+            val cloudLoan = loanFromCloud(uid, cloudId, data)
+            if (existing != null) {
+                if (cloudLoan.updatedAt > existing.updatedAt) {
+                    dao.updateLoan(cloudLoan.copy(id = existing.id))
+                }
+                continue
+            }
+            dao.insertLoan(cloudLoan)
             restoredLoans++
         }
 
@@ -121,10 +162,22 @@ object CloudAccountRestore {
         val bankCloudIds = bankDocs.map { (id, data) -> str(data["cloudId"]).ifBlank { id } }.toSet()
         for ((docId, data) in bankDocs) {
             val cloudId = str(data["cloudId"]).ifBlank { docId }
-            if (cloudId.isNotBlank() && dao.getBankTransactionByCloudId(cloudId) != null) continue
+            val isDeleted = bool(data["isDeleted"]) || str(data["actionType"]) == "DELETE" || docId in pendingDeletedDocIds || cloudId in pendingDeletedDocIds
+            if (isDeleted) {
+                dao.deleteBankTransactionByCloudId(cloudId)
+                continue
+            }
+            val existing = dao.getBankTransactionByCloudId(cloudId)
+            val cloudTx = bankTxFromCloud(uid, cloudId, data)
+            if (existing != null) {
+                if (cloudTx.timestamp > existing.timestamp) {
+                    dao.insertBankTransaction(cloudTx.copy(id = existing.id))
+                }
+                continue
+            }
             val fingerprint = str(data["fingerprint"])
             if (fingerprint.isNotBlank() && dao.getBankTransactionByFingerprint(fingerprint) != null) continue
-            dao.insertBankTransaction(bankTxFromCloud(uid, cloudId, data))
+            dao.insertBankTransaction(cloudTx)
             restoredBankTx++
         }
 
@@ -134,7 +187,7 @@ object CloudAccountRestore {
         var queued = 0
         for (item in dao.getAllDebitsDirect(uid)) {
             val cid = item.cloudId
-            if (cid.isNotBlank() && expenseCloudIds.contains(cid)) continue
+            if (cid.isNotBlank() && (expenseCloudIds.contains(cid) || cid in pendingDeletedDocIds)) continue
             LocalFirstCloudSync.queueExpense(context, user, item)
             queued++
         }
@@ -152,13 +205,13 @@ object CloudAccountRestore {
         }
         for (loan in dao.getAllLoansDirect(uid)) {
             val cid = loan.cloudId.ifBlank { "loan_${loan.id}" }
-            if (cid.isNotBlank() && loanCloudIds.contains(cid)) continue
+            if (cid.isNotBlank() && (loanCloudIds.contains(cid) || cid in pendingDeletedDocIds)) continue
             LocalFirstCloudSync.queueLoan(context, user, loan)
             queued++
         }
         for (bankTx in dao.getBankTransactionsDirect(uid)) {
             val cid = bankTx.cloudId.ifBlank { "bank_${bankTx.id}" }
-            if (cid.isNotBlank() && bankCloudIds.contains(cid)) continue
+            if (cid.isNotBlank() && (bankCloudIds.contains(cid) || cid in pendingDeletedDocIds)) continue
             LocalFirstCloudSync.queueBankTransaction(context, user, bankTx)
             queued++
         }

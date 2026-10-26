@@ -76,6 +76,8 @@ fun DashboardScreen(
     var editingCreditSource by remember { mutableStateOf<IncomeSource?>(null) }
 
     val selectedSpecificDay by viewModel.selectedSpecificDay.collectAsStateWithLifecycle()
+    val selectedStartDay by viewModel.selectedStartDay.collectAsStateWithLifecycle()
+    val selectedEndDay by viewModel.selectedEndDay.collectAsStateWithLifecycle()
 
     var mainLedgerTab by remember { mutableStateOf("DEBITS") } // "DEBITS" or "CREDITS"
 
@@ -149,6 +151,8 @@ fun DashboardScreen(
         recurringOnlyFilter,
         selectedCategoryFilter,
         selectedSpecificDay,
+        selectedStartDay,
+        selectedEndDay,
         dashboardViewMode,
         month,
         year
@@ -174,10 +178,19 @@ fun DashboardScreen(
                 true
             }
             val matchesCategory = matchesDebitCategoryFilter(item, selectedCategoryFilter)
-            val matchesDay = if (selectedSpecificDay != null) {
-                item.dueDateDay == selectedSpecificDay
-            } else {
-                true
+            val matchesDay = when {
+                selectedStartDay != null && selectedEndDay != null -> {
+                    val minD = minOf(selectedStartDay!!, selectedEndDay!!)
+                    val maxD = maxOf(selectedStartDay!!, selectedEndDay!!)
+                    item.dueDateDay in minD..maxD
+                }
+                selectedStartDay != null -> {
+                    item.dueDateDay == selectedStartDay
+                }
+                selectedSpecificDay != null -> {
+                    item.dueDateDay == selectedSpecificDay
+                }
+                else -> true
             }
             matchesStatus && matchesCreditCard && matchesRecurring && matchesCategory && matchesDay
         }
@@ -238,6 +251,23 @@ fun DashboardScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                    val dateHeaderLabel = remember(monthName, year, selectedStartDay, selectedEndDay, selectedSpecificDay) {
+                        when {
+                            selectedStartDay != null && selectedEndDay != null && selectedStartDay != selectedEndDay -> {
+                                val minD = minOf(selectedStartDay!!, selectedEndDay!!)
+                                val maxD = maxOf(selectedStartDay!!, selectedEndDay!!)
+                                "$monthName $minD–$maxD, $year"
+                            }
+                            selectedStartDay != null -> {
+                                "$monthName $selectedStartDay, $year"
+                            }
+                            selectedSpecificDay != null -> {
+                                "$monthName $selectedSpecificDay, $year"
+                            }
+                            else -> "$monthName $year"
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -256,7 +286,7 @@ fun DashboardScreen(
                             ) {
                                 Icon(Icons.Filled.CalendarMonth, null, tint = IndBlue, modifier = Modifier.size(16.dp))
                             }
-                            Text("$monthName $year", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = IndNavyHeader)
+                            Text(dateHeaderLabel, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = IndNavyHeader)
                         }
                         IconButton(onClick = { viewModel.previousMonth() }, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.Filled.ChevronLeft, "Prev", tint = IndTextSecondary, modifier = Modifier.size(20.dp))
@@ -301,9 +331,15 @@ fun DashboardScreen(
                     currentMonth = month,
                     currentYear = year,
                     currentSelectedDay = selectedSpecificDay,
+                    currentStartDay = selectedStartDay,
+                    currentEndDay = selectedEndDay,
                     onDismiss = { showCalendarPicker = false },
                     onSelectDate = { m, y, d ->
                         viewModel.setMonthYear(m, y, d)
+                        showCalendarPicker = false
+                    },
+                    onSelectDateRange = { m, y, s, e ->
+                        viewModel.setDateRangeFilter(m, y, s, e)
                         showCalendarPicker = false
                     }
                 )
@@ -534,7 +570,7 @@ fun DashboardScreen(
             }
             val visibleTotal = filteredDebits.sumOf { it.amount }
             val filtersActive = selectedStatusFilter != "ALL" || creditCardOnlyFilter || recurringOnlyFilter ||
-                selectedCategoryFilter != "ALL" || selectedSpecificDay != null
+                selectedCategoryFilter != "ALL" || selectedSpecificDay != null || selectedStartDay != null || selectedEndDay != null
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -619,7 +655,7 @@ fun DashboardScreen(
                                         creditCardOnlyFilter = false
                                         recurringOnlyFilter = false
                                         selectedCategoryFilter = "ALL"
-                                        viewModel.setMonthYear(month, year, null)
+                                        viewModel.clearDateFilter()
                                     }
                                 }
                             }

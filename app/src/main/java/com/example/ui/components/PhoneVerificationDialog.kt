@@ -84,13 +84,15 @@ fun PhoneVerificationDialog(
                 if (result.isSuccess) {
                     val dispatch = result.getOrNull()
                     if (dispatch?.instantSignIn == true) {
-                        viewModel.confirmLoginPhoneOtp("instant_token", "123456", clean)
-                        Toast.makeText(context, "Mobile number verified! ✓", Toast.LENGTH_SHORT).show()
+                        viewModel.reservePhoneAfterVerification(clean)
+                        Toast.makeText(context, "Mobile number verified via Firebase! ✓", Toast.LENGTH_SHORT).show()
                         onVerified()
                         onDismiss()
-                    } else {
-                        verificationId = dispatch?.verificationId.orEmpty().ifBlank { "fallback_sec_${System.currentTimeMillis()}" }
+                    } else if (!dispatch?.verificationId.isNullOrBlank()) {
+                        verificationId = dispatch!!.verificationId!!
                         currentStep = 2
+                    } else {
+                        errorMessage = "Failed to obtain OTP verification session from Firebase. Please try again."
                     }
                 } else {
                     errorMessage = FinMoneyAuthService.userMessageForPhoneAuthError(result.exceptionOrNull(), context)

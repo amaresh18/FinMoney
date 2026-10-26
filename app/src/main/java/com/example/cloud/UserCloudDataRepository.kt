@@ -78,6 +78,42 @@ class UserCloudDataRepository(
         }
     }
 
+    suspend fun deleteUserDocument(
+        context: CloudUserContext,
+        subcollection: String,
+        documentId: String,
+        legacyCollections: List<String> = emptyList()
+    ): Result<Unit> {
+        if (!context.canSyncToCloud) {
+            return Result.failure(IllegalStateException("Cloud sync requires a signed-in Firebase user."))
+        }
+        return try {
+            firestore.collection("users").document(context.userId)
+                .collection(subcollection)
+                .document(documentId)
+                .delete()
+                .await()
+            val tombstone = hashMapOf<String, Any>(
+                "isDeleted" to true,
+                "deletedAt" to System.currentTimeMillis()
+            )
+            firestore.collection("users").document(context.userId)
+                .collection(subcollection)
+                .document(documentId)
+                .set(tombstone, SetOptions.merge())
+                .await()
+            for (legacy in legacyCollections) {
+                try {
+                    firestore.collection(legacy).document(documentId).delete().await()
+                } catch (_: Exception) {}
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.w(TAG, "User cloud delete failed ($subcollection/$documentId): ${e.message}")
+            Result.failure(e)
+        }
+    }
+
     suspend fun writePhoneInbox(phone10: String, documentId: String, data: Map<String, Any?>): Result<Unit> {
         if (phone10.length != 10 || documentId.isBlank()) {
             return Result.failure(IllegalArgumentException("Invalid inbox address"))

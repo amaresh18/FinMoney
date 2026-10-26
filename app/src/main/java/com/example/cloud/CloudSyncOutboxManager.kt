@@ -64,7 +64,8 @@ object CloudSyncOutboxManager {
     }
 
     /**
-     * Always queue locally first, then kick a background flush. Never blocks on the network.
+     * Queues change locally into Room / Outbox table. Backup and sync happens only
+     * when the user explicitly clicks the Backup / Sync button in the Profile page.
      */
     suspend fun enqueueAndSchedule(
         context: Context,
@@ -82,9 +83,9 @@ object CloudSyncOutboxManager {
             documentId = documentId,
             data = data,
             legacyCollections = legacyCollections,
-            error = if (cloudUser.canSyncToCloud) null else "Waiting for signed-in Firebase user"
+            error = if (cloudUser.canSyncToCloud) null else "Waiting for manual backup in Profile"
         )
-        scheduleFlush(context.applicationContext)
+        // Auto-flush disabled. Changes are saved locally and backed up only when requested by user in Profile.
     }
 
     /** Kept for callers; same local-first contract as [enqueueAndSchedule]. */
@@ -125,14 +126,24 @@ object CloudSyncOutboxManager {
                 if (now < item.updatedAt + backoffMs(item.attempts)) continue
                 val payload = jsonToMap(item.payloadJson)
                 val legacy = parseLegacyCollections(item.legacyCollectionsJson)
+                val isDeleteAction = payload["actionType"] == "DELETE" || payload["isDeleted"] == true
                 val result = withTimeoutOrNull(ITEM_TIMEOUT_MS) {
-                    cloudRepository.writeUserDocument(
-                        context = cloudUser,
-                        subcollection = item.subcollection,
-                        documentId = item.documentId,
-                        data = payload,
-                        legacyCollections = legacy
-                    )
+                    if (isDeleteAction) {
+                        cloudRepository.deleteUserDocument(
+                            context = cloudUser,
+                            subcollection = item.subcollection,
+                            documentId = item.documentId,
+                            legacyCollections = legacy
+                        )
+                    } else {
+                        cloudRepository.writeUserDocument(
+                            context = cloudUser,
+                            subcollection = item.subcollection,
+                            documentId = item.documentId,
+                            data = payload,
+                            legacyCollections = legacy
+                        )
+                    }
                 }
                 if (result?.isSuccess == true) {
                     dao.deleteCloudSyncOutboxById(item.id)

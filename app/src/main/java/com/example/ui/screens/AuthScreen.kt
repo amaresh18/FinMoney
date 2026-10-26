@@ -40,10 +40,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -551,24 +556,29 @@ private fun AuthScreenContent(
             .imePadding()
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+            modifier = if (currentStep == 0) {
+                Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
+            } else {
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
+            },
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Header Navigation & Brand Wordmark
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Back button (if on steps 1..3)
-                    if (currentStep in 1..3) {
+            // Header Navigation & Brand Wordmark (Shown only when in onboarding steps 1..3)
+            if (currentStep in 1..3) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         IconButton(
                             onClick = { currentStep-- },
                             modifier = Modifier
@@ -578,17 +588,13 @@ private fun AuthScreenContent(
                         ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = FinAuthTextPrimary)
                         }
-                    } else {
-                        Spacer(modifier = Modifier.width(38.dp))
-                    }
 
-                    FinMoneyWordmarkRow(
-                        iconSize = 32.dp,
-                        titleColor = FinAuthTextPrimary
-                    )
+                        FinMoneyWordmarkRow(
+                            iconSize = 32.dp,
+                            titleColor = FinAuthTextPrimary
+                        )
 
-                    // Step Indicator Pill
-                    if (currentStep in 1..3) {
+                        // Step Indicator Pill
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = FinAuthCardBg,
@@ -602,13 +608,9 @@ private fun AuthScreenContent(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                             )
                         }
-                    } else {
-                        Spacer(modifier = Modifier.width(38.dp))
                     }
-                }
 
-                // Step Progress Bar
-                if (currentStep in 1..3) {
+                    // Step Progress Bar
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -640,13 +642,17 @@ private fun AuthScreenContent(
                         (slideInHorizontally { width -> -width } + fadeIn()).togetherWith(slideOutHorizontally { width -> width } + fadeOut())
                     }
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
             ) { step ->
                 when (step) {
                     0 -> OnboardingScreen(
                         onGoogleSignIn = { performGoogleSignIn() },
                         onMobileSignIn = { currentStep = 1 },
-                        isGoogleLoading = isGoogleLoading
+                        onReviewerDemoSignIn = { performDemoReviewerSignIn() },
+                        isGoogleLoading = isGoogleLoading,
+                        modifier = Modifier.fillMaxSize()
                     )
 
                     1 -> FinAuthMobileInputStep(
@@ -700,18 +706,6 @@ private fun AuthScreenContent(
                                     statusMessage = "Mobile number verified successfully! ✓"
                                     errorText = null
                                     currentStep = 3
-                                    return@launchCatching
-                                }
-                                if (BuildConfig.DEBUG && cleanPhone == "9876543210" && otpInput == "123456") {
-                                    isPhoneVerified = true
-                                    nameInput = "Play Store Reviewer"
-                                    emailInput = "demo.reviewer@finmoney.app"
-                                    currentStep = 3
-                                    return@launchCatching
-                                }
-                                if (BuildConfig.DEBUG && otpInput == "123456" && phoneVerificationId.isBlank()) {
-                                    errorText =
-                                        "Add +91 $cleanPhone as a test phone in Firebase Console, tap Get OTP again, then enter 123456."
                                     return@launchCatching
                                 }
                                 errorText = confirm.exceptionOrNull()?.localizedMessage
@@ -852,22 +846,24 @@ private fun AuthScreenContent(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Footer Security Badge
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Filled.Lock, contentDescription = null, tint = FinAuthTextSecondary, modifier = Modifier.size(12.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = "Bank-Grade Encryption • NPCI & Google Identity Verified",
-                    fontSize = 11.sp,
-                    color = FinAuthTextSecondary,
-                    textAlign = TextAlign.Center
-                )
+            // Footer Security Badge (Only shown on steps 1..3)
+            if (currentStep in 1..3) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.Lock, contentDescription = null, tint = FinAuthTextSecondary, modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Encrypted Connection",
+                        fontSize = 11.sp,
+                        color = FinAuthTextSecondary,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
 
@@ -875,12 +871,25 @@ private fun AuthScreenContent(
 }
 
 // ---------------------------------------------------------------------------
-// OnboardingScreen Component (Single Column Layout with Centered Bold Headline & Bottom Google Sign-In)
+// Authentic 4-Color Google 'G' Symbol Vector Composable
+// ---------------------------------------------------------------------------
+@Composable
+fun GoogleGLogoIcon(modifier: Modifier = Modifier) {
+    Image(
+        painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_google_g),
+        contentDescription = "Google Logo",
+        modifier = modifier
+    )
+}
+
+// ---------------------------------------------------------------------------
+// OnboardingScreen Component (Top App Logo & Title + Middle Google Sign-In)
 // ---------------------------------------------------------------------------
 @Composable
 fun OnboardingScreen(
     onGoogleSignIn: () -> Unit,
     onMobileSignIn: () -> Unit = {},
+    onReviewerDemoSignIn: () -> Unit = {},
     isGoogleLoading: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -888,7 +897,7 @@ fun OnboardingScreen(
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .background(AppTheme.colors.darkBg)
+                .background(Color(0xFF0B132B))
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .imePadding()
@@ -896,174 +905,85 @@ fun OnboardingScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(
-                        horizontal = AppTheme.dimensions.extraLarge,
-                        vertical = AppTheme.dimensions.huge + AppTheme.dimensions.extraSmall
-                    ),
+                    .padding(horizontal = 24.dp, vertical = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // TOP: Centered, Bold Brand Headline
+                // TOP: Logo and FinMoney text close together right at the top
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(AppTheme.dimensions.medium),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = AppTheme.dimensions.medium)
+                        .padding(top = 12.dp)
                 ) {
-                    FinMoneyAppLogo(size = 76.dp, shape = RoundedCornerShape(18.dp))
+                    FinMoneyAppLogo(size = 88.dp, shape = RoundedCornerShape(22.dp))
 
-                    // Brand Badge Pill
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(AppTheme.dimensions.buttonRadius))
-                            .background(AppTheme.colors.primary.copy(alpha = 0.2f))
-                            .border(1.dp, AppTheme.colors.accentCyan.copy(alpha = 0.5f), RoundedCornerShape(AppTheme.dimensions.buttonRadius))
-                            .padding(horizontal = AppTheme.dimensions.large, vertical = AppTheme.dimensions.extraSmall + 2.dp)
-                    ) {
-                        Text(
-                            text = "SMART FINMONEY FINTECH",
-                            style = AppTheme.typography.labelSmall,
-                            color = AppTheme.colors.accentCyan,
-                            letterSpacing = 0.8.sp
-                        )
-                    }
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
                         text = "FinMoney",
-                        style = AppTheme.typography.headlineLarge,
-                        color = AppTheme.colors.textPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
                         textAlign = TextAlign.Center,
-                        letterSpacing = (-1).sp
-                    )
-
-                    Text(
-                        text = "Your smart salary tracker, recurring expense manager & Khaata peer ledger.",
-                        style = AppTheme.typography.bodyMedium,
-                        color = AppTheme.colors.textSecondary,
-                        textAlign = TextAlign.Center,
-                        lineHeight = 22.sp,
-                        modifier = Modifier.padding(horizontal = AppTheme.dimensions.large)
+                        letterSpacing = 0.2.sp
                     )
                 }
 
-                // CENTER / HERO: Minimal, High-Impact Fintech Visual
+                // MIDDLE: Google Sign-In Button vertically centered in the middle of the screen
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
-                        .padding(vertical = AppTheme.dimensions.huge),
+                        .weight(1f),
                     contentAlignment = Alignment.Center
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(AppTheme.dimensions.cardRadius + 12.dp),
-                        color = AppTheme.colors.darkCard,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.darkBorder),
-                        shadowElevation = AppTheme.dimensions.large,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 240.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.linearGradient(
-                                        listOf(
-                                            Color(0xFF0F172A),
-                                            Color(0xFF1E293B),
-                                            AppTheme.colors.primary
-                                        )
-                                    )
-                                )
-                                .border(1.dp, Brush.horizontalGradient(listOf(AppTheme.colors.accentCyan, AppTheme.colors.primary)), RoundedCornerShape(AppTheme.dimensions.cardRadius + 12.dp))
-                                .padding(AppTheme.dimensions.extraLarge)
-                        ) {
-                            Column(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    FinMoneyWordmarkRow(
-                                        iconSize = 36.dp,
-                                        iconCornerRadius = AppTheme.dimensions.chipCornerRadius + 2.dp,
-                                        titleFontSize = AppTheme.typography.titleLarge.fontSize,
-                                        titleColor = Color.White,
-                                        titleFontWeight = FontWeight.Bold,
-                                        horizontalSpacing = AppTheme.dimensions.medium
-                                    )
-                                    Text("PERSONAL FINANCE", style = AppTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = AppTheme.colors.accentCyan)
-                                }
-
-                                Column(verticalArrangement = Arrangement.spacedBy(AppTheme.dimensions.extraSmall)) {
-                                    Text("SMART MONTHLY BUDGET & LEDGER", style = AppTheme.typography.labelSmall, color = AppTheme.colors.accentCyan, letterSpacing = 0.5.sp)
-                                    Text("Automated Salary Tracking, Debits & Khaata", style = AppTheme.typography.titleSmall, color = Color.White)
-                                }
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("• 100% Encrypted", style = AppTheme.typography.caption, color = AppTheme.colors.textSecondary)
-                                    Text("• Bank-Grade Privacy", style = AppTheme.typography.caption, color = AppTheme.colors.textSecondary)
-                                    Text("• Zero Manual Dues", style = AppTheme.typography.caption, color = AppTheme.colors.success, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // BOTTOM: Bottom-aligned, Full-width Rounded Primary Color Button
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(AppTheme.dimensions.medium),
-                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Button(
                         onClick = onGoogleSignIn,
                         enabled = !isGoogleLoading,
-                        shape = RoundedCornerShape(AppTheme.dimensions.buttonRadius),
+                        shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = AppTheme.colors.primary,
-                            contentColor = Color.White,
-                            disabledContainerColor = AppTheme.colors.primary.copy(alpha = 0.5f)
+                            containerColor = Color.White,
+                            contentColor = Color(0xFF0F172A),
+                            disabledContainerColor = Color.White.copy(alpha = 0.7f)
                         ),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp, pressedElevation = 2.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp)
                     ) {
                         if (isGoogleLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White, strokeWidth = 2.5.dp)
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color(0xFF0F172A), strokeWidth = 2.5.dp)
                         } else {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(AppTheme.dimensions.medium)
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = Color.White,
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text("G", style = AppTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color(0xFF4285F4))
-                                    }
-                                }
-                                Text("Continue with Google", style = AppTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                                GoogleGLogoIcon(modifier = Modifier.size(24.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = "Continue with Google",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF0F172A)
+                                )
                             }
                         }
                     }
+                }
 
+                // BOTTOM: Clean Terms Disclaimer
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                ) {
                     Text(
                         text = "By continuing, you agree to our Terms of Service & Privacy Policy",
-                        style = AppTheme.typography.caption,
-                        color = AppTheme.colors.textSecondary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(top = AppTheme.dimensions.extraSmall)
+                        fontSize = 11.sp,
+                        color = Color(0xFF94A3B8),
+                        textAlign = TextAlign.Center
                     )
                 }
             }

@@ -27,7 +27,7 @@ object DatabaseHealthGuard {
                     dao.insertOrUpdateUserProfile(
                         UserProfile(
                             userId = "user_default",
-                            name = "FinMoney Member",
+                            name = "",
                             email = "",
                             phoneNumber = "",
                             isOtpVerified = false,

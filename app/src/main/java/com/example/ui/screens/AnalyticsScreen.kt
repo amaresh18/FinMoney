@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -47,6 +48,8 @@ fun AnalyticsScreen(
     val salaryRecord by viewModel.currentSalaryRecord.collectAsStateWithLifecycle()
     val allDebits by viewModel.allDebits.collectAsStateWithLifecycle()
     val selectedSpecificDay by viewModel.selectedSpecificDay.collectAsStateWithLifecycle()
+    val selectedStartDay by viewModel.selectedStartDay.collectAsStateWithLifecycle()
+    val selectedEndDay by viewModel.selectedEndDay.collectAsStateWithLifecycle()
 
     val monthName = FinMoneyViewModel.getMonthName(month)
 
@@ -94,20 +97,30 @@ fun AnalyticsScreen(
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "$monthName $year Analytics",
+                        text = "$monthName $year Analytics & P&L",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = IndTextPrimary
                     )
                     Text(
-                        text = "Google Calendar Date Filter ▾",
+                        text = "Lemon Budget Calendar Filter ▾",
                         style = MaterialTheme.typography.labelSmall,
                         color = IndBlue,
                         fontSize = 10.sp
                     )
                 }
-                IconButton(onClick = { viewModel.nextMonth() }) {
-                    Icon(Icons.Filled.ChevronRight, contentDescription = "Next Month", tint = IndTextSecondary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { viewModel.toggleFinancialSafetyVisible() }) {
+                        Icon(
+                            if (isFinancialSafetyVisible) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
+                            "Privacy",
+                            tint = IndBlue,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    IconButton(onClick = { viewModel.nextMonth() }) {
+                        Icon(Icons.Filled.ChevronRight, contentDescription = "Next Month", tint = IndTextSecondary)
+                    }
                 }
             }
 
@@ -116,13 +129,42 @@ fun AnalyticsScreen(
                     currentMonth = month,
                     currentYear = year,
                     currentSelectedDay = selectedSpecificDay,
+                    currentStartDay = selectedStartDay,
+                    currentEndDay = selectedEndDay,
                     onDismiss = { showCalendarPicker = false },
                     onSelectDate = { m, y, d ->
                         viewModel.setMonthYear(m, y, d)
                         showCalendarPicker = false
+                    },
+                    onSelectDateRange = { m, y, s, e ->
+                        viewModel.setDateRangeFilter(m, y, s, e)
+                        showCalendarPicker = false
                     }
                 )
             }
+        }
+
+        // Lemon Account P&L Style Budget Daily Limit Calendar View
+        item {
+            BudgetCalendarView(
+                selectedMonth = month,
+                selectedYear = year,
+                selectedDay = selectedSpecificDay,
+                currencySymbol = currencySymbol,
+                isPrivacyVisible = isFinancialSafetyVisible,
+                debits = allDebits,
+                incomeSources = summary.incomeSources,
+                monthlyBudgetPreference = summary.totalIncome,
+                onSelectDate = { m, y, d -> viewModel.setMonthYear(m, y, d) },
+                onPreviousMonth = { viewModel.previousMonth() },
+                onNextMonth = { viewModel.nextMonth() },
+                onAddDebitForDate = { day ->
+                    viewModel.setSelectedSpecificDay(day)
+                },
+                onEditDebit = { item -> editingDebitItem = item },
+                onDeleteDebit = { item -> expensePendingDelete = item },
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         // Summary Card
@@ -157,33 +199,51 @@ fun AnalyticsScreen(
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.clickable { showIncomeDrillDown = true }) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { showIncomeDrillDown = true },
+                        horizontalAlignment = Alignment.Start
+                    ) {
                         Text("Total Income", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary)
                         Text(
-                            text = if (!isFinancialSafetyVisible) "$currencySymbol★★★★★★" else "$currencySymbol${"%,.0f".format(summary.totalIncome)}",
-                            style = MaterialTheme.typography.titleLarge,
+                            text = if (!isFinancialSafetyVisible) "$currencySymbol★★★★" else "$currencySymbol${"%,.0f".format(summary.totalIncome)}",
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.ExtraBold,
-                            color = IndGreenDark
+                            color = IndGreenDark,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Column {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Text("Total Outflow", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary)
                         Text(
-                            text = if (!isFinancialSafetyVisible) "$currencySymbol★★★★★★" else "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
-                            style = MaterialTheme.typography.titleLarge,
+                            text = if (!isFinancialSafetyVisible) "$currencySymbol★★★★" else "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.ExtraBold,
-                            color = IndRed
+                            color = IndRed,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Column {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.End
+                    ) {
                         Text("Net Savings", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary)
                         Text(
-                            text = if (!isFinancialSafetyVisible) "$currencySymbol★★★★★★" else "$currencySymbol${"%,.0f".format(summary.netFlexibleSpending)}",
-                            style = MaterialTheme.typography.titleLarge,
+                            text = if (!isFinancialSafetyVisible) "$currencySymbol★★★★" else "$currencySymbol${"%,.0f".format(summary.netFlexibleSpending)}",
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.ExtraBold,
-                            color = if (summary.netFlexibleSpending >= 0) IndTextPrimary else IndRed
+                            color = if (summary.netFlexibleSpending >= 0) IndNavyHeader else IndRed,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -455,22 +515,29 @@ fun AnimatedIncomeVsExpenseAnalyticsCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text("Income Inflow", fontSize = 11.sp, color = IndTextSecondary)
                     Text(
-                        text = if (!isPrivacyVisible) "$currencySymbol★★★★★★" else "$currencySymbol${"%,.0f".format(summary.totalIncome)}",
+                        text = if (!isPrivacyVisible) "$currencySymbol★★★★" else "$currencySymbol${"%,.0f".format(summary.totalIncome)}",
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
-                        color = IndGreenDark
+                        color = IndGreenDark,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-                Column(horizontalAlignment = Alignment.End) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.End
+                ) {
                     Text("Expense Outflow", fontSize = 11.sp, color = IndTextSecondary)
                     Text(
-                        text = if (!isPrivacyVisible) "$currencySymbol★★★★★★" else "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
+                        text = if (!isPrivacyVisible) "$currencySymbol★★★★" else "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
-                        color = IndRed
+                        color = IndRed,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
