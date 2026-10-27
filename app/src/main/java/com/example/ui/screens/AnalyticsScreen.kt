@@ -39,17 +39,27 @@ fun AnalyticsScreen(
     viewModel: FinMoneyViewModel,
     onBackToDashboard: () -> Unit
 ) {
-    val month by viewModel.currentMonth.collectAsStateWithLifecycle()
-    val year by viewModel.currentYear.collectAsStateWithLifecycle()
+    val month by viewModel.analyticsMonth.collectAsStateWithLifecycle()
+    val year by viewModel.analyticsYear.collectAsStateWithLifecycle()
     val currencySymbol by viewModel.currencySymbol.collectAsStateWithLifecycle()
     val isFinancialSafetyVisible by viewModel.isFinancialSafetyVisible.collectAsStateWithLifecycle()
-    val summaryRaw by viewModel.monthlySummary.collectAsStateWithLifecycle()
+    val summaryRaw by viewModel.analyticsMonthlySummary.collectAsStateWithLifecycle()
     val summary = summaryRaw ?: MonthlyFinanceSummary()
-    val salaryRecord by viewModel.currentSalaryRecord.collectAsStateWithLifecycle()
+    val salaryRecord by viewModel.analyticsSalaryRecord.collectAsStateWithLifecycle()
     val allDebits by viewModel.allDebits.collectAsStateWithLifecycle()
-    val selectedSpecificDay by viewModel.selectedSpecificDay.collectAsStateWithLifecycle()
-    val selectedStartDay by viewModel.selectedStartDay.collectAsStateWithLifecycle()
-    val selectedEndDay by viewModel.selectedEndDay.collectAsStateWithLifecycle()
+    val selectedSpecificDay by viewModel.analyticsSelectedSpecificDay.collectAsStateWithLifecycle()
+    val selectedStartDay by viewModel.analyticsSelectedStartDay.collectAsStateWithLifecycle()
+    val selectedEndDay by viewModel.analyticsSelectedEndDay.collectAsStateWithLifecycle()
+    val reconciliation by viewModel.analyticsReconciliation.collectAsStateWithLifecycle()
+
+    val startingBankBalance = remember(reconciliation) {
+        val recon = reconciliation
+        if (recon != null && recon.bankBalancesJson.isNotBlank() && recon.bankBalancesJson != "[]") {
+            com.example.data.repository.FinMoneyRepository.parseBankBalances(recon.bankBalancesJson).sumOf { it.startingBalance }
+        } else {
+            0.0
+        }
+    }
 
     val monthName = FinMoneyViewModel.getMonthName(month)
 
@@ -95,18 +105,29 @@ fun AnalyticsScreen(
                 IconButton(onClick = onBackToDashboard) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Dashboard", tint = IndNavyHeader)
                 }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.weight(1f, fill = false).padding(horizontal = 4.dp)
+                ) {
+                    val dateLabel = remember(monthName, year, selectedStartDay, selectedEndDay, selectedSpecificDay) {
+                        when {
+                            selectedStartDay != null && selectedEndDay != null && selectedStartDay != selectedEndDay -> {
+                                val minD = minOf(selectedStartDay!!, selectedEndDay!!)
+                                val maxD = maxOf(selectedStartDay!!, selectedEndDay!!)
+                                "$monthName $minD–$maxD, $year"
+                            }
+                            selectedStartDay != null -> "$monthName $selectedStartDay, $year"
+                            selectedSpecificDay != null -> "$monthName $selectedSpecificDay, $year"
+                            else -> "$monthName $year"
+                        }
+                    }
                     Text(
-                        text = "$monthName $year Analytics & P&L",
+                        text = "$dateLabel Analytics",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = IndTextPrimary
-                    )
-                    Text(
-                        text = "Lemon Budget Calendar Filter ▾",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = IndBlue,
-                        fontSize = 10.sp
+                        color = IndTextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -118,7 +139,10 @@ fun AnalyticsScreen(
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    IconButton(onClick = { viewModel.nextMonth() }) {
+                    IconButton(onClick = { viewModel.previousAnalyticsMonth() }) {
+                        Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous Month", tint = IndTextSecondary)
+                    }
+                    IconButton(onClick = { viewModel.nextAnalyticsMonth() }) {
                         Icon(Icons.Filled.ChevronRight, contentDescription = "Next Month", tint = IndTextSecondary)
                     }
                 }
@@ -133,11 +157,11 @@ fun AnalyticsScreen(
                     currentEndDay = selectedEndDay,
                     onDismiss = { showCalendarPicker = false },
                     onSelectDate = { m, y, d ->
-                        viewModel.setMonthYear(m, y, d)
+                        viewModel.setAnalyticsMonthYear(m, y, d)
                         showCalendarPicker = false
                     },
                     onSelectDateRange = { m, y, s, e ->
-                        viewModel.setDateRangeFilter(m, y, s, e)
+                        viewModel.setAnalyticsDateRangeFilter(m, y, s, e)
                         showCalendarPicker = false
                     }
                 )
@@ -155,14 +179,12 @@ fun AnalyticsScreen(
                 debits = allDebits,
                 incomeSources = summary.incomeSources,
                 monthlyBudgetPreference = summary.totalIncome,
-                onSelectDate = { m, y, d -> viewModel.setMonthYear(m, y, d) },
-                onPreviousMonth = { viewModel.previousMonth() },
-                onNextMonth = { viewModel.nextMonth() },
-                onAddDebitForDate = { day ->
-                    viewModel.setSelectedSpecificDay(day)
-                },
-                onEditDebit = { item -> editingDebitItem = item },
-                onDeleteDebit = { item -> expensePendingDelete = item },
+                onSelectDate = { m, y, d -> viewModel.setAnalyticsMonthYear(m, y, d) },
+                onPreviousMonth = { viewModel.previousAnalyticsMonth() },
+                onNextMonth = { viewModel.nextAnalyticsMonth() },
+                onAddDebitForDate = null,
+                onEditDebit = null,
+                onDeleteDebit = null,
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -248,6 +270,23 @@ fun AnalyticsScreen(
                     }
                 }
             }
+        }
+
+        // Day-Wise Closing Net Balance Graph
+        item {
+            DayWiseClosingNetBalanceChartCard(
+                month = month,
+                year = year,
+                debits = allDebits,
+                incomeSources = summary.incomeSources,
+                startingBalance = startingBankBalance,
+                currencySymbol = currencySymbol,
+                isPrivacyVisible = isFinancialSafetyVisible,
+                selectedDay = selectedSpecificDay,
+                onSelectDay = { day ->
+                    viewModel.setAnalyticsSelectedSpecificDay(day)
+                }
+            )
         }
 
         // Interactive Trend Chart
@@ -371,11 +410,11 @@ fun AnalyticsScreen(
             year = year,
             currencySymbol = currencySymbol,
             onDismiss = { selectedCategoryForDrillDown = null },
-            onEditItem = { item -> editingDebitItem = item },
-            onDeleteItem = { item -> expensePendingDelete = item },
-            onTogglePaid = { item -> viewModel.toggleDebitPaid(item) },
-            onToggleCreditCard = { item -> viewModel.toggleDebitCreditCardStatus(item) },
-            onToggleRecurring = { item -> viewModel.toggleDebitRecurring(item) }
+            onEditItem = null,
+            onDeleteItem = null,
+            onTogglePaid = null,
+            onToggleCreditCard = null,
+            onToggleRecurring = null
         )
     }
 

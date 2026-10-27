@@ -146,7 +146,6 @@ fun UserProfileScreen(
 
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
-    var showDataSafetyDialog by remember { mutableStateOf(false) }
     var showPhoneVerifyDialog by remember { mutableStateOf(false) }
     var showManageCustomCategoriesDialog by remember { mutableStateOf(false) }
     var editingCustomCategory by remember { mutableStateOf<CustomCategory?>(null) }
@@ -734,95 +733,7 @@ fun UserProfileScreen(
                 }
             }
 
-            // 4. Account Deletion & Legal Policies Card
-            fun openUrlInBrowser(url: String) {
-                try {
-                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                    context.startActivity(intent)
-                } catch (e: Exception) {
-                    android.widget.Toast.makeText(context, "Could not open link", android.widget.Toast.LENGTH_SHORT).show()
-                }
-            }
-
-            IndCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    ProfileSectionTitle(
-                        title = "Legal & support",
-                        subtitle = "Policies and data rights",
-                        icon = Icons.Filled.PrivacyTip
-                    )
-
-                    ProfileSettingsNavRow(
-                        title = "Request account deletion",
-                        subtitle = "Permanently remove account & financial records",
-                        titleColor = IndRed,
-                        icon = Icons.Filled.DeleteForever,
-                        iconTint = IndRed,
-                        onClick = {
-                            openUrlInBrowser(
-                                "https://docs.google.com/forms/d/e/1FAIpQLScYFK0kYaruDdJjmtrwwh33q4wXq3M0RL2xH_Hq18ZRTuvZOg/viewform"
-                            )
-                        },
-                        testTag = "request_account_deletion_link"
-                    )
-
-                    HorizontalDivider(color = IndBorderSubtle, modifier = Modifier.padding(vertical = 4.dp))
-
-                    ProfileSettingsNavRow(
-                        title = "Privacy policy",
-                        subtitle = "Google Play compliant policy",
-                        titleColor = IndNavyHeader,
-                        icon = Icons.Outlined.Description,
-                        iconTint = IndBlue,
-                        onClick = {
-                            openUrlInBrowser(
-                                "https://gist.githubusercontent.com/amareshgajawada/raw/finmoney_privacy_policy.txt"
-                            )
-                        },
-                        testTag = "privacy_policy_link"
-                    )
-
-                    HorizontalDivider(color = IndBorderSubtle, modifier = Modifier.padding(vertical = 4.dp))
-
-                    ProfileSettingsNavRow(
-                        title = "Data safety & disclosures",
-                        subtitle = "How we protect phone & personal data",
-                        titleColor = IndNavyHeader,
-                        icon = Icons.Filled.Info,
-                        iconTint = IndBlue,
-                        onClick = { showDataSafetyDialog = true },
-                        testTag = "data_safety_disclosures_link"
-                    )
-                }
-            }
-
             Spacer(modifier = Modifier.height(28.dp))
-        }
-
-        if (showDataSafetyDialog) {
-            AlertDialog(
-                onDismissRequest = { showDataSafetyDialog = false },
-                title = { Text("Data Safety & Privacy Information", fontWeight = FontWeight.Bold) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("FinMoney collects user data strictly for core app functionality and account management:\n", fontSize = 12.sp)
-                        Text("• Phone Number: Collected for account identification and SMS bank sync verification.", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        Text("• Name & Email Address: Collected for account creation, Google Sign-In, and personal ledger sync.", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        Text("• Contacts: Optional permission used solely to select borrower/lender contacts when recording Lent & Borrowed Khaata entries. Contacts are never shared or uploaded to third parties.", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        Text("• Encryption: All transmitted data is encrypted in transit using SSL/TLS protocols.", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        Text("• Third-Party Sharing: We DO NOT share or sell personal data to any third parties.", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        Text("• Right to Deletion: You can request complete deletion of your account and data at any time via the Account Deletion Form link.", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = { showDataSafetyDialog = false },
-                        colors = ButtonDefaults.buttonColors(containerColor = IndBlue)
-                    ) {
-                        Text("Got It", color = Color.White)
-                    }
-                }
-            )
         }
     }
 

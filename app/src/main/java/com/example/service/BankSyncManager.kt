@@ -520,6 +520,9 @@ object BankSyncManager {
 
         dao.updateBankTransactionStatus(tx.id, true, "APPROVED")
         dismissIncomingNotification(context, tx)
+        try {
+            com.example.audit.UserActionAuditLogger.logMessageApproved(context, tx, customCategory, resultMsg)
+        } catch (_: Exception) {}
 
         if (tx.availableBalance > 0.0) {
             try {
@@ -567,6 +570,9 @@ object BankSyncManager {
         val tx = findBankTransaction(dao, txId, cloudId, fingerprint) ?: return
         dao.updateBankTransactionStatus(tx.id, true, "REJECTED")
         dismissIncomingNotification(context, tx)
+        try {
+            com.example.audit.UserActionAuditLogger.logMessageRejected(context, tx)
+        } catch (_: Exception) {}
         try {
             val cloudUser = CloudUserContextResolver.resolve(dao)
             saveTransactionToFirestore(

@@ -25,9 +25,10 @@ import kotlinx.coroutines.launch
         BankTransactionRecord::class,
         RawNotificationRecord::class,
         CloudSyncOutboxEntry::class,
-        CustomExpenseTag::class
+        CustomExpenseTag::class,
+        UserActionAuditLog::class
     ],
-    version = 23,
+    version = 24,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -56,6 +57,40 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE UNIQUE INDEX IF NOT EXISTS index_user_profiles_email_unique " +
                         "ON user_profiles(email) WHERE email != ''"
                 )
+            }
+        }
+
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS user_action_audit_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        userId TEXT NOT NULL DEFAULT '',
+                        eventType TEXT NOT NULL DEFAULT '',
+                        originalMessage TEXT NOT NULL DEFAULT '',
+                        sender TEXT NOT NULL DEFAULT '',
+                        amount REAL NOT NULL DEFAULT 0.0,
+                        currency TEXT NOT NULL DEFAULT '₹',
+                        type TEXT NOT NULL DEFAULT 'DEBIT',
+                        merchant TEXT NOT NULL DEFAULT '',
+                        accountNumber TEXT NOT NULL DEFAULT '',
+                        referenceNumber TEXT NOT NULL DEFAULT '',
+                        initialCategory TEXT NOT NULL DEFAULT '',
+                        finalCategory TEXT NOT NULL DEFAULT '',
+                        initialSubCategory TEXT NOT NULL DEFAULT '',
+                        finalSubCategory TEXT NOT NULL DEFAULT '',
+                        initialAmount REAL NOT NULL DEFAULT 0.0,
+                        finalAmount REAL NOT NULL DEFAULT 0.0,
+                        initialNotes TEXT NOT NULL DEFAULT '',
+                        finalNotes TEXT NOT NULL DEFAULT '',
+                        diffSummary TEXT NOT NULL DEFAULT '',
+                        timestamp INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_user_action_audit_logs_eventType ON user_action_audit_logs(eventType)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_user_action_audit_logs_timestamp ON user_action_audit_logs(timestamp)")
             }
         }
 
@@ -203,7 +238,8 @@ abstract class AppDatabase : RoomDatabase() {
                             MIGRATION_19_20,
                             MIGRATION_20_21,
                             MIGRATION_21_22,
-                            MIGRATION_22_23
+                            MIGRATION_22_23,
+                            MIGRATION_23_24
                         )
                         .fallbackToDestructiveMigration()
                         .fallbackToDestructiveMigrationOnDowngrade()

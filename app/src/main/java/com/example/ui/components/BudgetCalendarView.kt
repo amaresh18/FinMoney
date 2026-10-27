@@ -202,15 +202,10 @@ fun BudgetCalendarView(
                         }
                         Column {
                             Text(
-                                text = "Daily Budget Calendar",
+                                text = "Daily Expenses Calendar",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = IndNavyHeader
-                            )
-                            Text(
-                                text = "Equal Daily Limit Split: ${formatCurrency(dailyBudgetLimit, currencySymbol, isPrivacyVisible)}/day",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = IndTextSecondary
                             )
                         }
                     }
@@ -289,12 +284,6 @@ fun BudgetCalendarView(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = IndNavyHeader
-                    )
-                    Text(
-                        text = "*Daily limit calculated by dividing net monthly pool by $daysInMonth days*",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = IndTextSecondary,
-                        fontSize = 9.sp
                     )
                 }
 
@@ -408,71 +397,6 @@ private fun DailyCalendarViewContent(
     )
     val currentMonthName = monthNames.getOrElse(selectedMonth - 1) { "Month" }
 
-    // Top Overview Banner Card
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = IndGreenLight, // Soft Emerald Green header card
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFA7F3D0)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Total Month Budget Pool",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = IndGreenDark,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = Color(0xFFA7F3D0)
-                ) {
-                    Text(
-                        text = "Win Rate ${String.format(Locale.US, "%.1f", savingsWinRatePercent)}% 📈",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = IndGreenDark,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        fontSize = 11.sp
-                    )
-                }
-            }
-
-            Text(
-                text = formatCurrency(netBudgetPool - totalMonthDebits, currencySymbol, isPrivacyVisible),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = if (netBudgetPool - totalMonthDebits >= 0) IndGreenDark else IndRedDark
-            )
-
-            HorizontalDivider(color = Color(0xFFA7F3D0), thickness = 1.dp)
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text("Daily Target Limit", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary, fontSize = 10.sp)
-                    Text("${formatCurrency(dailyBudgetLimit, currencySymbol, isPrivacyVisible)} / day", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = IndNavyHeader)
-                }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("Avg Daily Spend", style = MaterialTheme.typography.labelSmall, color = IndTextSecondary, fontSize = 10.sp)
-                    Text(formatCurrency(avgDailyExpense, currencySymbol, isPrivacyVisible), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = if (avgDailyExpense <= dailyBudgetLimit) IndGreenDark else IndRedDark)
-                }
-            }
-        }
-    }
-
     // Daily breakdown title
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -512,33 +436,6 @@ private fun DailyCalendarViewContent(
         }
     }
 
-    // Notice card for recurring and one-time expense calculation
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = IndCardSecondary,
-        border = androidx.compose.foundation.BorderStroke(1.dp, IndBorderSubtle),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Info,
-                contentDescription = null,
-                tint = IndBlue,
-                modifier = Modifier.size(16.dp)
-            )
-            Text(
-                text = "Includes all recurring & one-time expenses in daily calculations. One-time expenses marked with *.",
-                style = MaterialTheme.typography.labelSmall,
-                color = IndTextSecondary,
-                fontSize = 10.sp
-            )
-        }
-    }
-
     // 7-Column Calendar Grid
     val totalCells = startDayOfWeek + daysInMonth
     val rows = (totalCells + 6) / 7
@@ -560,24 +457,11 @@ private fun DailyCalendarViewContent(
                         val isToday = dayNum == todayDay && selectedMonth == todayMonth && selectedYear == todayYear
                         val isSelected = selectedDay == dayNum
                         val expenseAmount = dailyExpenseMap[dayNum] ?: 0.0
-                        val dayDebits = dayToDebitsMap[dayNum] ?: emptyList()
-                        val hasNonRecurring = dayDebits.any { !it.isRecurring }
-
-                        // Determine status
-                        val status = when {
-                            expenseAmount == 0.0 -> BudgetDayStatus.NO_EXPENSES
-                            expenseAmount < 0.90 * dailyBudgetLimit -> BudgetDayStatus.UNDER_BUDGET
-                            expenseAmount <= 1.10 * dailyBudgetLimit -> BudgetDayStatus.AROUND_LIMIT
-                            else -> BudgetDayStatus.OVER_BUDGET
-                        }
-
                         DateCell(
                             dayNumber = dayNum,
                             expenseAmount = expenseAmount,
-                            status = status,
                             isToday = isToday,
                             isSelected = isSelected,
-                            hasNonRecurring = hasNonRecurring,
                             currencySymbol = currencySymbol,
                             isPrivacyVisible = isPrivacyVisible,
                             onClick = {
@@ -591,21 +475,6 @@ private fun DailyCalendarViewContent(
                 }
             }
         }
-    }
-
-    // Calendar Bottom Legend Bar
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 4.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        LegendDot(color = Color(0xFF22C55E), label = "Under Limit")
-        LegendDot(color = Color(0xFFF59E0B), label = "~Limit (±10%)")
-        LegendDot(color = Color(0xFFEF4444), label = "Over Limit")
-        LegendDot(color = IndBlue, label = "Today")
-        LegendDot(color = Color(0xFF94A3B8), label = "No Expense")
     }
 
     // Interactive Selected Date Details Card
@@ -642,12 +511,9 @@ private fun DailyCalendarViewContent(
                             color = IndNavyHeader
                         )
                         Text(
-                            text = if (dayDiff >= 0)
-                                "🟢 Under budget by ${formatCurrency(dayDiff, currencySymbol, isPrivacyVisible)}"
-                            else
-                                "🔴 Over limit by ${formatCurrency(-dayDiff, currencySymbol, isPrivacyVisible)}",
+                            text = "Total Expenses: ${formatCurrency(dayTotal, currencySymbol, isPrivacyVisible)}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (dayDiff >= 0) IndGreenDark else IndRedDark,
+                            color = IndTextSecondary,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -681,19 +547,6 @@ private fun DailyCalendarViewContent(
                     )
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Daily Target Limit:", style = MaterialTheme.typography.bodySmall, color = IndTextSecondary)
-                    Text(
-                        formatCurrency(dailyBudgetLimit, currencySymbol, isPrivacyVisible),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                        color = IndBlue
-                    )
-                }
-
                 if (selectedDayDebits.isEmpty()) {
                     Box(
                         modifier = Modifier
@@ -719,6 +572,7 @@ private fun DailyCalendarViewContent(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .wrapContentHeight()
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(IndCardSecondary)
                                 .border(1.dp, IndBorderSubtle, RoundedCornerShape(10.dp))
@@ -726,8 +580,14 @@ private fun DailyCalendarViewContent(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 8.dp),
+                                verticalArrangement = Arrangement.Center
+                            ) {
                                 Row(
+                                    modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
@@ -737,46 +597,74 @@ private fun DailyCalendarViewContent(
                                         fontWeight = FontWeight.Bold,
                                         color = IndTextPrimary,
                                         maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
                                     )
-                                    Surface(
-                                        shape = RoundedCornerShape(12.dp),
-                                        color = if (!debit.isRecurring) Color(0xFFF3E8FF) else IndBlueLight,
-                                        border = androidx.compose.foundation.BorderStroke(0.5.dp, if (!debit.isRecurring) Color(0xFFC084FC) else IndBlue)
-                                    ) {
-                                        Text(
-                                            text = if (!debit.isRecurring) "⭐ One-time (*)" else "🔄 Recurring",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontSize = 8.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (!debit.isRecurring) Color(0xFF7E22CE) else IndBlue,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
+                                    if (debit.isRecurring) {
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = IndBlueLight,
+                                            border = androidx.compose.foundation.BorderStroke(0.5.dp, IndBlue)
+                                        ) {
+                                            Text(
+                                                text = "🔄 Recurring",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontSize = 8.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = IndBlue,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    } else {
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = Color(0xFFF3E8FF),
+                                            border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFC084FC))
+                                        ) {
+                                            Text(
+                                                text = "★ One-time",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontSize = 8.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF7E22CE),
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            )
+                                        }
                                     }
                                 }
+                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "${debit.category} • ${if (debit.isPaid) "Paid" else "Due"}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = IndTextSecondary,
-                                    fontSize = 10.sp
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
 
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.wrapContentWidth()
                             ) {
                                 Text(
                                     text = formatCurrency(debit.amount, currencySymbol, isPrivacyVisible),
                                     style = MaterialTheme.typography.bodySmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = IndRedDark
+                                    color = IndRedDark,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
 
                                 if (onEditDebit != null) {
                                     IconButton(
                                         onClick = { onEditDebit(debit) },
-                                        modifier = Modifier.size(24.dp)
+                                        modifier = Modifier.size(28.dp)
                                     ) {
                                         Icon(Icons.Default.Edit, contentDescription = "Edit", tint = IndBlue, modifier = Modifier.size(14.dp))
                                     }
@@ -785,34 +673,11 @@ private fun DailyCalendarViewContent(
                                 if (onDeleteDebit != null) {
                                     IconButton(
                                         onClick = { onDeleteDebit(debit) },
-                                        modifier = Modifier.size(24.dp)
+                                        modifier = Modifier.size(28.dp)
                                     ) {
                                         Icon(Icons.Default.Delete, contentDescription = "Delete", tint = IndRed, modifier = Modifier.size(14.dp))
                                     }
                                 }
-                            }
-                        }
-                    }
-
-                    if (selectedDayDebits.any { !it.isRecurring }) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFFFAF5FF),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE9D5FF)),
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text("⭐", fontSize = 12.sp)
-                                Text(
-                                    text = "One-time (non-recurring) expenses are calculated into this day's limit and marked with * on grid.",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF6B21A8),
-                                    fontSize = 10.sp
-                                )
                             }
                         }
                     }
@@ -824,59 +689,45 @@ private fun DailyCalendarViewContent(
 
 /**
  * Individual Rounded Square Date Cell for Calendar Grid in INDmoney Theme.
+ * Clean, neutral styling displaying total expenses for the day without color bias.
  */
 @Composable
 private fun DateCell(
     dayNumber: Int,
     expenseAmount: Double,
-    status: BudgetDayStatus,
     isToday: Boolean,
     isSelected: Boolean,
-    hasNonRecurring: Boolean = false,
     currencySymbol: String,
     isPrivacyVisible: Boolean = true,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val backgroundColor = when {
-        isToday -> Color(0xFFEFF6FF)
-        status == BudgetDayStatus.UNDER_BUDGET -> Color(0xFFF0FDF4)
-        status == BudgetDayStatus.AROUND_LIMIT -> Color(0xFFFFFBEB)
-        status == BudgetDayStatus.OVER_BUDGET -> Color(0xFFFEF2F2)
-        else -> Color(0xFFFAFAFA)
-    }
-
-    val textColor = when {
-        status == BudgetDayStatus.UNDER_BUDGET -> Color(0xFF15803D)
-        status == BudgetDayStatus.AROUND_LIMIT -> Color(0xFFB45309)
-        status == BudgetDayStatus.OVER_BUDGET -> Color(0xFFDC2626)
-        else -> Color(0xFF64748B)
+        isSelected -> Color(0xFFEFF6FF)
+        isToday -> Color(0xFFF8FAFC)
+        else -> Color.White
     }
 
     val borderColor = when {
         isSelected -> IndBlue
         isToday -> IndBlue
-        status == BudgetDayStatus.UNDER_BUDGET -> Color(0xFF86EFAC)
-        status == BudgetDayStatus.AROUND_LIMIT -> Color(0xFFFDE68A)
-        status == BudgetDayStatus.OVER_BUDGET -> Color(0xFFFCA5A5)
-        else -> Color(0xFFE2E8F0)
+        else -> IndBorderSubtle
     }
 
-    val formattedAmount = remember(expenseAmount, currencySymbol, isPrivacyVisible, hasNonRecurring) {
-        val baseStr = when {
+    val formattedAmount = remember(expenseAmount, currencySymbol, isPrivacyVisible) {
+        when {
             !isPrivacyVisible && expenseAmount > 0 -> "$currencySymbol★"
             expenseAmount == 0.0 -> ""
             expenseAmount >= 1000 -> "${currencySymbol}${String.format(Locale.US, "%.1f", expenseAmount / 1000)}K"
             else -> "${currencySymbol}${expenseAmount.toInt()}"
         }
-        if (baseStr.isNotBlank() && expenseAmount > 0 && hasNonRecurring) "$baseStr*" else baseStr
     }
 
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(10.dp),
         color = backgroundColor,
-        border = androidx.compose.foundation.BorderStroke(if (isSelected || isToday) 2.dp else 1.dp, borderColor),
+        border = androidx.compose.foundation.BorderStroke(if (isSelected || isToday) 1.5.dp else 1.dp, borderColor),
         modifier = modifier
             .heightIn(min = 52.dp)
             .testTag("date_cell_$dayNumber")
@@ -913,23 +764,19 @@ private fun DateCell(
                 }
             }
 
-            // Expense Amount pill container
+            // Total Expense Amount pill container
             if (formattedAmount.isNotBlank()) {
                 Surface(
                     shape = RoundedCornerShape(6.dp),
-                    color = when {
-                        status == BudgetDayStatus.UNDER_BUDGET -> Color(0xFFDCFCE7)
-                        status == BudgetDayStatus.AROUND_LIMIT -> Color(0xFFFEF3C7)
-                        status == BudgetDayStatus.OVER_BUDGET -> Color(0xFFFEE2E2)
-                        else -> Color(0xFFF1F5F9)
-                    },
+                    color = Color(0xFFF1F5F9),
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = formattedAmount,
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = textColor,
+                        color = IndNavyHeader,
                         fontSize = 10.sp,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
@@ -941,7 +788,7 @@ private fun DateCell(
                 Text(
                     text = "-",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFFCBD5E1),
+                    color = Color(0xFF94A3B8),
                     fontSize = 11.sp,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(bottom = 2.dp)
@@ -951,29 +798,6 @@ private fun DateCell(
     }
 }
 
-/**
- * Legend Dot item.
- */
-@Composable
-private fun LegendDot(color: Color, label: String) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(7.dp)
-                .clip(CircleShape)
-                .background(color)
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = IndTextSecondary,
-            fontSize = 8.sp
-        )
-    }
-}
 
 /**
  * Weekly Breakdown Content for "Week" Tab in White Theme.
@@ -1334,32 +1158,78 @@ private fun YearlyBreakdownContent(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Total Annual Income:", style = MaterialTheme.typography.bodyMedium, color = IndTextSecondary)
-                Text(formatCurrency(totalIncome, currencySymbol, isPrivacyVisible), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = IndGreenDark)
+                Text(
+                    text = "Total Annual Income",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = IndTextSecondary,
+                    modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp)
+                )
+                Text(
+                    text = formatCurrency(totalIncome, currencySymbol, isPrivacyVisible),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = IndGreenDark,
+                    softWrap = false,
+                    maxLines = 1
+                )
             }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Total Annual Expenses:", style = MaterialTheme.typography.bodyMedium, color = IndTextSecondary)
-                Text(formatCurrency(totalDebits, currencySymbol, isPrivacyVisible), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = IndRedDark)
+                Text(
+                    text = "Total Annual Expenses",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = IndTextSecondary,
+                    modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp)
+                )
+                Text(
+                    text = formatCurrency(totalDebits, currencySymbol, isPrivacyVisible),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = IndRedDark,
+                    softWrap = false,
+                    maxLines = 1
+                )
             }
 
             HorizontalDivider(color = IndBorderSubtle)
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Net Savings / Remaining Balance:", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = IndNavyHeader)
+                Column(
+                    modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp)
+                ) {
+                    Text(
+                        text = "Net Annual Savings",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = IndNavyHeader,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Remaining balance",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = IndTextMuted,
+                        maxLines = 1
+                    )
+                }
                 Text(
-                    formatCurrency(netSavings, currencySymbol, isPrivacyVisible),
+                    text = formatCurrency(netSavings, currencySymbol, isPrivacyVisible),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = if (netSavings >= 0) IndGreenDark else IndRedDark
+                    color = if (netSavings >= 0) IndGreenDark else IndRedDark,
+                    softWrap = false,
+                    maxLines = 1
                 )
             }
         }
@@ -1367,12 +1237,12 @@ private fun YearlyBreakdownContent(
 }
 
 /**
- * Utility to format currency values cleanly.
+ * Utility to format currency values cleanly without awkward wrapping.
  */
 private fun formatCurrency(amount: Double, symbol: String, isPrivacyVisible: Boolean = true): String {
     if (!isPrivacyVisible) return "$symbol★★★★"
-    val formatter = NumberFormat.getNumberInstance(Locale.US)
-    formatter.maximumFractionDigits = 2
+    val formatter = NumberFormat.getNumberInstance(Locale.getDefault())
+    formatter.maximumFractionDigits = 0
     formatter.minimumFractionDigits = 0
     return "$symbol${formatter.format(amount)}"
 }

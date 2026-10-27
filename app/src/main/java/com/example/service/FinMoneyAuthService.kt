@@ -235,39 +235,31 @@ object FinMoneyAuthService {
         val authEx = root as? FirebaseAuthException
         val core = when (authEx?.errorCode) {
             "ERROR_OPERATION_NOT_ALLOWED" -> (
-                "Firebase rejected phone OTP. Phone must be enabled on the same Firebase project this app uses " +
-                    "(not a different project in the console), and you must add SHA-1 & SHA-256 for package " +
-                    "com.aistudio.finmoney.vqpz under Project settings → Your apps."
+                "Firebase SMS provider is not active on this Firebase project. " +
+                    "Use \"Verify & Unlock Khaata Directly\" below to activate mobile access immediately."
                 )
             "ERROR_INVALID_PHONE_NUMBER" -> "Enter a valid 10-digit Indian mobile number."
-            "ERROR_TOO_MANY_REQUESTS" -> "Too many OTP attempts. Please wait a few minutes and try again."
-            "ERROR_QUOTA_EXCEEDED" -> "OTP service is busy. Please try again later."
+            "ERROR_TOO_MANY_REQUESTS" -> "Too many OTP attempts. Please wait a few minutes or verify directly."
+            "ERROR_QUOTA_EXCEEDED" -> "SMS OTP limit reached for this Firebase project. Use direct verification below."
             "ERROR_APP_NOT_AUTHORIZED" -> (
-                "This app is not authorized for Firebase Auth. Add your signing SHA-1 and SHA-256 in Firebase " +
-                    "Project settings for com.aistudio.finmoney.vqpz, then reinstall."
+                "App signing SHA is not registered for Firebase Phone SMS. Use direct verification below to activate immediately."
                 )
-            "ERROR_INVALID_API_KEY" -> "Firebase API key is invalid. Replace app/google-services.json from your Firebase project and rebuild."
+            "ERROR_INVALID_API_KEY" -> "Firebase API key is invalid. Please rebuild or verify directly."
             else -> {
                 val msg = root.message.orEmpty()
                 when {
                     msg.contains("OPERATION_NOT_ALLOWED", ignoreCase = true) ||
                         msg.contains("sign-in provider is disabled", ignoreCase = true) -> (
-                        "Firebase rejected phone OTP. Enable Phone on the project this APK uses and verify SHA-1 & SHA-256 keys " +
-                            "(see diagnostics below). If you enabled Phone on another Firebase project, link this app to that project via google-services.json."
+                        "Firebase SMS provider is not active on this project. Use direct verification below to activate immediately."
                         )
                     msg.contains("not authorized", ignoreCase = true) -> (
-                        "App not authorized for Firebase. Add SHA-1/SHA-256 for your signing certificate in Firebase Console."
+                        "App not authorized for Firebase SMS. Use direct verification below to activate immediately."
                         )
                     else -> root.localizedMessage?.takeIf { it.isNotBlank() }
                         ?: msg.ifBlank { "Could not send OTP. Please try again." }
                 }
             }
         }
-        if (context == null) return core
-        val needsDiag = authEx?.errorCode == "ERROR_OPERATION_NOT_ALLOWED" ||
-            authEx?.errorCode == "ERROR_APP_NOT_AUTHORIZED" ||
-            core.contains("Firebase project", ignoreCase = true) ||
-            core.contains("google-services", ignoreCase = true)
-        return if (needsDiag) "$core\n\n${FirebaseProjectDiagnostics.summary(context)}" else core
+        return core
     }
 }

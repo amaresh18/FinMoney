@@ -411,4 +411,20 @@ interface FinMoneyDao {
             "WHERE id = :id"
     )
     suspend fun updateCloudSyncOutboxAttempt(id: Long, attempts: Int, error: String?, updatedAt: Long)
+
+    // --- User Action Audit Logs (Rejected, Approved, Edited) ---
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAuditLog(log: UserActionAuditLog): Long
+
+    @Query("SELECT * FROM user_action_audit_logs ORDER BY timestamp DESC")
+    fun getAllAuditLogs(): Flow<List<UserActionAuditLog>>
+
+    @Query("SELECT * FROM user_action_audit_logs WHERE eventType = :eventType ORDER BY timestamp DESC")
+    fun getAuditLogsByEventType(eventType: String): Flow<List<UserActionAuditLog>>
+
+    @Query("SELECT * FROM user_action_audit_logs ORDER BY timestamp DESC")
+    suspend fun getAllAuditLogsDirect(): List<UserActionAuditLog>
+
+    @Query("DELETE FROM user_action_audit_logs")
+    suspend fun clearAllAuditLogs()
 }

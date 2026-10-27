@@ -71,6 +71,7 @@ fun PendingTransactionsScreen(
     val isListenerConnected by BankSyncManager.isListenerConnected.collectAsStateWithLifecycle()
     var isPermissionGranted by remember { mutableStateOf(BankSyncManager.isNotificationAccessGranted(context)) }
     var showPermissionDialog by remember { mutableStateOf(false) }
+    var showAuditLogsDialog by remember { mutableStateOf(false) }
 
     var selectedTab by remember { mutableStateOf("PENDING") } // PENDING, DUPLICATES, INCORRECT
     var searchQuery by remember { mutableStateOf("") }
@@ -208,6 +209,16 @@ fun PendingTransactionsScreen(
                                 color = Color.White
                             )
                         }
+                    }
+                    IconButton(
+                        onClick = { showAuditLogsDialog = true },
+                        modifier = Modifier.testTag("open_audit_logs_action_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.HistoryEdu,
+                            contentDescription = "AI Studio Action Logs",
+                            tint = AppTheme.colors.primary
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = AppTheme.colors.surface)
@@ -461,6 +472,13 @@ fun PendingTransactionsScreen(
                 showPermissionDialog = false
                 isPermissionGranted = BankSyncManager.isNotificationAccessGranted(context)
             }
+        )
+    }
+
+    if (showAuditLogsDialog) {
+        com.example.ui.components.ActionAuditLogsDialog(
+            viewModel = viewModel,
+            onDismiss = { showAuditLogsDialog = false }
         )
     }
 }

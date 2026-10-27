@@ -180,7 +180,10 @@ fun AccountReconciliationScreen(
                 },
                 actions = {
                     TextButton(
-                        onClick = onBack,
+                        onClick = {
+                            android.widget.Toast.makeText(context, "Cancelled", android.widget.Toast.LENGTH_SHORT).show()
+                            onBack()
+                        },
                         modifier = Modifier
                             .padding(end = 4.dp)
                             .testTag("reconcile_cancel_btn")
@@ -203,6 +206,9 @@ fun AccountReconciliationScreen(
                                 adjustmentNote = adjustmentNote,
                                 isReconciled = isPerfectMatch
                             )
+                            val message = if (isPerfectMatch) "Account balanced & reconciled! ✓" else "Reconciliation progress saved"
+                            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+                            onBack()
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isPerfectMatch) IndGreenDark else IndNavyHeader
@@ -238,7 +244,7 @@ fun AccountReconciliationScreen(
             verticalArrangement = Arrangement.spacedBy(AppTheme.dimensions.medium),
             contentPadding = PaddingValues(top = AppTheme.dimensions.medium, bottom = 48.dp)
         ) {
-            // Quick Status & Action Banner at the TOP (Prominent Cancel & Save buttons)
+            // Quick Status Banner at the TOP (Clean status indicator without duplicate action buttons)
             item {
                 Surface(
                     shape = RoundedCornerShape(14.dp),
@@ -249,17 +255,18 @@ fun AccountReconciliationScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             Text(
                                 text = if (isPerfectMatch) "STATUS: BALANCED ✓" else "DISCREPANCY: $currencySymbol${"%,.0f".format(abs(difference))}",
-                                fontSize = 11.5.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = if (isPerfectMatch) IndGreenDark else IndNavyHeader
                             )
+                            Spacer(Modifier.height(2.dp))
                             Text(
                                 text = if (isPerfectMatch) "All entries match actual balances." else if (difference > 0) "Surplus (+₹${"%,.0f".format(difference)}) unrecorded" else "Deficit (-₹${"%,.0f".format(abs(difference))}) unrecorded",
                                 fontSize = 10.5.sp,
@@ -269,48 +276,17 @@ fun AccountReconciliationScreen(
                             )
                         }
 
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isPerfectMatch) IndGreenLight else IndAmberLight
                         ) {
-                            OutlinedButton(
-                                onClick = onBack,
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Text("Cancel", fontSize = 12.sp, color = IndNavyHeader, fontWeight = FontWeight.SemiBold)
-                            }
-
-                            Button(
-                                onClick = {
-                                    viewModel.saveReconciliation(
-                                        month = currentMonth,
-                                        year = currentYear,
-                                        bankBalances = bankBalances,
-                                        manualAdjustment = manualAdjustment,
-                                        adjustmentNote = adjustmentNote,
-                                        isReconciled = isPerfectMatch
-                                    )
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isPerfectMatch) IndGreenDark else IndNavyHeader
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                                modifier = Modifier.testTag("save_reconcile_card_btn")
-                            ) {
-                                Icon(
-                                    imageVector = if (isPerfectMatch) Icons.Filled.CheckCircle else Icons.Filled.Save,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = if (isPerfectMatch) "Mark Reconciled" else "Save Progress",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            }
+                            Text(
+                                text = if (isPerfectMatch) "Balanced ✓" else "Needs Action",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isPerfectMatch) IndGreenDark else Color(0xFFB45309),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
                         }
                     }
                 }
@@ -627,7 +603,10 @@ fun AccountReconciliationScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             OutlinedButton(
-                                onClick = onBack,
+                                onClick = {
+                                    android.widget.Toast.makeText(context, "Cancelled", android.widget.Toast.LENGTH_SHORT).show()
+                                    onBack()
+                                },
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
@@ -644,6 +623,9 @@ fun AccountReconciliationScreen(
                                         adjustmentNote = adjustmentNote,
                                         isReconciled = isPerfectMatch
                                     )
+                                    val message = if (isPerfectMatch) "Account balanced & reconciled! ✓" else "Reconciliation progress saved"
+                                    android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+                                    onBack()
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (isPerfectMatch) IndGreenDark else IndNavyHeader

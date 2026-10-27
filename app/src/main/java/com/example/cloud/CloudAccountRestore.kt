@@ -47,6 +47,19 @@ object CloudAccountRestore {
             it.payloadJson.contains("\"actionType\":\"DELETE\"") || it.payloadJson.contains("\"isDeleted\":true")
         }.map { it.documentId }.toSet()
 
+        val nameRegex = Regex("\"name\":\"([^\"]+)\"")
+        val pendingDeletedCategoryNames = pendingOutbox
+            .filter { it.subcollection == "custom_categories" && (it.payloadJson.contains("\"actionType\":\"DELETE\"") || it.payloadJson.contains("\"isDeleted\":true")) }
+            .mapNotNull { entry ->
+                nameRegex.find(entry.payloadJson)?.groupValues?.getOrNull(1)?.trim()?.lowercase()
+            }.toSet()
+
+        val pendingDeletedTagNames = pendingOutbox
+            .filter { it.subcollection == "custom_expense_tags" && (it.payloadJson.contains("\"actionType\":\"DELETE\"") || it.payloadJson.contains("\"isDeleted\":true")) }
+            .mapNotNull { entry ->
+                nameRegex.find(entry.payloadJson)?.groupValues?.getOrNull(1)?.trim()?.lowercase()
+            }.toSet()
+
         onProgress(CloudSyncProgress(CloudSyncStage.DOWNLOADING_EXPENSES, "Downloading expenses & bills…"))
         val expenses = cloud.listUserSubcollection(uid, "expenses")
         for ((docId, data) in expenses) {
@@ -100,9 +113,20 @@ object CloudAccountRestore {
         for ((docId, data) in cloud.listUserSubcollection(uid, "custom_categories")) {
             val name = str(data["name"]).trim()
             if (name.isBlank()) continue
-            val isDeleted = bool(data["isDeleted"]) || str(data["actionType"]) == "DELETE" || docId in pendingDeletedDocIds
+            val cleanName = name.lowercase()
+            val isDeleted = bool(data["isDeleted"]) ||
+                str(data["actionType"]) == "DELETE" ||
+                docId in pendingDeletedDocIds ||
+                cleanName in pendingDeletedCategoryNames ||
+                CloudSyncPreferences.isCategoryDeleted(context, uid, name)
+
             if (isDeleted) {
                 dao.deleteCustomCategoryByName(name, uid)
+                if (!bool(data["isDeleted"]) && str(data["actionType"]) != "DELETE") {
+                    try {
+                        cloud.deleteUserDocument(user, "custom_categories", docId)
+                    } catch (_: Exception) {}
+                }
                 continue
             }
             if (dao.getCustomCategoryByName(name, uid) != null) continue
@@ -120,9 +144,20 @@ object CloudAccountRestore {
         for ((docId, data) in cloud.listUserSubcollection(uid, "custom_expense_tags")) {
             val name = str(data["name"]).trim()
             if (name.isBlank()) continue
-            val isDeleted = bool(data["isDeleted"]) || str(data["actionType"]) == "DELETE" || docId in pendingDeletedDocIds
+            val cleanName = name.lowercase()
+            val isDeleted = bool(data["isDeleted"]) ||
+                str(data["actionType"]) == "DELETE" ||
+                docId in pendingDeletedDocIds ||
+                cleanName in pendingDeletedTagNames ||
+                CloudSyncPreferences.isTagDeleted(context, uid, name)
+
             if (isDeleted) {
                 dao.deleteCustomExpenseTagByName(name, uid)
+                if (!bool(data["isDeleted"]) && str(data["actionType"]) != "DELETE") {
+                    try {
+                        cloud.deleteUserDocument(user, "custom_expense_tags", docId)
+                    } catch (_: Exception) {}
+                }
                 continue
             }
             if (dao.getCustomExpenseTagByName(name, uid) != null) continue
