@@ -399,32 +399,6 @@ fun UserProfileScreen(
                                 iconPending = Icons.Outlined.Email
                             )
                         }
-
-                        if (!isEditProfileMode) {
-                            FilledTonalButton(
-                                onClick = {
-                                    nameInput = effectiveName
-                                    isEditProfileMode = true
-                                },
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = Color.White.copy(alpha = 0.2f),
-                                    contentColor = Color.White
-                                ),
-                                modifier = Modifier.testTag("edit_profile_toggle")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Edit,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Edit display name",
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp
-                                )
-                            }
-                        }
                     }
                 }
             }

@@ -1124,6 +1124,38 @@ private fun MultiAddRowCard(
                     }
                 }
 
+                // 🔁 Recurring Toggle
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (rowState.isRecurring) Color(0xFFE0F2FE) else IndSurface,
+                    border = androidx.compose.foundation.BorderStroke(
+                        0.8.dp,
+                        if (rowState.isRecurring) Color(0xFF0284C7) else IndBorder
+                    ),
+                    modifier = Modifier.clickable {
+                        rowState.isRecurring = !rowState.isRecurring
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Repeat,
+                            contentDescription = "Toggle Recurring",
+                            tint = if (rowState.isRecurring) Color(0xFF0284C7) else IndTextMuted,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Text(
+                            text = if (rowState.isRecurring) "🔁 Recurring: YES" else "🔁 Recurring",
+                            fontSize = 10.sp,
+                            fontWeight = if (rowState.isRecurring) FontWeight.ExtraBold else FontWeight.Medium,
+                            color = if (rowState.isRecurring) Color(0xFF0284C7) else IndTextSecondary
+                        )
+                    }
+                }
+
                 // 📅 Transaction Date Chip (Prefilled with current date, customizable for any past or future date)
                 val context = androidx.compose.ui.platform.LocalContext.current
                 val formattedDate = remember(rowState.selectedDateMillis) {

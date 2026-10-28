@@ -70,11 +70,14 @@ object LoanInviteService {
             return "Shared the request. Add a 10-digit number next time to find them in FinMoney."
         }
 
-        val registeredUid = try {
-            registry.lookupPhone(phone)?.uid?.takeIf { it.isNotBlank() }
+        val registeredEntry = try {
+            registry.lookupPhone(phone)
         } catch (_: Exception) {
             null
         }
+
+        val registeredUid = registeredEntry?.uid?.takeIf { it.isNotBlank() }
+        val isVerifiedUser = registeredEntry?.phoneVerified ?: (registeredUid != null)
 
         val inbox = cloud.writePhoneInbox(phone, inviteId, payload)
         if (inbox.isFailure) {
@@ -94,12 +97,14 @@ object LoanInviteService {
             )
         )
 
-        if (registeredUid != null && registeredUid != sender.userId) {
-            return "Sent to their FinMoney inbox. They can open the record to approve or reject."
+        if (registeredUid != null && registeredUid != sender.userId && isVerifiedUser) {
+            // Registered and verified on FinMoney -> In-app notification delivered
+            return "Sent in-app notification to ${ensured.personName.ifBlank { "+91 $phone" }} on FinMoney."
         }
 
+        // Unregistered counterparty -> Fallback to WhatsApp / SMS text message notification
         shareInstallInvite(app, phone, shareText(ensured, body, registered = false))
-        return "They are not on FinMoney yet. Share the details with the install link."
+        return "Not registered on FinMoney yet. Details sent via WhatsApp/SMS."
     }
 
     suspend fun pullInbox(context: Context) {

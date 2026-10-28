@@ -1069,6 +1069,7 @@ fun AddCustomCategoryDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.widthIn(max = 520.dp).fillMaxWidth(0.92f).imePadding(),
         title = {
             Text(
                 if (isEdit) titleEdit else titleNew,
@@ -1114,7 +1115,8 @@ fun AddCustomCategoryDialog(
                     }
                 }
                 Text("Color", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = IndTextMuted)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     customCategoryColorChoices.forEach { hex ->
                         val picked = selectedColor == hex
                         val c = try {
@@ -1221,6 +1223,7 @@ fun ManageCustomCategoriesDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(0.92f).imePadding(),
         title = {
             Text("Custom categories", fontWeight = FontWeight.Bold, color = IndNavyHeader)
         },

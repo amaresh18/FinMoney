@@ -552,6 +552,7 @@ fun AppDialog(
     ) {
         Surface(
             modifier = modifier
+                .widthIn(max = 520.dp)
                 .fillMaxWidth(0.92f)
                 .wrapContentHeight()
                 .padding(ThemeConstants.Dimensions.ScreenPaddingHorizontal),

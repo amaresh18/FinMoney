@@ -25,7 +25,7 @@ class UserIdentityRegistry(
     private val emails = root.document("emails").collection("entries")
     private val users = root.document("users").collection("entries")
 
-    data class PhoneRegistryEntry(val uid: String, val email: String)
+    data class PhoneRegistryEntry(val uid: String, val email: String, val phoneVerified: Boolean = true)
     data class EmailRegistryEntry(val uid: String, val phone: String)
 
     suspend fun lookupPhone(phone10: String): PhoneRegistryEntry? {
@@ -34,7 +34,8 @@ class UserIdentityRegistry(
             val snap = phones.document(phone10).get().await()
             if (!snap.exists()) return null
             val uid = snap.getString("uid") ?: return null
-            PhoneRegistryEntry(uid = uid, email = snap.getString("email") ?: "")
+            val isVerified = snap.getBoolean("phoneVerified") ?: true
+            PhoneRegistryEntry(uid = uid, email = snap.getString("email") ?: "", phoneVerified = isVerified)
         } catch (e: Exception) {
             Log.w(TAG, "lookupPhone failed for $phone10: ${e.message}")
             null

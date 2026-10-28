@@ -1374,31 +1374,6 @@ fun DebitItemCard(
                                 fontSize = 11.sp,
                                 color = if (isCcItem) Color(0xFF7C3AED) else IndTextSecondary
                             )
-                            if (item.isRecurring) {
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = Color(0xFFE0F2FE)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Repeat,
-                                            contentDescription = "Recurring",
-                                            tint = Color(0xFF0284C7),
-                                            modifier = Modifier.size(10.dp)
-                                        )
-                                        Text(
-                                            text = "Recurring",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF0284C7)
-                                        )
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -1483,9 +1458,9 @@ fun DebitItemCard(
                             .testTag("toggle_recurring_${item.id}")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Repeat,
@@ -1493,6 +1468,14 @@ fun DebitItemCard(
                                 tint = if (item.isRecurring) Color(0xFF0284C7) else IndTextSecondary,
                                 modifier = Modifier.size(12.dp)
                             )
+                            if (item.isRecurring) {
+                                Text(
+                                    text = "Repeat",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0284C7)
+                                )
+                            }
                         }
                     }
 
@@ -1874,31 +1857,6 @@ fun CreditItemCard(
                                 fontSize = 11.sp,
                                 color = IndTextSecondary
                             )
-                            if (item.isRecurring) {
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = IndGreenLight
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Repeat,
-                                            contentDescription = "Recurring",
-                                            tint = IndGreenDark,
-                                            modifier = Modifier.size(10.dp)
-                                        )
-                                        Text(
-                                            text = "Recurring",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = IndGreenDark
-                                        )
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -1967,9 +1925,9 @@ fun CreditItemCard(
                             .testTag("toggle_recurring_credit_${item.id}")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Repeat,
@@ -1977,6 +1935,14 @@ fun CreditItemCard(
                                 tint = if (item.isRecurring) IndGreenDark else IndTextSecondary,
                                 modifier = Modifier.size(12.dp)
                             )
+                            if (item.isRecurring) {
+                                Text(
+                                    text = "Repeat",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndGreenDark
+                                )
+                            }
                         }
                     }
                 }

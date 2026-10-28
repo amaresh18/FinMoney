@@ -480,9 +480,10 @@ fun BankTransactionsHistorySheet(
                             value = customSenderInput,
                             onValueChange = { customSenderInput = it },
                             label = { Text("Sender ID") },
-                            modifier = Modifier.width(130.dp),
+                            modifier = Modifier.weight(1f),
                             singleLine = true
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Button(
                             onClick = {
                                 if (customSmsInput.isNotBlank()) {

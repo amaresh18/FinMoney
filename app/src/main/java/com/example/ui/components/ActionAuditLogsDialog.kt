@@ -56,8 +56,12 @@ fun ActionAuditLogsDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
-            modifier = Modifier.fillMaxSize().padding(top = 20.dp),
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            modifier = Modifier
+                .widthIn(max = 680.dp)
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.9f)
+                .padding(vertical = 16.dp),
+            shape = RoundedCornerShape(20.dp),
             color = IndSurface
         ) {
             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -77,11 +81,16 @@ fun ActionAuditLogsDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    val appCount = logs.count { it.eventType == UserActionAuditLogger.EVENT_APPROVED }
-                    val rejCount = logs.count { it.eventType == UserActionAuditLogger.EVENT_REJECTED }
-                    val editCount = logs.count { it.eventType == UserActionAuditLogger.EVENT_EDITED }
+                val appCount = logs.count { it.eventType == UserActionAuditLogger.EVENT_APPROVED }
+                val rejCount = logs.count { it.eventType == UserActionAuditLogger.EVENT_REJECTED }
+                val editCount = logs.count { it.eventType == UserActionAuditLogger.EVENT_EDITED }
 
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     FilterChip(selected = selectedFilter == "ALL", onClick = { selectedFilter = "ALL" }, label = { Text("All (${logs.size})", fontSize = 11.sp) })
                     FilterChip(selected = selectedFilter == "APPROVED", onClick = { selectedFilter = "APPROVED" }, label = { Text("Appr ($appCount)", fontSize = 11.sp) })
                     FilterChip(selected = selectedFilter == "REJECTED", onClick = { selectedFilter = "REJECTED" }, label = { Text("Rej ($rejCount)", fontSize = 11.sp) })

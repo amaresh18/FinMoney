@@ -608,7 +608,7 @@ fun AnimatedIncomeVsExpenseAnalyticsCard(
 
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Income", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(60.dp))
+                    Text("Income", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.widthIn(min = 54.dp, max = 80.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     LinearProgressIndicator(
                         progress = { incomeRatio },
                         modifier = Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp)),
@@ -617,7 +617,7 @@ fun AnimatedIncomeVsExpenseAnalyticsCard(
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Expense", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(60.dp))
+                    Text("Expense", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.widthIn(min = 54.dp, max = 80.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     LinearProgressIndicator(
                         progress = { expenseRatio },
                         modifier = Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp)),
@@ -662,7 +662,8 @@ fun CategoryDrillDownDialog(
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
-                .fillMaxWidth()
+                .widthIn(max = 560.dp)
+                .fillMaxWidth(0.95f)
                 .imePadding()
                 .padding(vertical = 16.dp),
             shape = RoundedCornerShape(20.dp),
@@ -959,7 +960,8 @@ fun IncomeDrillDownDialog(
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
-                .fillMaxWidth()
+                .widthIn(max = 560.dp)
+                .fillMaxWidth(0.95f)
                 .imePadding()
                 .padding(vertical = 16.dp),
             shape = RoundedCornerShape(20.dp),

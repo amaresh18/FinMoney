@@ -1017,6 +1017,8 @@ private fun ApiKeyConfigDialog(
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
+                .widthIn(max = 560.dp)
+                .fillMaxWidth(0.95f)
                 .navigationBarsPadding()
                 .imePadding(),
             shape = RoundedCornerShape(20.dp),
@@ -1196,7 +1198,8 @@ private fun LiveJsonContextDialog(
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
-                .fillMaxWidth()
+                .widthIn(max = 680.dp)
+                .fillMaxWidth(0.95f)
                 .fillMaxHeight(0.85f)
                 .imePadding(),
             shape = RoundedCornerShape(20.dp),
@@ -1467,7 +1470,8 @@ private fun KuberaLoreCodexDialog(
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
-                .fillMaxWidth()
+                .widthIn(max = 680.dp)
+                .fillMaxWidth(0.95f)
                 .fillMaxHeight(0.9f)
                 .imePadding(),
             shape = RoundedCornerShape(22.dp),
