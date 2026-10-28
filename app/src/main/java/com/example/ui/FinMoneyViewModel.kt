@@ -1916,6 +1916,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     fun deleteLoan(id: Long) {
         launchSafe {
             val loan = dao.getLoanById(id)
+            dao.deleteLedgerEntriesByLoanId(id)
             repository.deleteLoanById(id)
             if (loan != null) {
                 queueCloudAfterLocal { user -> LocalFirstCloudSync.queueLoanDeletion(app, user, loan) }
@@ -2002,6 +2003,12 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 updatedAt = System.currentTimeMillis()
             )
             dao.updateLedgerEntry(agreed)
+            val myPhone = currentUserPhone10()
+            val otherPhone = LoanPartyAuth.phone10(loan.personContact.ifBlank { loan.counterpartyContact })
+            launchSafe(Dispatchers.IO) {
+                LoanInviteService.deleteLedgerEntryInboxInvites(app, loan, entry, listOf(myPhone, otherPhone))
+            }
+            dao.deleteNotificationByRelated(loan.id, entry.id)
             refreshLoanBalance(loan.id)
             _loanActionMessage.emit("Payment approved. The balance is updated.")
         }
@@ -2025,6 +2032,12 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             dao.updateLedgerEntry(
                 entry.copy(status = LoanApprovalStatus.REJECTED, updatedAt = System.currentTimeMillis())
             )
+            val myPhone = currentUserPhone10()
+            val otherPhone = LoanPartyAuth.phone10(loan.personContact.ifBlank { loan.counterpartyContact })
+            launchSafe(Dispatchers.IO) {
+                LoanInviteService.deleteLedgerEntryInboxInvites(app, loan, entry, listOf(myPhone, otherPhone))
+            }
+            dao.deleteNotificationByRelated(loan.id, entry.id)
             _loanActionMessage.emit(if (isProposer) "Payment withdrawn." else "Payment declined. The balance is unchanged.")
         }
     }
@@ -2165,7 +2178,35 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 return@launchSafe
             }
             dao.deleteLedgerEntry(entryId)
+
+            val activeUid = getActiveUserId()
+            val loanCid = loan.cloudId.ifBlank { "loan_${loan.id}" }
+            val keysToMark = listOf(
+                "loan_${loanCid}_entry_${entry.id}",
+                "loan_${loan.id}_entry_${entry.id}",
+                "loan_${loanCid}_entry_${entry.amount}_${entry.createdAt}",
+                "loan_${loan.id}_entry_${entry.amount}_${entry.createdAt}",
+                "entry_${entry.id}",
+                "loan_entry_${loan.id}_${entry.id}",
+                "loan_entry_${loanCid}_${entry.id}"
+            )
+            keysToMark.forEach { k -> CloudSyncPreferences.markLedgerEntryDeleted(app, activeUid, k) }
+
+            // Purge any pending upload outbox items for this entry so it isn't re-created
+            try {
+                dao.deleteCloudSyncOutboxEntry(activeUid, "loan_ledger", "loan_entry_${loan.id}_${entry.id}")
+                dao.deleteCloudSyncOutboxEntry(activeUid, "loan_ledger", "loan_entry_${loanCid}_${entry.id}")
+            } catch (_: Exception) {}
+
             queueCloudAfterLocal { user -> LocalFirstCloudSync.queueLedgerEntryDeletion(app, user, entry) }
+
+            val myPhone = currentUserPhone10()
+            val otherPhone = LoanPartyAuth.phone10(loan.personContact.ifBlank { loan.counterpartyContact })
+            launchSafe(Dispatchers.IO) {
+                LoanInviteService.deleteLedgerEntryInboxInvites(app, loan, entry, listOf(myPhone, otherPhone))
+            }
+            dao.deleteNotificationByRelated(loan.id, entry.id)
+
             refreshLoanBalance(loan.id)
             _loanActionMessage.emit("Payment deleted.")
         }

@@ -132,6 +132,22 @@ class UserCloudDataRepository(
         }
     }
 
+    suspend fun deletePhoneInboxItem(phone10: String, documentId: String): Result<Unit> {
+        if (phone10.length != 10 || documentId.isBlank()) return Result.success(Unit)
+        return try {
+            firestore.collection("loan_inbox_by_phone")
+                .document(phone10)
+                .collection("items")
+                .document(documentId)
+                .delete()
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.w(TAG, "Phone inbox delete failed ($phone10/$documentId): ${e.message}")
+            Result.failure(e)
+        }
+    }
+
     suspend fun listUserSubcollection(userId: String, subcollection: String): List<Pair<String, Map<String, Any?>>> {
         if (userId.isBlank()) return emptyList()
         return try {

@@ -270,12 +270,101 @@ fun UserProfileScreen(
                             modifier = Modifier.testTag("profile_avatar_picker")
                         )
 
-                        Text(
-                            text = effectiveName,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        if (!isEditProfileMode) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        nameInput = effectiveName
+                                        isEditProfileMode = true
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    .testTag("profile_display_name_row")
+                            ) {
+                                Text(
+                                    text = effectiveName,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Icon(
+                                    imageVector = Icons.Outlined.Edit,
+                                    contentDescription = "Edit display name",
+                                    tint = Color.White.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        } else {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = nameInput,
+                                    onValueChange = { nameInput = it },
+                                    singleLine = true,
+                                    placeholder = { Text("Display Name", color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp) },
+                                    textStyle = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        fontSize = 15.sp
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(52.dp)
+                                        .testTag("inline_edit_name_input"),
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White,
+                                        focusedBorderColor = Color.White,
+                                        unfocusedBorderColor = Color.White.copy(alpha = 0.7f),
+                                        cursorColor = Color.White,
+                                        focusedContainerColor = Color.White.copy(alpha = 0.18f),
+                                        unfocusedContainerColor = Color.White.copy(alpha = 0.12f)
+                                    )
+                                )
+                                FilledIconButton(
+                                    onClick = {
+                                        val cleanName = nameInput.trim().ifBlank { effectiveName }
+                                        viewModel.saveUserProfile(
+                                            name = cleanName,
+                                            email = effectiveEmail,
+                                            phoneNumber = effectivePhone,
+                                            profilePicUri = displayProfilePicUri,
+                                            isOtpVerified = phoneVerified,
+                                            isEmailVerified = emailVerified
+                                        )
+                                        isEditProfileMode = false
+                                        android.widget.Toast.makeText(context, "Display name updated", android.widget.Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = IndGreen),
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .testTag("inline_save_name_button")
+                                ) {
+                                    Icon(Icons.Filled.Check, contentDescription = "Save", tint = Color.White, modifier = Modifier.size(20.dp))
+                                }
+                                FilledIconButton(
+                                    onClick = {
+                                        nameInput = effectiveName
+                                        isEditProfileMode = false
+                                    },
+                                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White.copy(alpha = 0.25f)),
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .testTag("inline_cancel_name_button")
+                                ) {
+                                    Icon(Icons.Filled.Close, contentDescription = "Cancel", tint = Color.White, modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        }
                         if (effectiveEmail.isNotBlank()) {
                             Text(
                                 text = effectiveEmail,
@@ -311,25 +400,30 @@ fun UserProfileScreen(
                             )
                         }
 
-                        FilledTonalButton(
-                            onClick = { isEditProfileMode = !isEditProfileMode },
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = Color.White.copy(alpha = 0.2f),
-                                contentColor = Color.White
-                            ),
-                            modifier = Modifier.testTag("edit_profile_toggle")
-                        ) {
-                            Icon(
-                                imageVector = if (isEditProfileMode) Icons.Filled.Check else Icons.Outlined.Edit,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isEditProfileMode) "Done editing" else "Edit display name",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp
-                            )
+                        if (!isEditProfileMode) {
+                            FilledTonalButton(
+                                onClick = {
+                                    nameInput = effectiveName
+                                    isEditProfileMode = true
+                                },
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = Color.White.copy(alpha = 0.2f),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.testTag("edit_profile_toggle")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Edit,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Edit display name",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp
+                                )
+                            }
                         }
                     }
                 }
@@ -434,74 +528,6 @@ fun UserProfileScreen(
                 }
             }
 
-            if (isEditProfileMode) {
-                IndCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ProfileSectionTitle(
-                            title = "Personal details",
-                            subtitle = "Name shown on your dashboard & agreements",
-                            icon = Icons.Outlined.Person
-                        )
-                        OutlinedTextField(
-                            value = nameInput,
-                            onValueChange = { nameInput = it },
-                            label = { Text("Full name") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        OutlinedTextField(
-                            value = if (effectivePhone.isNotBlank()) "+91 ${effectivePhone.takeLast(10)}" else "—",
-                            onValueChange = {},
-                            readOnly = true,
-                            enabled = false,
-                            label = { Text("Mobile") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        OutlinedTextField(
-                            value = effectiveEmail.ifBlank { "—" },
-                            onValueChange = {},
-                            readOnly = true,
-                            enabled = false,
-                            label = { Text("Email") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        Text(
-                            text = "To update and verify your mobile number, use the Mobile & Khaata Access card above.",
-                            fontSize = 11.sp,
-                            color = IndTextSecondary,
-                            lineHeight = 15.sp
-                        )
-                        Button(
-                            onClick = {
-                                viewModel.saveUserProfile(
-                                    name = nameInput,
-                                    email = effectiveEmail,
-                                    phoneNumber = effectivePhone,
-                                    profilePicUri = displayProfilePicUri,
-                                    isOtpVerified = phoneVerified,
-                                    isEmailVerified = emailVerified
-                                )
-                                isEditProfileMode = false
-                                android.widget.Toast.makeText(
-                                    context,
-                                    "Profile updated",
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = IndBlue),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Save changes", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
 
             IndCard(modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

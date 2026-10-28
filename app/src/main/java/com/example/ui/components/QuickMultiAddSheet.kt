@@ -60,7 +60,8 @@ class MultiAddRowState(
     initialInterestRateText: String = "",
     initialTotalTenureMonthsText: String = "",
     initialCurrentMonthTenureText: String = "1",
-    initialIsRecurring: Boolean = false
+    initialIsRecurring: Boolean = false,
+    initialSelectedDateMillis: Long = System.currentTimeMillis()
 ) {
     var categoryKey by mutableStateOf(initialCategoryKey)
     var customCategoryName by mutableStateOf(initialCustomCategoryName)
@@ -77,6 +78,29 @@ class MultiAddRowState(
     var totalTenureMonthsText by mutableStateOf(initialTotalTenureMonthsText)
     var currentMonthTenureText by mutableStateOf(initialCurrentMonthTenureText)
     var isRecurring by mutableStateOf(initialIsRecurring)
+    var selectedDateMillis by mutableStateOf(initialSelectedDateMillis)
+}
+
+/**
+ * Checks if category is strictly LOAN/EMI, Electricity & Water Bill, or CHIT
+ * for which "Due Date" applies. All other categories use "Transaction Date".
+ */
+fun isDueDateExpenseCategory(categoryKey: String, customCategoryName: String = "", titleOrTag: String = ""): Boolean {
+    val upperCat = categoryKey.uppercase().trim()
+    val upperCustom = customCategoryName.uppercase().trim()
+    val upperTag = titleOrTag.uppercase().trim()
+
+    val isLoanEmi = isLoanOrEmi(upperCat) ||
+            upperCat in listOf("LOAN", "EMI", "DEBT_REPAY") ||
+            upperTag.contains("LOAN") || upperTag.contains("EMI")
+    val isElectricityWater = upperCat == DebitCategory.ELECTRICITY.name ||
+            upperCat.contains("ELECTRIC") || upperCat.contains("WATER") ||
+            upperCustom.contains("ELECTRIC") || upperCustom.contains("WATER") ||
+            upperTag.contains("ELECTRIC") || upperTag.contains("WATER")
+    val isChit = upperCat == "CHIT" || upperCat == DebitCategory.CHIT.name ||
+            upperCustom.contains("CHIT") || upperTag.contains("CHIT")
+
+    return isLoanEmi || isElectricityWater || isChit
 }
 
 data class CategoryMeta(
@@ -115,6 +139,13 @@ fun debitItemToMultiAddRowState(item: DebitItem, todayDay: Int): MultiAddRowStat
     } else {
         ""
     }
+    val itemMillis = item.dueDate?.takeIf { it > 0L }
+        ?: item.paidDateTimestamp?.takeIf { it > 0L }
+        ?: item.createdAt.takeIf { it > 0L }
+        ?: java.util.Calendar.getInstance().apply {
+            set(item.year, (item.month - 1).coerceIn(0, 11), item.dueDateDay.coerceIn(1, 31), 12, 0, 0)
+        }.timeInMillis
+
     return MultiAddRowState(
         initialCategoryKey = categoryKey,
         initialCustomCategoryName = customName,
@@ -123,13 +154,14 @@ fun debitItemToMultiAddRowState(item: DebitItem, todayDay: Int): MultiAddRowStat
         initialIsPaidViaCreditCard = item.isPaidViaCreditCard,
         initialTag = tagForRow,
         initialNotes = item.notes,
-        initialDay = item.dueDateDay.coerceIn(1, 28).takeIf { it > 0 } ?: todayDay,
+        initialDay = item.dueDateDay.coerceIn(1, 31).takeIf { it > 0 } ?: todayDay,
         initialShowNotesField = item.notes.isNotBlank(),
         initialPrincipalAmountText = formatAmountForRowInput(item.principalAmount),
         initialInterestRateText = if (item.interestRate > 0) item.interestRate.toString() else "",
         initialTotalTenureMonthsText = if (item.totalTenureMonths > 0) item.totalTenureMonths.toString() else "",
         initialCurrentMonthTenureText = if (item.currentMonthTenure > 0) item.currentMonthTenure.toString() else "1",
-        initialIsRecurring = item.isRecurring
+        initialIsRecurring = item.isRecurring,
+        initialSelectedDateMillis = itemMillis
     )
 }
 
@@ -718,24 +750,29 @@ fun QuickMultiAddSheet(
                                         val isLoanCat = isLoanOrEmi(row.categoryKey)
 
                                         val base = editingDebit
+                                        val rowCal = java.util.Calendar.getInstance().apply { timeInMillis = row.selectedDateMillis }
+                                        val rowDay = rowCal.get(java.util.Calendar.DAY_OF_MONTH)
+                                        val rowMonth = rowCal.get(java.util.Calendar.MONTH) + 1
+                                        val rowYear = rowCal.get(java.util.Calendar.YEAR)
+
                                         itemsToSave.add(
                                             DebitItem(
                                                 id = base?.id ?: 0L,
                                                 userId = base?.userId ?: "",
                                                 cloudId = base?.cloudId ?: "",
-                                                month = base?.month ?: month,
-                                                year = base?.year ?: year,
-                                                monthYear = base?.monthYear ?: "$year-${if (month < 10) "0$month" else month}",
+                                                month = rowMonth,
+                                                year = rowYear,
+                                                monthYear = "$rowYear-${if (rowMonth < 10) "0$rowMonth" else "$rowMonth"}",
                                                 category = row.categoryKey,
                                                 customCategoryName = row.customCategoryName,
                                                 title = finalTitle,
                                                 amount = amt,
-                                                dueDateDay = row.day,
-                                                dueDate = base?.dueDate,
+                                                dueDateDay = rowDay,
+                                                dueDate = row.selectedDateMillis,
                                                 isPaid = row.isPaid,
                                                 isPaidViaCreditCard = row.isPaidViaCreditCard,
-                                                paidDateTimestamp = base?.paidDateTimestamp,
-                                                paidDate = base?.paidDate,
+                                                paidDateTimestamp = if (row.isPaid) (base?.paidDateTimestamp ?: row.selectedDateMillis) else null,
+                                                paidDate = if (row.isPaid) (base?.paidDate ?: row.selectedDateMillis) else null,
                                                 notes = row.notes.trim(),
                                                 principalAmount = row.principalAmountText.toDoubleOrNull() ?: 0.0,
                                                 interestRate = row.interestRateText.toDoubleOrNull() ?: 0.0,
@@ -1083,6 +1120,62 @@ private fun MultiAddRowCard(
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
+                        )
+                    }
+                }
+
+                // 📅 Transaction Date Chip (Prefilled with current date, customizable for any past or future date)
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val formattedDate = remember(rowState.selectedDateMillis) {
+                    java.text.SimpleDateFormat("dd MMM", java.util.Locale.getDefault()).format(java.util.Date(rowState.selectedDateMillis))
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = IndCardSecondary,
+                    border = androidx.compose.foundation.BorderStroke(
+                        0.8.dp,
+                        IndBorderSubtle
+                    ),
+                    modifier = Modifier.clickable {
+                        val cal = java.util.Calendar.getInstance().apply { timeInMillis = rowState.selectedDateMillis }
+                        android.app.DatePickerDialog(
+                            context,
+                            { _, y, m, d ->
+                                val newCal = java.util.Calendar.getInstance().apply {
+                                    set(y, m, d, 12, 0, 0)
+                                }
+                                rowState.selectedDateMillis = newCal.timeInMillis
+                                rowState.day = d
+                            },
+                            cal.get(java.util.Calendar.YEAR),
+                            cal.get(java.util.Calendar.MONTH),
+                            cal.get(java.util.Calendar.DAY_OF_MONTH)
+                        ).show()
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.CalendarMonth,
+                            contentDescription = "Pick Transaction Date",
+                            tint = IndNavyHeader,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Text(
+                            text = "📅 Transaction Date: $formattedDate",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndNavyHeader
+                        )
+                        Icon(
+                            imageVector = Icons.Filled.ArrowDropDown,
+                            contentDescription = null,
+                            tint = IndNavyHeader,
+                            modifier = Modifier.size(12.dp)
                         )
                     }
                 }

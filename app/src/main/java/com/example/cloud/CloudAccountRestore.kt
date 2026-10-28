@@ -8,6 +8,8 @@ import com.example.data.model.CustomCategory
 import com.example.data.model.CustomExpenseTag
 import com.example.data.model.DebitItem
 import com.example.data.model.LoanApprovalStatus
+import com.example.data.model.LoanLedgerEntry
+import com.example.data.model.LoanLedgerKind
 import com.example.data.model.LoanTransaction
 import com.example.data.model.LoanType
 import com.example.data.model.SalaryRecord
@@ -190,6 +192,65 @@ object CloudAccountRestore {
             }
             dao.insertLoan(cloudLoan)
             restoredLoans++
+        }
+
+        val ledgerDocs = cloud.listUserSubcollection(uid, "loan_ledger")
+        for ((docId, data) in ledgerDocs) {
+            val isDeleted = bool(data["isDeleted"]) || str(data["actionType"]) == "DELETE" || docId in pendingDeletedDocIds
+            val localEntryId = lng(data["localEntryId"])
+            val loanId = lng(data["loanId"])
+            val amount = num(data["amount"])
+            val createdAt = lng(data["createdAt"]).takeIf { it > 0 } ?: lng(data["updatedAt"])
+            val entryKey1 = "loan_${loanId}_entry_${localEntryId}"
+            val entryKey2 = "loan_${loanId}_entry_${amount}_${createdAt}"
+            val isMarkedDeleted = CloudSyncPreferences.isLedgerEntryDeleted(context, uid, entryKey1) ||
+                CloudSyncPreferences.isLedgerEntryDeleted(context, uid, entryKey2) ||
+                CloudSyncPreferences.isLedgerEntryDeleted(context, uid, docId)
+
+            if (isDeleted || isMarkedDeleted) {
+                if (localEntryId > 0) {
+                    dao.deleteLedgerEntry(localEntryId)
+                }
+                if (amount > 0.0 && loanId > 0) {
+                    dao.deleteLedgerEntryByDetails(loanId, amount, createdAt)
+                }
+                continue
+            }
+
+            // Restore valid non-deleted ledger entry if missing from local DB
+            if (loanId > 0 && amount > 0.0) {
+                val existingEntries = dao.listLedgerEntries(loanId)
+                val exists = existingEntries.any {
+                    it.kind.name == str(data["kind"]).uppercase() &&
+                        kotlin.math.abs(it.amount - amount) < 0.01 &&
+                        (createdAt == 0L || kotlin.math.abs(it.createdAt - createdAt) < 5000)
+                }
+                if (!exists) {
+                    val status = try {
+                        LoanApprovalStatus.valueOf(str(data["status"]).uppercase())
+                    } catch (_: Exception) {
+                        LoanApprovalStatus.PENDING_APPROVAL
+                    }
+                    val kind = try {
+                        LoanLedgerKind.valueOf(str(data["kind"]).uppercase())
+                    } catch (_: Exception) {
+                        LoanLedgerKind.CLEARING
+                    }
+                    dao.insertLedgerEntry(
+                        LoanLedgerEntry(
+                            loanId = loanId,
+                            userId = uid,
+                            kind = kind,
+                            amount = amount,
+                            notes = str(data["notes"]),
+                            status = status,
+                            createdAt = if (createdAt > 0) createdAt else System.currentTimeMillis(),
+                            updatedAt = lng(data["updatedAt"]).takeIf { it > 0 } ?: System.currentTimeMillis()
+                        )
+                    )
+                    restoredLoans++
+                }
+            }
         }
 
         onProgress(CloudSyncProgress(CloudSyncStage.DOWNLOADING_BANK, "Downloading bank activity…"))

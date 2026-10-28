@@ -233,6 +233,12 @@ interface FinMoneyDao {
     @Query("DELETE FROM loan_ledger_entries WHERE id = :id")
     suspend fun deleteLedgerEntry(id: Long)
 
+    @Query("DELETE FROM loan_ledger_entries WHERE loanId = :loanId")
+    suspend fun deleteLedgerEntriesByLoanId(loanId: Long)
+
+    @Query("DELETE FROM loan_ledger_entries WHERE loanId = :loanId AND ABS(amount - :amount) < 0.01 AND ABS(createdAt - :createdAt) < 5000")
+    suspend fun deleteLedgerEntryByDetails(loanId: Long, amount: Double, createdAt: Long)
+
     // --- App Notifications ---
     @Query("SELECT * FROM app_notifications WHERE userId = :userId OR :userId = '' ORDER BY timestamp DESC")
     fun getAllNotifications(userId: String = ""): Flow<List<AppNotification>>
@@ -266,6 +272,9 @@ interface FinMoneyDao {
 
     @Query("DELETE FROM app_notifications WHERE id = :id")
     suspend fun deleteNotification(id: Long)
+
+    @Query("DELETE FROM app_notifications WHERE relatedLoanId = :loanId AND referenceId = :referenceId")
+    suspend fun deleteNotificationByRelated(loanId: Long, referenceId: Long)
 
     // --- Monthly Reconciliations ---
     @Query("SELECT * FROM monthly_reconciliations WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year ORDER BY id DESC LIMIT 1")

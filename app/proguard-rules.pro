@@ -12,8 +12,10 @@
 -keep class com.example.model.** { *; }
 -keep class com.example.util.** { *; }
 -keep class com.example.ui.FinMoneyViewModel { *; }
+-keep class * extends androidx.lifecycle.ViewModel { *; }
 -keep class com.example.ui.**UiState* { *; }
 -keep class com.example.ui.CategorySummary { *; }
+-keep class com.example.service.** { *; }
 
 # Firebase Firestore & Auth
 -keepattributes *Annotation*

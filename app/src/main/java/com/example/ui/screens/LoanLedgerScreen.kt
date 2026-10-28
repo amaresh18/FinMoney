@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -293,6 +295,7 @@ fun LoanLedgerScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LedgerBubble(
     entry: LoanLedgerEntry,
@@ -328,7 +331,7 @@ private fun LedgerBubble(
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = bubbleColor,
-            modifier = Modifier.widthIn(max = 300.dp)
+            modifier = Modifier.widthIn(min = 180.dp, max = 340.dp).fillMaxWidth(0.85f)
         ) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
@@ -351,10 +354,19 @@ private fun LedgerBubble(
                     Text(
                         "Proposed $currencySymbol${"%,.0f".format(entry.proposedAmount)} · balance unchanged",
                         fontSize = 11.sp,
-                        color = Color(0xFFD97706)
+                        color = Color(0xFFD97706),
+                        softWrap = true
                     )
                 }
-                if (entry.notes.isNotBlank()) Text(entry.notes, fontSize = 12.sp, color = IndTextSecondary)
+                if (entry.notes.isNotBlank()) {
+                    Text(
+                        entry.notes,
+                        fontSize = 12.sp,
+                        color = IndTextSecondary,
+                        lineHeight = 16.sp,
+                        softWrap = true
+                    )
+                }
                 Text(
                     when {
                         entry.status == LoanApprovalStatus.REJECTED -> "Declined"
@@ -376,7 +388,11 @@ private fun LedgerBubble(
                     fontSize = 10.sp,
                     color = IndTextSecondary
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     if (pending && isOther) {
                         OutlinedButton(onClick = onDecline, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp)) {
                             Text("Decline", fontSize = 11.sp)

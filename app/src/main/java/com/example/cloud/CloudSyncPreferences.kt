@@ -78,4 +78,30 @@ object CloudSyncPreferences {
             prefs.edit().putStringSet("deleted_tags_$userId", current).apply()
         }
     }
+
+    // --- Deleted Ledger Entries Tracking ---
+    fun isLedgerEntryDeleted(context: Context, userId: String, entryKey: String): Boolean {
+        if (userId.isBlank() || entryKey.isBlank()) return false
+        val set = context.applicationContext
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getStringSet("deleted_ledger_entries_$userId", emptySet()) ?: emptySet()
+        return set.contains(entryKey.trim().lowercase())
+    }
+
+    fun markLedgerEntryDeleted(context: Context, userId: String, entryKey: String) {
+        if (userId.isBlank() || entryKey.isBlank()) return
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val current = prefs.getStringSet("deleted_ledger_entries_$userId", emptySet())?.toMutableSet() ?: mutableSetOf()
+        current.add(entryKey.trim().lowercase())
+        prefs.edit().putStringSet("deleted_ledger_entries_$userId", current).apply()
+    }
+
+    fun unmarkLedgerEntryDeleted(context: Context, userId: String, entryKey: String) {
+        if (userId.isBlank() || entryKey.isBlank()) return
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val current = prefs.getStringSet("deleted_ledger_entries_$userId", emptySet())?.toMutableSet() ?: return
+        if (current.remove(entryKey.trim().lowercase())) {
+            prefs.edit().putStringSet("deleted_ledger_entries_$userId", current).apply()
+        }
+    }
 }

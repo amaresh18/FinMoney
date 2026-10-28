@@ -97,6 +97,10 @@ fun AddEditDebitDialog(
 
     val isChit = category.equals("CHIT", ignoreCase = true) || title.contains("CHIT", ignoreCase = true)
     val isLoan = isLoanOrEmi(category)
+    val isElectricityWater = category.equals(DebitCategory.ELECTRICITY.name, ignoreCase = true) ||
+        category.contains("ELECTRIC", ignoreCase = true) || category.contains("WATER", ignoreCase = true) ||
+        title.contains("ELECTRIC", ignoreCase = true) || title.contains("WATER", ignoreCase = true)
+    val isDueCategory = isLoan || isChit || isElectricityWater
 
     IndDialog(
         onDismiss = onDismiss,
@@ -162,8 +166,8 @@ fun AddEditDebitDialog(
         IndOutlinedTextField(
             value = dueDate,
             onValueChange = { dueDate = it },
-            label = "Due Date",
-            placeholder = "e.g. 5th of month",
+            label = "Transaction Date",
+            placeholder = "e.g. Today / pick date",
             leadingIcon = Icons.Filled.Event,
             testTag = "debit_duedate_input"
         )

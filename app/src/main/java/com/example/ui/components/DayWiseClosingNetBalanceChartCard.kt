@@ -218,183 +218,418 @@ fun DayWiseClosingNetBalanceChartCard(
             .fillMaxWidth()
             .testTag("day_wise_closing_net_balance_card")
     ) {
-        // --- 1. Header Row ---
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(IndBlueLight),
-                    contentAlignment = Alignment.Center
+        // --- 1. Header Row (Responsive & Auto-adjusting for all screen sizes) ---
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val isCompact = maxWidth < 420.dp
+            if (isCompact) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.TrendingUp,
-                        contentDescription = "Day-Wise Closing Balance",
-                        tint = IndBlue,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Column {
-                    Text(
-                        text = "DAY-WISE CLOSING NET BALANCE",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = IndBlueDark,
-                        fontSize = 11.sp,
-                        letterSpacing = 0.5.sp
-                    )
-                    Text(
-                        text = "$monthName $year daily liquidity tracking",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = IndTextSecondary,
-                        fontSize = 11.sp
-                    )
-                }
-            }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(IndBlueLight),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.TrendingUp,
+                                contentDescription = "Day-Wise Closing Balance",
+                                tint = IndBlue,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "DAY-WISE CLOSING NET BALANCE",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = IndBlueDark,
+                                fontSize = 11.sp,
+                                letterSpacing = 0.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "$monthName $year daily liquidity tracking",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = IndTextSecondary,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
 
-            // Mode Toggle Chips (Closing Balance vs Daily Flow)
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = IndCardSecondary,
-                modifier = Modifier.padding(2.dp)
-            ) {
-                Row(modifier = Modifier.padding(2.dp)) {
-                    val isClosing = graphMode == NetBalanceGraphMode.CLOSING_BALANCE
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(if (isClosing) IndSurface else Color.Transparent)
-                            .clickable { graphMode = NetBalanceGraphMode.CLOSING_BALANCE }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    // Mode Toggle Chips (Closing Balance vs Daily Flow) - given dedicated breathing room
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
                     ) {
-                        Text(
-                            text = "Balance",
-                            fontSize = 10.sp,
-                            fontWeight = if (isClosing) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isClosing) IndBlue else IndTextSecondary
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = IndCardSecondary,
+                            modifier = Modifier.padding(2.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val isClosing = graphMode == NetBalanceGraphMode.CLOSING_BALANCE
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isClosing) IndSurface else Color.Transparent)
+                                        .clickable { graphMode = NetBalanceGraphMode.CLOSING_BALANCE }
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Text(
+                                        text = "Balance",
+                                        fontSize = 10.sp,
+                                        fontWeight = if (isClosing) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isClosing) IndBlue else IndTextSecondary,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (!isClosing) IndSurface else Color.Transparent)
+                                        .clickable { graphMode = NetBalanceGraphMode.DAILY_FLOW }
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Text(
+                                        text = "Daily Flow",
+                                        fontSize = 10.sp,
+                                        fontWeight = if (!isClosing) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (!isClosing) IndBlue else IndTextSecondary,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+                        }
                     }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(if (!isClosing) IndSurface else Color.Transparent)
-                            .clickable { graphMode = NetBalanceGraphMode.DAILY_FLOW }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f, fill = false),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            text = "Daily Flow",
-                            fontSize = 10.sp,
-                            fontWeight = if (!isClosing) FontWeight.Bold else FontWeight.Medium,
-                            color = if (!isClosing) IndBlue else IndTextSecondary
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(IndBlueLight),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.TrendingUp,
+                                contentDescription = "Day-Wise Closing Balance",
+                                tint = IndBlue,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "DAY-WISE CLOSING NET BALANCE",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = IndBlueDark,
+                                fontSize = 11.sp,
+                                letterSpacing = 0.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "$monthName $year daily liquidity tracking",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = IndTextSecondary,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    // Mode Toggle Chips (Closing Balance vs Daily Flow)
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = IndCardSecondary,
+                        modifier = Modifier.padding(2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val isClosing = graphMode == NetBalanceGraphMode.CLOSING_BALANCE
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isClosing) IndSurface else Color.Transparent)
+                                    .clickable { graphMode = NetBalanceGraphMode.CLOSING_BALANCE }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = "Balance",
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isClosing) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isClosing) IndBlue else IndTextSecondary,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (!isClosing) IndSurface else Color.Transparent)
+                                    .clickable { graphMode = NetBalanceGraphMode.DAILY_FLOW }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Text(
+                                        text = "Daily Flow",
+                                        fontSize = 10.sp,
+                                        fontWeight = if (!isClosing) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (!isClosing) IndBlue else IndTextSecondary,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // --- 2. Prominent Key Metric & Status ---
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                val labelText = if (scrubbedDayIndex != null) {
-                    "Closing Balance on ${currentInspectionPoint.dateLabel}"
-                } else if (rangeFilter == NetBalanceRangeFilter.MONTH_TO_DATE && isCurrentMonthAndYear) {
-                    "Current Closing Net Balance (Day $todayDay)"
-                } else {
-                    "Month-End Closing Net Balance"
-                }
-
-                Text(
-                    text = labelText,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = IndTextSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                val displayAmount = if (!isPrivacyVisible) {
-                    "$currencySymbol★★★★"
-                } else {
-                    formatCurrencyWithSymbol(currentInspectionPoint.closingNetBalance, currencySymbol)
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+        // --- 2. Prominent Key Metric & Status (Adaptive layout) ---
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val isNarrowMetricRow = maxWidth < 340.dp
+            if (isNarrowMetricRow) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val labelText = if (scrubbedDayIndex != null) {
+                        "Closing Balance on ${currentInspectionPoint.dateLabel}"
+                    } else if (rangeFilter == NetBalanceRangeFilter.MONTH_TO_DATE && isCurrentMonthAndYear) {
+                        "Current Closing Net Balance (Day $todayDay)"
+                    } else {
+                        "Month-End Closing Net Balance"
+                    }
+
                     Text(
-                        text = displayAmount,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = if (currentInspectionPoint.closingNetBalance >= 0) IndNavyHeader else IndRed,
+                        text = labelText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = IndTextSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (currentInspectionPoint.closingNetBalance >= 0) IndGreenLight else IndRedLight
+                    Spacer(modifier = Modifier.height(2.dp))
+                    val displayAmount = if (!isPrivacyVisible) {
+                        "$currencySymbol★★★★"
+                    } else {
+                        formatCurrencyWithSymbol(currentInspectionPoint.closingNetBalance, currencySymbol)
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = if (currentInspectionPoint.closingNetBalance >= 0) "SURPLUS" else "DEFICIT",
-                            fontSize = 9.sp,
+                            text = displayAmount,
+                            style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.ExtraBold,
-                            color = if (currentInspectionPoint.closingNetBalance >= 0) IndGreenDark else IndRedDark,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            color = if (currentInspectionPoint.closingNetBalance >= 0) IndNavyHeader else IndRed,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (currentInspectionPoint.closingNetBalance >= 0) IndGreenLight else IndRedLight
+                        ) {
+                            Text(
+                                text = if (currentInspectionPoint.closingNetBalance >= 0) "SURPLUS" else "DEFICIT",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (currentInspectionPoint.closingNetBalance >= 0) IndGreenDark else IndRedDark,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+
+                    // Range Selector Pills (MTD vs Full Month)
+                    if (isCurrentMonthAndYear) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = IndCardSecondary,
+                            border = BorderStroke(1.dp, IndBorder)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val isMtd = rangeFilter == NetBalanceRangeFilter.MONTH_TO_DATE
+                                Text(
+                                    text = "MTD (1–$todayDay)",
+                                    fontSize = 9.sp,
+                                    fontWeight = if (isMtd) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isMtd) Color.White else IndTextSecondary,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isMtd) IndBlue else Color.Transparent)
+                                        .clickable {
+                                            rangeFilter = NetBalanceRangeFilter.MONTH_TO_DATE
+                                            scrubbedDayIndex = null
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                                Text(
+                                    text = "Full ($daysInMonth d)",
+                                    fontSize = 9.sp,
+                                    fontWeight = if (!isMtd) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (!isMtd) Color.White else IndTextSecondary,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (!isMtd) IndBlue else Color.Transparent)
+                                        .clickable {
+                                            rangeFilter = NetBalanceRangeFilter.FULL_MONTH
+                                            scrubbedDayIndex = null
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
                     }
                 }
-            }
-
-            // Range Selector Pills (MTD vs Full Month)
-            if (isCurrentMonthAndYear) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = IndCardSecondary,
-                    border = BorderStroke(1.dp, IndBorder)
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
                 ) {
-                    Row(modifier = Modifier.padding(2.dp)) {
-                        val isMtd = rangeFilter == NetBalanceRangeFilter.MONTH_TO_DATE
+                    Column(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .padding(end = 8.dp)
+                    ) {
+                        val labelText = if (scrubbedDayIndex != null) {
+                            "Closing Balance on ${currentInspectionPoint.dateLabel}"
+                        } else if (rangeFilter == NetBalanceRangeFilter.MONTH_TO_DATE && isCurrentMonthAndYear) {
+                            "Current Closing Net Balance (Day $todayDay)"
+                        } else {
+                            "Month-End Closing Net Balance"
+                        }
+
                         Text(
-                            text = "MTD (1–$todayDay)",
-                            fontSize = 9.sp,
-                            fontWeight = if (isMtd) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isMtd) Color.White else IndTextSecondary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (isMtd) IndBlue else Color.Transparent)
-                                .clickable {
-                                    rangeFilter = NetBalanceRangeFilter.MONTH_TO_DATE
-                                    scrubbedDayIndex = null
-                                }
-                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                            text = labelText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = IndTextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
-                        Text(
-                            text = "Full ($daysInMonth d)",
-                            fontSize = 9.sp,
-                            fontWeight = if (!isMtd) FontWeight.Bold else FontWeight.Medium,
-                            color = if (!isMtd) Color.White else IndTextSecondary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (!isMtd) IndBlue else Color.Transparent)
-                                .clickable {
-                                    rangeFilter = NetBalanceRangeFilter.FULL_MONTH
-                                    scrubbedDayIndex = null
-                                }
-                                .padding(horizontal = 6.dp, vertical = 3.dp)
-                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        val displayAmount = if (!isPrivacyVisible) {
+                            "$currencySymbol★★★★"
+                        } else {
+                            formatCurrencyWithSymbol(currentInspectionPoint.closingNetBalance, currencySymbol)
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = displayAmount,
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (currentInspectionPoint.closingNetBalance >= 0) IndNavyHeader else IndRed,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (currentInspectionPoint.closingNetBalance >= 0) IndGreenLight else IndRedLight
+                            ) {
+                                Text(
+                                    text = if (currentInspectionPoint.closingNetBalance >= 0) "SURPLUS" else "DEFICIT",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (currentInspectionPoint.closingNetBalance >= 0) IndGreenDark else IndRedDark,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+                    }
+
+                    // Range Selector Pills (MTD vs Full Month)
+                    if (isCurrentMonthAndYear) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = IndCardSecondary,
+                            border = BorderStroke(1.dp, IndBorder)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val isMtd = rangeFilter == NetBalanceRangeFilter.MONTH_TO_DATE
+                                Text(
+                                    text = "MTD (1–$todayDay)",
+                                    fontSize = 9.sp,
+                                    fontWeight = if (isMtd) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isMtd) Color.White else IndTextSecondary,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isMtd) IndBlue else Color.Transparent)
+                                        .clickable {
+                                            rangeFilter = NetBalanceRangeFilter.MONTH_TO_DATE
+                                            scrubbedDayIndex = null
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                                Text(
+                                    text = "Full ($daysInMonth d)",
+                                    fontSize = 9.sp,
+                                    fontWeight = if (!isMtd) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (!isMtd) Color.White else IndTextSecondary,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (!isMtd) IndBlue else Color.Transparent)
+                                        .clickable {
+                                            rangeFilter = NetBalanceRangeFilter.FULL_MONTH
+                                            scrubbedDayIndex = null
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -418,10 +653,28 @@ fun DayWiseClosingNetBalanceChartCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column {
-                        Text("Month High", fontSize = 9.sp, color = IndTextMuted, fontWeight = FontWeight.SemiBold)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .padding(end = 4.dp)
+                    ) {
+                        Text(
+                            text = "Month High",
+                            fontSize = 9.sp,
+                            color = IndTextMuted,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
                         val highText = if (!isPrivacyVisible) "$currencySymbol★★★★" else formatCurrencyWithSymbol(peakPoint?.closingNetBalance ?: 0.0, currencySymbol)
-                        Text(highText, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndGreenDark)
+                        Text(
+                            text = highText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndGreenDark,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                     if (peakPoint != null) {
                         Surface(shape = RoundedCornerShape(4.dp), color = IndGreenLight) {
@@ -442,10 +695,28 @@ fun DayWiseClosingNetBalanceChartCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column {
-                        Text("Month Low", fontSize = 9.sp, color = IndTextMuted, fontWeight = FontWeight.SemiBold)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .padding(end = 4.dp)
+                    ) {
+                        Text(
+                            text = "Month Low",
+                            fontSize = 9.sp,
+                            color = IndTextMuted,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
                         val lowText = if (!isPrivacyVisible) "$currencySymbol★★★★" else formatCurrencyWithSymbol(lowPoint?.closingNetBalance ?: 0.0, currencySymbol)
-                        Text(lowText, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndRedDark)
+                        Text(
+                            text = lowText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndRedDark,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                     if (lowPoint != null) {
                         Surface(shape = RoundedCornerShape(4.dp), color = IndRedLight) {

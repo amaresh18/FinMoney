@@ -15,6 +15,11 @@ import com.google.firebase.auth.PhoneAuthCredential
 import com.google.firebase.auth.PhoneAuthOptions
 import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
 import java.util.concurrent.TimeUnit
@@ -32,6 +37,16 @@ object FinMoneyAuthService {
 
     @Volatile
     var lastForceResendingToken: PhoneAuthProvider.ForceResendingToken? = null
+
+    sealed interface AutoVerificationEvent {
+        data class Verified(val user: FirebaseUser) : AutoVerificationEvent
+        data class CodeReceived(val smsCode: String) : AutoVerificationEvent
+    }
+
+    val autoVerificationEvents = MutableSharedFlow<AutoVerificationEvent>(
+        extraBufferCapacity = 2,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
 
     data class PhoneOtpDispatchResult(
         val verificationId: String?,
@@ -66,18 +81,42 @@ object FinMoneyAuthService {
 
             val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
                 override fun onVerificationCompleted(credential: PhoneAuthCredential) {
-                    if (!cont.isActive) return
-                    val existing = auth.currentUser
-                    val task = if (existing != null && existing.phoneNumber.isNullOrBlank()) {
-                        existing.linkWithCredential(credential)
-                    } else {
-                        auth.signInWithCredential(credential)
+                    val code = credential.smsCode
+                    if (!code.isNullOrBlank()) {
+                        autoVerificationEvents.tryEmit(AutoVerificationEvent.CodeReceived(code))
                     }
-                    task.addOnCompleteListener { result ->
-                        if (result.isSuccessful) {
-                            completeOnce(Result.success(PhoneOtpDispatchResult(verificationId = null, instantSignIn = true)))
+
+                    if (cont.isActive) {
+                        val existing = auth.currentUser
+                        val task = if (existing != null && existing.phoneNumber.isNullOrBlank()) {
+                            existing.linkWithCredential(credential)
                         } else {
-                            completeOnce(Result.failure(result.exception ?: IllegalStateException("Phone sign-in failed")))
+                            auth.signInWithCredential(credential)
+                        }
+                        task.addOnCompleteListener { result ->
+                            if (result.isSuccessful) {
+                                completeOnce(Result.success(PhoneOtpDispatchResult(verificationId = null, instantSignIn = true)))
+                            } else {
+                                completeOnce(Result.failure(result.exception ?: IllegalStateException("Phone sign-in failed")))
+                            }
+                        }
+                    } else {
+                        // Continuation already completed (SMS arrived after onCodeSent!)
+                        CoroutineScope(Dispatchers.IO).launch {
+                            try {
+                                val existing = auth.currentUser
+                                val task = if (existing != null && existing.phoneNumber.isNullOrBlank()) {
+                                    existing.linkWithCredential(credential).await()
+                                } else {
+                                    auth.signInWithCredential(credential).await()
+                                }
+                                val user = task.user
+                                if (user != null) {
+                                    autoVerificationEvents.emit(AutoVerificationEvent.Verified(user))
+                                }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Background auto-verification sign-in error: ${e.message}")
+                            }
                         }
                     }
                 }
@@ -227,34 +266,37 @@ object FinMoneyAuthService {
         if (root == null) return "Could not send OTP. Please try again."
         if (isPhoneAuthQuotaError(root)) {
             return (
-                "SMS OTP limit reached for this Firebase project (daily quota). " +
-                    "Wait until the limit resets, upgrade billing in Firebase Console, or add your number under " +
-                    "Authentication → Sign-in method → Phone → Phone numbers for testing (fixed OTP, no SMS)."
-                )
+                "SMS OTP quota exceeded for this Firebase project. " +
+                    "To fix: Upgrade project to Blaze plan (10k free verifications/mo) or add your number under " +
+                    "Firebase Console → Authentication → Sign-in method → Phone → 'Phone numbers for testing' (code: 123456)."
+            )
         }
         val authEx = root as? FirebaseAuthException
         val core = when (authEx?.errorCode) {
             "ERROR_OPERATION_NOT_ALLOWED" -> (
-                "Firebase SMS provider is not active on this Firebase project. " +
-                    "Use \"Verify & Unlock Khaata Directly\" below to activate mobile access immediately."
-                )
+                "Firebase Phone provider is not enabled in Firebase Console. " +
+                    "Go to console.firebase.google.com → Authentication → Sign-in method → Phone → Enable and Save."
+            )
             "ERROR_INVALID_PHONE_NUMBER" -> "Enter a valid 10-digit Indian mobile number."
-            "ERROR_TOO_MANY_REQUESTS" -> "Too many OTP attempts. Please wait a few minutes or verify directly."
-            "ERROR_QUOTA_EXCEEDED" -> "SMS OTP limit reached for this Firebase project. Use direct verification below."
+            "ERROR_TOO_MANY_REQUESTS" -> "Too many OTP attempts from this device/number. Please wait a few minutes or verify directly."
+            "ERROR_QUOTA_EXCEEDED" -> (
+                "Firebase SMS quota exceeded. Add this phone number under Firebase Console → Phone → 'Phone numbers for testing' (code: 123456)."
+            )
             "ERROR_APP_NOT_AUTHORIZED" -> (
-                "App signing SHA is not registered for Firebase Phone SMS. Use direct verification below to activate immediately."
-                )
-            "ERROR_INVALID_API_KEY" -> "Firebase API key is invalid. Please rebuild or verify directly."
+                "App signing SHA fingerprint is missing in Firebase Console. " +
+                    "Open 'Troubleshoot Real SMS' below to copy your SHA-1 & SHA-256 and add them to Firebase Project Settings."
+            )
+            "ERROR_INVALID_API_KEY" -> "Firebase API key is invalid in google-services.json."
             else -> {
                 val msg = root.message.orEmpty()
                 when {
                     msg.contains("OPERATION_NOT_ALLOWED", ignoreCase = true) ||
                         msg.contains("sign-in provider is disabled", ignoreCase = true) -> (
-                        "Firebase SMS provider is not active on this project. Use direct verification below to activate immediately."
-                        )
+                        "Firebase Phone provider is not enabled. Go to Firebase Console → Authentication → Sign-in method → Phone → Enable."
+                    )
                     msg.contains("not authorized", ignoreCase = true) -> (
-                        "App not authorized for Firebase SMS. Use direct verification below to activate immediately."
-                        )
+                        "App is not authorized for Firebase SMS. Add your SHA-1 & SHA-256 in Firebase Console Project Settings."
+                    )
                     else -> root.localizedMessage?.takeIf { it.isNotBlank() }
                         ?: msg.ifBlank { "Could not send OTP. Please try again." }
                 }

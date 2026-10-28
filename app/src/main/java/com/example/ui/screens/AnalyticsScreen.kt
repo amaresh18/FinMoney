@@ -345,18 +345,33 @@ fun AnalyticsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    .padding(end = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
                                 CategoryIconBadge(
                                     categoryKey = cat.categoryName,
                                     storedIconName = categorySummaryStoredIcon(cat),
                                     customColor = customCategoryTint(cat.colorHex)
                                 )
                                 Column {
-                                    Text(cat.categoryName, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = IndTextPrimary)
+                                    Text(
+                                        text = cat.categoryName,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = IndTextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                     Text(
                                         text = "${cat.itemCount} items • ${cat.paidCount} paid • ${(categoryShare * 100).toInt()}% of outflow",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = IndTextSecondary
+                                        color = IndTextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -365,21 +380,27 @@ fun AnalyticsScreen(
                                     text = if (!isFinancialSafetyVisible) "$currencySymbol★★★★" else "$currencySymbol${"%,.0f".format(cat.totalAmount)}",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = IndNavyHeader
+                                    color = IndNavyHeader,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                                 if (cat.yetToPayAmount > 0) {
                                     Text(
                                         text = if (!isFinancialSafetyVisible) "★★★★ pending" else "$currencySymbol${"%,.0f".format(cat.yetToPayAmount)} pending",
                                         fontSize = 10.sp,
                                         color = IndRed,
-                                        fontWeight = FontWeight.SemiBold
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 } else {
                                     Text(
                                         text = "All Paid ✓",
                                         fontSize = 10.sp,
                                         color = IndGreenDark,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }
@@ -773,7 +794,7 @@ fun CategoryDrillDownDialog(
                                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
                                             Text(
-                                                text = "Due Day ${item.dueDateDay}",
+                                                text = "Transaction Date: Day ${item.dueDateDay}",
                                                 fontSize = 11.sp,
                                                 color = IndTextSecondary
                                             )

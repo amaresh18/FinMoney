@@ -207,43 +207,52 @@ fun MainScreen(
                 shadowElevation = 2.dp,
                 border = androidx.compose.foundation.BorderStroke(1.dp, IndBorderSubtle)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
                 ) {
-                    // Left: Brand Logo & Title
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = 840.dp)
+                            .statusBarsPadding()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        BrandLogo(
-                            name = "FinMoney",
-                            badgeSize = 32.dp
-                        )
-                        Column {
-                            Text(
-                                text = "FinMoney",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = IndNavyHeader
+                        // Left: Brand Logo & Title
+                        Row(
+                            modifier = Modifier.weight(1f, fill = false),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            BrandLogo(
+                                name = "FinMoney",
+                                badgeSize = 32.dp
                             )
-                            Text(
-                                text = FinMoneyViewModel.getMonthName(currentMonth) + " " + currentYear,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = IndTextSecondary
-                            )
+                            Column(modifier = Modifier.weight(1f, fill = false)) {
+                                Text(
+                                    text = "FinMoney",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndNavyHeader,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = FinMoneyViewModel.getMonthName(currentMonth) + " " + currentYear,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = IndTextSecondary,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
                         }
-                    }
-
-                    // Right: Actions
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                        // Right: Actions
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                         // Kubera AI Quick Action
                         IconButton(
                             onClick = {
@@ -361,6 +370,7 @@ fun MainScreen(
                         }
                     }
                 }
+                }
             }
             if (!isAutoExpenseTrackingReady) {
                 AutoExpenseTrackingHeaderStrip(
@@ -371,95 +381,145 @@ fun MainScreen(
             }
         },
         bottomBar = {
-            NavigationBar(
-                containerColor = IndSurface,
-                tonalElevation = 8.dp,
-                modifier = Modifier.border(1.dp, IndBorderSubtle, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(IndSurface),
+                contentAlignment = Alignment.Center
             ) {
-                NavigationBarItem(
-                    icon = {
-                        Icon(
-                            imageVector = if (selectedTab == 0) Icons.Filled.AccountBalanceWallet else Icons.Outlined.AccountBalanceWallet,
-                            contentDescription = "Dashboard"
+                NavigationBar(
+                    containerColor = IndSurface,
+                    tonalElevation = 8.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 840.dp)
+                        .border(1.dp, IndBorderSubtle, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                ) {
+                    NavigationBarItem(
+                        icon = {
+                            Icon(
+                                imageVector = if (selectedTab == 0) Icons.Filled.AccountBalanceWallet else Icons.Outlined.AccountBalanceWallet,
+                                contentDescription = "Dashboard"
+                            )
+                        },
+                        label = {
+                            Text(
+                                "Dashboard",
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                softWrap = false
+                            )
+                        },
+                        selected = selectedTab == 0 && !overlayObscuresMainContent && !showAnalytics,
+                        onClick = { navigateToTab(0) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = IndBlue,
+                            selectedTextColor = IndBlue,
+                            indicatorColor = IndBlueLight
                         )
-                    },
-                    label = { Text("Dashboard", style = MaterialTheme.typography.labelSmall) },
-                    selected = selectedTab == 0 && !overlayObscuresMainContent && !showAnalytics,
-                    onClick = { navigateToTab(0) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = IndBlue,
-                        selectedTextColor = IndBlue,
-                        indicatorColor = IndBlueLight
                     )
-                )
 
-                NavigationBarItem(
-                    icon = {
-                        Icon(
-                            imageVector = if (selectedTab == 1) Icons.Filled.SwapHoriz else Icons.Outlined.SwapHoriz,
-                            contentDescription = "Lent & Borrowed"
+                    NavigationBarItem(
+                        icon = {
+                            Icon(
+                                imageVector = if (selectedTab == 1) Icons.Filled.SwapHoriz else Icons.Outlined.SwapHoriz,
+                                contentDescription = "Lent & Borrowed"
+                            )
+                        },
+                        label = {
+                            Text(
+                                "Lent/Borrow",
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                softWrap = false
+                            )
+                        },
+                        selected = selectedTab == 1 && !overlayObscuresMainContent,
+                        onClick = { navigateToTab(1) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = IndBlue,
+                            selectedTextColor = IndBlue,
+                            indicatorColor = IndBlueLight
                         )
-                    },
-                    label = { Text("Lent/Borrowed", style = MaterialTheme.typography.labelSmall) },
-                    selected = selectedTab == 1 && !overlayObscuresMainContent,
-                    onClick = { navigateToTab(1) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = IndBlue,
-                        selectedTextColor = IndBlue,
-                        indicatorColor = IndBlueLight
                     )
-                )
 
-                NavigationBarItem(
-                    icon = {
-                        Icon(
-                            imageVector = if (selectedTab == 2) Icons.Filled.BarChart else Icons.Outlined.BarChart,
-                            contentDescription = "Analytics"
+                    NavigationBarItem(
+                        icon = {
+                            Icon(
+                                imageVector = if (selectedTab == 2) Icons.Filled.BarChart else Icons.Outlined.BarChart,
+                                contentDescription = "Analytics"
+                            )
+                        },
+                        label = {
+                            Text(
+                                "Analytics",
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                softWrap = false
+                            )
+                        },
+                        selected = selectedTab == 2 && !overlayObscuresMainContent,
+                        onClick = { navigateToTab(2) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = IndBlue,
+                            selectedTextColor = IndBlue,
+                            indicatorColor = IndBlueLight
                         )
-                    },
-                    label = { Text("Analytics", style = MaterialTheme.typography.labelSmall) },
-                    selected = selectedTab == 2 && !overlayObscuresMainContent,
-                    onClick = { navigateToTab(2) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = IndBlue,
-                        selectedTextColor = IndBlue,
-                        indicatorColor = IndBlueLight
                     )
-                )
 
-                NavigationBarItem(
-                    icon = {
-                        Icon(
-                            imageVector = if (selectedTab == 3) Icons.Filled.AccountBalance else Icons.Outlined.AccountBalance,
-                            contentDescription = "Reconcile"
+                    NavigationBarItem(
+                        icon = {
+                            Icon(
+                                imageVector = if (selectedTab == 3) Icons.Filled.AccountBalance else Icons.Outlined.AccountBalance,
+                                contentDescription = "Reconcile"
+                            )
+                        },
+                        label = {
+                            Text(
+                                "Reconcile",
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                softWrap = false
+                            )
+                        },
+                        selected = selectedTab == 3 && !overlayObscuresMainContent,
+                        onClick = { navigateToTab(3) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = IndBlue,
+                            selectedTextColor = IndBlue,
+                            indicatorColor = IndBlueLight
                         )
-                    },
-                    label = { Text("Reconcile", style = MaterialTheme.typography.labelSmall) },
-                    selected = selectedTab == 3 && !overlayObscuresMainContent,
-                    onClick = { navigateToTab(3) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = IndBlue,
-                        selectedTextColor = IndBlue,
-                        indicatorColor = IndBlueLight
                     )
-                )
 
-                NavigationBarItem(
-                    icon = {
-                        Icon(
-                            imageVector = if (selectedTab == 4 && !showKuberaAi) Icons.Filled.Person else Icons.Outlined.Person,
-                            contentDescription = "Profile & Settings"
+                    NavigationBarItem(
+                        icon = {
+                            Icon(
+                                imageVector = if (selectedTab == 4 && !showKuberaAi) Icons.Filled.Person else Icons.Outlined.Person,
+                                contentDescription = "Profile & Settings"
+                            )
+                        },
+                        label = {
+                            Text(
+                                "Profile",
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                softWrap = false
+                            )
+                        },
+                        selected = selectedTab == 4 && !overlayObscuresMainContent,
+                        onClick = { navigateToTab(4) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = IndBlue,
+                            selectedTextColor = IndBlue,
+                            indicatorColor = IndBlueLight
                         )
-                    },
-                    label = { Text("Profile", style = MaterialTheme.typography.labelSmall) },
-                    selected = selectedTab == 4 && !overlayObscuresMainContent,
-                    onClick = { navigateToTab(4) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = IndBlue,
-                        selectedTextColor = IndBlue,
-                        indicatorColor = IndBlueLight
                     )
-                )
+                }
             }
         },
 

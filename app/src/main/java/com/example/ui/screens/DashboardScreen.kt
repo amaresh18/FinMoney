@@ -286,7 +286,14 @@ fun DashboardScreen(
                             ) {
                                 Icon(Icons.Filled.CalendarMonth, null, tint = IndBlue, modifier = Modifier.size(16.dp))
                             }
-                            Text(dateHeaderLabel, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = IndNavyHeader)
+                            Text(
+                                dateHeaderLabel,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = IndNavyHeader,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
                         }
                         IconButton(onClick = { viewModel.previousMonth() }, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.Filled.ChevronLeft, "Prev", tint = IndTextSecondary, modifier = Modifier.size(20.dp))
@@ -304,25 +311,35 @@ fun DashboardScreen(
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        CompactMetric(
-                            "In",
-                            if (!isFinancialSafetyVisible) "★★★★" else "$currencySymbol${"%,.0f".format(summary.totalIncome)}",
-                            IndGreenDark,
-                            Icons.Filled.SouthWest
-                        ) { mainLedgerTab = "CREDITS" }
-                        CompactMetric(
-                            "Out",
-                            if (!isFinancialSafetyVisible) "★★★★" else "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
-                            IndRed,
-                            Icons.Filled.NorthEast
-                        ) { mainLedgerTab = "DEBITS" }
-                        CompactMetric(
-                            "Net",
-                            if (!isFinancialSafetyVisible) "★★★★" else "$currencySymbol${"%,.0f".format(summary.netFlexibleSpending)}",
-                            if (summary.netFlexibleSpending >= 0) IndNavyHeader else IndRed,
-                            Icons.Filled.Savings
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            CompactMetric(
+                                "In",
+                                if (!isFinancialSafetyVisible) "★★★★" else "$currencySymbol${"%,.0f".format(summary.totalIncome)}",
+                                IndGreenDark,
+                                Icons.Filled.SouthWest
+                            ) { mainLedgerTab = "CREDITS" }
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            CompactMetric(
+                                "Out",
+                                if (!isFinancialSafetyVisible) "★★★★" else "$currencySymbol${"%,.0f".format(summary.totalDebits)}",
+                                IndRed,
+                                Icons.Filled.NorthEast
+                            ) { mainLedgerTab = "DEBITS" }
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            CompactMetric(
+                                "Net",
+                                if (!isFinancialSafetyVisible) "★★★★" else "$currencySymbol${"%,.0f".format(summary.netFlexibleSpending)}",
+                                if (summary.netFlexibleSpending >= 0) IndNavyHeader else IndRed,
+                                Icons.Filled.Savings
+                            )
+                        }
                     }
                 }
             }
@@ -1353,7 +1370,7 @@ fun DebitItemCard(
                         ) {
                             val isCcItem = item.isActualCreditCardTransaction()
                             Text(
-                                text = "$categoryLabel • Due Day ${item.dueDateDay}" + if (isCcItem) " • 💳 CC" else "",
+                                text = "$categoryLabel • Transaction Date: Day ${item.dueDateDay}" + if (isCcItem) " • 💳 CC" else "",
                                 fontSize = 11.sp,
                                 color = if (isCcItem) Color(0xFF7C3AED) else IndTextSecondary
                             )
@@ -1603,14 +1620,29 @@ private fun CompactMetric(
 ) {
     Column(
         modifier = Modifier
+            .fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 4.dp)
+            .padding(horizontal = 2.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Icon(icon, null, tint = color, modifier = Modifier.size(12.dp))
-            Text(label, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = IndTextSecondary)
+            Text(
+                label,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = IndTextSecondary,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
         }
-        Text(value, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = color)
+        Text(
+            value,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = color,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
     }
 }
 

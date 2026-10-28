@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import com.example.MainActivity
+import com.example.cloud.CloudSyncPreferences
 import com.example.cloud.CloudUserContextResolver
 import com.example.cloud.LocalFirstCloudSync
 import com.example.cloud.UserCloudDataRepository
@@ -109,7 +110,31 @@ object LoanInviteService {
         if (phone.length != 10) return
         val items = cloud.listPhoneInbox(phone)
         for (item in items) {
-            val loan = loanFromPayload(item, me.userId) ?: continue
+            val inviteId = item["inviteId"]?.toString().orEmpty()
+            val isDeleted = item["isDeleted"] == true ||
+                item["actionType"] == "DELETE" ||
+                item["status"] == "REJECTED" ||
+                item["status"] == "DELETED"
+
+            val loan = loanFromPayload(item, me.userId)
+            val entryAmount = (item["entryAmount"] as? Number)?.toDouble() ?: 0.0
+            val entryCreatedAt = (item["entryCreatedAt"] as? Number)?.toLong() ?: 0L
+
+            if (isDeleted) {
+                if (loan != null && entryAmount > 0.0) {
+                    val existing = if (loan.cloudId.isNotBlank()) dao.getLoanByCloudId(loan.cloudId) else dao.getLoanById(loan.id)
+                    if (existing != null) {
+                        dao.deleteLedgerEntryByDetails(existing.id, entryAmount, entryCreatedAt)
+                    }
+                }
+                if (inviteId.isNotBlank()) {
+                    dao.deleteNotificationByRelated(loan?.id ?: 0L, 0L)
+                    cloud.deletePhoneInboxItem(phone, inviteId)
+                }
+                continue
+            }
+
+            if (loan == null) continue
             val existing = if (loan.cloudId.isNotBlank()) dao.getLoanByCloudId(loan.cloudId) else null
             val localLoan = if (existing == null) {
                 val id = dao.insertLoan(loan.copy(id = 0L, userId = me.userId))
@@ -133,13 +158,37 @@ object LoanInviteService {
             }
             val entry = entryFromPayload(item, localLoan.id, me.userId)
             if (entry != null) {
+                val rawEntryId = item["localEntryId"] ?: item["entryId"] ?: ""
+                val entryKeyAmount1 = "loan_${localLoan.cloudId.ifBlank { localLoan.id }}_entry_${entry.amount}_${entry.createdAt}"
+                val entryKeyAmount2 = "loan_${localLoan.id}_entry_${entry.amount}_${entry.createdAt}"
+                val entryKeyId1 = "loan_${localLoan.cloudId.ifBlank { localLoan.id }}_entry_${rawEntryId}"
+                val entryKeyId2 = "loan_${localLoan.id}_entry_${rawEntryId}"
+                val entryKeyId3 = "entry_${rawEntryId}"
+                val entryKeyId4 = "loan_entry_${localLoan.id}_${rawEntryId}"
+                val entryKeyId5 = "loan_entry_${localLoan.cloudId.ifBlank { localLoan.id }}_${rawEntryId}"
+
+                val isEntryDeleted = CloudSyncPreferences.isLedgerEntryDeleted(app, me.userId, entryKeyAmount1) ||
+                    CloudSyncPreferences.isLedgerEntryDeleted(app, me.userId, entryKeyAmount2) ||
+                    (rawEntryId.toString().isNotBlank() && (
+                        CloudSyncPreferences.isLedgerEntryDeleted(app, me.userId, entryKeyId1) ||
+                        CloudSyncPreferences.isLedgerEntryDeleted(app, me.userId, entryKeyId2) ||
+                        CloudSyncPreferences.isLedgerEntryDeleted(app, me.userId, entryKeyId3) ||
+                        CloudSyncPreferences.isLedgerEntryDeleted(app, me.userId, entryKeyId4) ||
+                        CloudSyncPreferences.isLedgerEntryDeleted(app, me.userId, entryKeyId5)
+                    ))
+
+                if (isEntryDeleted || entry.status == LoanApprovalStatus.REJECTED) {
+                    dao.deleteLedgerEntryByDetails(localLoan.id, entry.amount, entry.createdAt)
+                    if (inviteId.isNotBlank()) cloud.deletePhoneInboxItem(phone, inviteId)
+                    continue
+                }
+
                 val already = dao.listLedgerEntries(localLoan.id).any {
                     it.kind == entry.kind && kotlin.math.abs(it.amount - entry.amount) < 0.01 &&
                         kotlin.math.abs(it.createdAt - entry.createdAt) < 2_000
                 }
                 if (!already) dao.insertLedgerEntry(entry)
             }
-            val inviteId = item["inviteId"]?.toString().orEmpty()
             if (inviteId.isNotBlank() && dao.getNotificationByCloudId(inviteId) == null) {
                 dao.insertNotification(
                     AppNotification(
@@ -154,6 +203,52 @@ object LoanInviteService {
                         isRead = false
                     )
                 )
+            }
+        }
+    }
+
+    suspend fun deleteLedgerEntryInboxInvites(
+        context: Context,
+        loan: LoanTransaction,
+        entry: LoanLedgerEntry,
+        phones: List<String>
+    ) {
+        val cloudId = loan.cloudId
+        for (rawPhone in phones) {
+            val phone = LoanPartyAuth.phone10(rawPhone)
+            if (phone.length != 10) continue
+            try {
+                val items = cloud.listPhoneInbox(phone)
+                for (item in items) {
+                    val inviteId = item["inviteId"]?.toString().orEmpty()
+                    val itemLoanCloudId = item["loanCloudId"]?.toString().orEmpty()
+                    val entryAmount = (item["entryAmount"] as? Number)?.toDouble() ?: 0.0
+                    val entryCreatedAt = (item["entryCreatedAt"] as? Number)?.toLong() ?: 0L
+
+                    val matchesLoan = (cloudId.isNotBlank() && itemLoanCloudId == cloudId) ||
+                        (item["localLoanId"] == loan.id)
+                    val matchesEntry = (entry.id > 0 && inviteId.contains("_${entry.id}_")) ||
+                        (matchesLoan && kotlin.math.abs(entryAmount - entry.amount) < 0.01 &&
+                            (entryCreatedAt == 0L || kotlin.math.abs(entryCreatedAt - entry.createdAt) < 5_000))
+
+                    if (matchesEntry && inviteId.isNotBlank()) {
+                        val tombstone = mapOf<String, Any?>(
+                            "inviteId" to inviteId,
+                            "isDeleted" to true,
+                            "status" to "DELETED",
+                            "actionType" to "DELETE",
+                            "loanCloudId" to cloudId.ifBlank { "loan_${loan.id}" },
+                            "localLoanId" to loan.id,
+                            "entryAmount" to entry.amount,
+                            "entryCreatedAt" to entry.createdAt,
+                            "updatedAt" to System.currentTimeMillis()
+                        )
+                        cloud.writePhoneInbox(phone, inviteId, tombstone)
+                        cloud.deletePhoneInboxItem(phone, inviteId)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("LoanInviteService", "Failed to clean up inbox invite for phone $phone: ${e.message}")
             }
         }
     }

@@ -37,6 +37,33 @@ object FirebaseProjectDiagnostics {
             !key.startsWith("AIzaSyCiPlaceholder")
     }
 
+    data class CertificateFingerprints(
+        val sha1: String,
+        val sha256: String
+    )
+
+    fun getSigningFingerprints(context: Context): CertificateFingerprints? {
+        return try {
+            val pm = context.packageManager
+            val pkg = context.packageName
+            val signatures = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                val info = pm.getPackageInfo(pkg, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+                info.signingInfo?.apkContentsSigners
+            } else {
+                @Suppress("DEPRECATION")
+                val info = pm.getPackageInfo(pkg, android.content.pm.PackageManager.GET_SIGNATURES)
+                @Suppress("DEPRECATION")
+                info.signatures
+            }
+            val certBytes = signatures?.firstOrNull()?.toByteArray() ?: return null
+            val sha1 = java.security.MessageDigest.getInstance("SHA-1").digest(certBytes).joinToString(":") { "%02X".format(it) }
+            val sha256 = java.security.MessageDigest.getInstance("SHA-256").digest(certBytes).joinToString(":") { "%02X".format(it) }
+            CertificateFingerprints(sha1 = sha1, sha256 = sha256)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun rootCause(error: Throwable?): Throwable? {
         var current = error
         var depth = 0
