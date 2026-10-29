@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- Orange Background -->
+    <path
+        android:fillColor="#FF6D00"
+        android:pathData="M8,4h32a4,4 0 0,1 4,4v32a4,4 0 0,1 -4,4h-32a4,4 0 0,1 -4,-4v-32a4,4 0 0,1 4,-4z" />
+    <!-- White Letter O with Pulse Cross -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,10a14,14 0 1,0 14,14a14,14 0 0,0 -14,-14zM24,32a8,8 0 1,1 8,-8a8,8 0 0,1 -8,8z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M22,18h4v12h-4zM18,22h12v4h-12z" />
+</vector>

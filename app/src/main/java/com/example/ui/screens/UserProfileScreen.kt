@@ -733,6 +733,20 @@ fun UserProfileScreen(
                 }
             }
 
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "FinMoney v${com.example.BuildConfig.VERSION_NAME} (Build ${com.example.BuildConfig.VERSION_CODE})",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = IndTextMuted
+                )
+            }
+
             Spacer(modifier = Modifier.height(28.dp))
         }
     }

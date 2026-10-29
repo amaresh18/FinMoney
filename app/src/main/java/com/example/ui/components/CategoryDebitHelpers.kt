@@ -78,3 +78,17 @@ fun customCategoryForFilterKey(filterKey: String, customCategories: List<CustomC
     val name = filterKey.substring(CUSTOM_CATEGORY_FILTER_PREFIX.length)
     return customCategoryForName(name, customCategories)
 }
+
+fun debitRecencyMillis(item: DebitItem, month: Int, year: Int): Long {
+    val day = item.dueDateDay.coerceIn(1, 31)
+    return java.util.Calendar.getInstance().apply {
+        set(year, month - 1, day, 12, 0, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }.timeInMillis
+}
+
+fun compareDebitsByRecency(month: Int, year: Int): Comparator<DebitItem> =
+    compareByDescending<DebitItem> { debitRecencyMillis(it, month, year) }
+        .thenByDescending { if (it.createdAt > 0L) it.createdAt else it.id }
+        .thenByDescending { it.id }
+

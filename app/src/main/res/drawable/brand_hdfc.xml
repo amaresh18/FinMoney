@@ -1,0 +1,25 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- HDFC Red Square Background -->
+    <path
+        android:fillColor="#ED232A"
+        android:pathData="M6,6h36v36h-36z" />
+    <!-- White Inner Frame -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,12h24v24h-24z" />
+    <!-- Blue Center Cross -->
+    <path
+        android:fillColor="#004C8F"
+        android:pathData="M18,12h12v24h-12z" />
+    <path
+        android:fillColor="#004C8F"
+        android:pathData="M12,18h24v12h-24z" />
+    <!-- White Center Square -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M18,18h12v12h-12z" />
+</vector>

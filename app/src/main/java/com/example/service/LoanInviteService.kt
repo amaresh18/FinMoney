@@ -125,7 +125,16 @@ object LoanInviteService {
             val entryAmount = (item["entryAmount"] as? Number)?.toDouble() ?: 0.0
             val entryCreatedAt = (item["entryCreatedAt"] as? Number)?.toLong() ?: 0L
 
-            if (isDeleted) {
+            val loanCloudId = item["loanCloudId"]?.toString().orEmpty()
+            val localLoanId = (item["localLoanId"] as? Number)?.toLong() ?: 0L
+            val isLoanDeletedInPrefs = (loanCloudId.isNotBlank() && CloudSyncPreferences.isLoanDeleted(app, me.userId, loanCloudId)) ||
+                (localLoanId > 0 && CloudSyncPreferences.isLoanDeleted(app, me.userId, "loan_$localLoanId")) ||
+                (localLoanId > 0 && CloudSyncPreferences.isLoanDeleted(app, me.userId, localLoanId.toString())) ||
+                (loan != null && loan.cloudId.isNotBlank() && CloudSyncPreferences.isLoanDeleted(app, me.userId, loan.cloudId))
+
+            if (isDeleted || isLoanDeletedInPrefs) {
+                if (loanCloudId.isNotBlank()) dao.deleteLoanByCloudId(loanCloudId)
+                if (localLoanId > 0) dao.deleteLoanById(localLoanId)
                 if (loan != null && entryAmount > 0.0) {
                     val existing = if (loan.cloudId.isNotBlank()) dao.getLoanByCloudId(loan.cloudId) else dao.getLoanById(loan.id)
                     if (existing != null) {

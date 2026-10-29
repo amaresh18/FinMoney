@@ -692,16 +692,38 @@ fun ManageIncomeCreditDialog(
                     onRecurringChange = { isRecurringCredit = it }
                 )
 
-                TextButton(
-                    onClick = {
-                        editingSourceId = null
-                        title = ""
-                        amountStr = ""
-                        isRecurringCredit = false
-                    },
-                    modifier = Modifier.align(Alignment.End)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Cancel Edit", color = IndRed)
+                    OutlinedButton(
+                        onClick = {
+                            pendingDeleteCreditId = editingSourceId
+                            pendingDeleteCreditTitle = title
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = IndRed),
+                        border = BorderStroke(1.dp, IndRed.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.testTag("delete_income_source_button")
+                    ) {
+                        Icon(Icons.Filled.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Delete Income", color = IndRed, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    TextButton(
+                        onClick = {
+                            editingSourceId = null
+                            title = ""
+                            amountStr = ""
+                            isRecurringCredit = false
+                        }
+                    ) {
+                        Text("Cancel Edit", color = IndTextSecondary)
+                    }
                 }
             }
 

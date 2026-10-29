@@ -36,25 +36,25 @@ interface FinMoneyDao {
     suspend fun insertOrUpdateUserProfile(profile: UserProfile): Long
 
     // --- Salary Records ---
-    @Query("SELECT * FROM salary_records WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year ORDER BY id DESC LIMIT 1")
+    @Query("SELECT * FROM salary_records WHERE (:userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default') AND month = :month AND year = :year ORDER BY (CASE WHEN userId = :userId THEN 0 ELSE 1 END), id DESC LIMIT 1")
     fun getSalaryRecord(month: Int, year: Int, userId: String = ""): Flow<SalaryRecord?>
 
-    @Query("SELECT * FROM salary_records WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year ORDER BY id DESC LIMIT 1")
+    @Query("SELECT * FROM salary_records WHERE (:userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default') AND month = :month AND year = :year ORDER BY (CASE WHEN userId = :userId THEN 0 ELSE 1 END), id DESC LIMIT 1")
     suspend fun getSalaryRecordDirect(month: Int, year: Int, userId: String = ""): SalaryRecord?
 
-    @Query("SELECT * FROM salary_records WHERE (userId = :userId OR :userId = '') ORDER BY year DESC, month DESC")
+    @Query("SELECT * FROM salary_records WHERE (:userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default') ORDER BY year DESC, month DESC, id DESC")
     fun getAllSalaryRecords(userId: String = ""): Flow<List<SalaryRecord>>
 
-    @Query("SELECT * FROM salary_records WHERE (userId = :userId OR :userId = '') ORDER BY year DESC, month DESC")
+    @Query("SELECT * FROM salary_records WHERE (:userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default') ORDER BY year DESC, month DESC, id DESC")
     suspend fun getAllSalaryRecordsDirect(userId: String = ""): List<SalaryRecord>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateSalary(record: SalaryRecord): Long
 
-    @Query("DELETE FROM salary_records WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year")
+    @Query("DELETE FROM salary_records WHERE (:userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default') AND month = :month AND year = :year")
     suspend fun deleteSalary(month: Int, year: Int, userId: String = "")
 
-    @Query("DELETE FROM salary_records WHERE userId = :userId OR :userId = ''")
+    @Query("DELETE FROM salary_records WHERE userId = :userId OR :userId = '' OR userId = 'user_default'")
     suspend fun clearAllSalaryRecords(userId: String = "")
 
     @Query("SELECT COUNT(*) FROM debit_items WHERE userId = :userId OR :userId = ''")
@@ -62,10 +62,10 @@ interface FinMoneyDao {
 
 
     // --- Debit Items ---
-    @Query("SELECT * FROM debit_items WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year ORDER BY dueDateDay DESC, createdAt DESC, id DESC")
+    @Query("SELECT * FROM debit_items WHERE (:userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default') AND month = :month AND year = :year ORDER BY dueDateDay DESC, createdAt DESC, id DESC")
     fun getDebitsForMonth(month: Int, year: Int, userId: String = ""): Flow<List<DebitItem>>
 
-    @Query("SELECT * FROM debit_items WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year ORDER BY dueDateDay DESC, createdAt DESC, id DESC")
+    @Query("SELECT * FROM debit_items WHERE (:userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default') AND month = :month AND year = :year ORDER BY dueDateDay DESC, createdAt DESC, id DESC")
     suspend fun getDebitsForMonthDirect(month: Int, year: Int, userId: String = ""): List<DebitItem>
 
     @Query("SELECT * FROM debit_items WHERE id = :id LIMIT 1")
@@ -277,10 +277,10 @@ interface FinMoneyDao {
     suspend fun deleteNotificationByRelated(loanId: Long, referenceId: Long)
 
     // --- Monthly Reconciliations ---
-    @Query("SELECT * FROM monthly_reconciliations WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year ORDER BY id DESC LIMIT 1")
+    @Query("SELECT * FROM monthly_reconciliations WHERE (:userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default') AND month = :month AND year = :year ORDER BY (CASE WHEN userId = :userId THEN 0 ELSE 1 END), id DESC LIMIT 1")
     fun getReconciliationForMonth(month: Int, year: Int, userId: String = ""): Flow<MonthlyReconciliation?>
 
-    @Query("SELECT * FROM monthly_reconciliations WHERE (userId = :userId OR :userId = '') AND month = :month AND year = :year ORDER BY id DESC LIMIT 1")
+    @Query("SELECT * FROM monthly_reconciliations WHERE (:userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default') AND month = :month AND year = :year ORDER BY (CASE WHEN userId = :userId THEN 0 ELSE 1 END), id DESC LIMIT 1")
     suspend fun getReconciliationForMonthDirect(month: Int, year: Int, userId: String = ""): MonthlyReconciliation?
 
     @Query("SELECT * FROM monthly_reconciliations WHERE cloudId = :cloudId AND cloudId != '' LIMIT 1")

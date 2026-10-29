@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -234,12 +235,19 @@ fun DashboardScreen(
             .sortedByDescending { it.totalAmount } // Highest total amount at top for Group By view
     }
 
+    val debitsByDate = remember(filteredDebits, month, year) {
+        filteredDebits.groupBy { it.dueDateDay }
+            .entries
+            .sortedByDescending { it.key }
+            .map { it.key to it.value.sortedWith(compareDebitsByRecency(month, year)) }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = AppTheme.dimensions.screenHorizontal),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp)
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 88.dp)
     ) {
         item {
             var showCalendarPicker by remember { mutableStateOf(false) }
@@ -857,18 +865,64 @@ fun DashboardScreen(
                 }
             }
         } else {
-            items(filteredDebits, key = { it.id }) { item ->
-                DebitItemCard(
-                    item = item,
-                    currencySymbol = currencySymbol,
-                    onTogglePaid = { viewModel.toggleDebitPaid(item) },
-                    onToggleCreditCard = { viewModel.toggleDebitCreditCardStatus(item) },
-                    onToggleRecurring = { viewModel.toggleDebitRecurring(item) },
-                    onEdit = { editingDebitItem = item },
-                    onDelete = { expensePendingDelete = item },
-                    customCategories = customCategories,
-                    customExpenseTags = customExpenseTags
-                )
+            debitsByDate.forEach { (day, dayDebits) ->
+                item(key = "date_header_$day") {
+                    val dateStr = formatDayToDateString(day, month, year)
+                    val dayTotal = dayDebits.sumOf { it.amount }
+                    Surface(
+                        color = IndBackground,
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(0.5.dp, IndBorderSubtle),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp, bottom = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.CalendarToday,
+                                    contentDescription = null,
+                                    tint = IndBlue,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Transaction Date: Day $day ($dateStr)",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndNavyHeader
+                                )
+                            }
+                            Text(
+                                text = "$currencySymbol${"%,.0f".format(dayTotal)}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = IndNavyHeader
+                            )
+                        }
+                    }
+                }
+                items(dayDebits, key = { it.id }) { item ->
+                    DebitItemCard(
+                        item = item,
+                        currencySymbol = currencySymbol,
+                        onTogglePaid = { viewModel.toggleDebitPaid(item) },
+                        onToggleCreditCard = { viewModel.toggleDebitCreditCardStatus(item) },
+                        onToggleRecurring = { viewModel.toggleDebitRecurring(item) },
+                        onEdit = { editingDebitItem = item },
+                        onDelete = { expensePendingDelete = item },
+                        customCategories = customCategories,
+                        customExpenseTags = customExpenseTags
+                    )
+                }
             }
         }
     } else {
@@ -1258,6 +1312,10 @@ fun DashboardScreen(
                 batch.firstOrNull()?.let { viewModel.updateDebit(it) }
                 editingDebitItem = null
             },
+            onDeleteDebit = { itemToDelete ->
+                expensePendingDelete = itemToDelete
+                editingDebitItem = null
+            },
             onOpenAddCustomCategory = { rowId ->
                 pendingCustomCategoryRowId = rowId
                 showAddCustomCategoryDialog = true
@@ -1310,21 +1368,25 @@ fun DebitItemCard(
     onToggleCreditCard: () -> Unit,
     onToggleRecurring: () -> Unit = {},
     onEdit: () -> Unit,
-    onDelete: () -> Unit,
+    onDelete: () -> Unit = {},
     customCategories: List<com.example.data.model.CustomCategory> = emptyList(),
     customExpenseTags: List<com.example.data.model.CustomExpenseTag> = emptyList()
 ) {
     val categoryLabel = debitCategoryDisplayLabel(item)
     val subTitle = debitSubcategoryTitle(item)
     val isChit = item.category.equals("CHIT", ignoreCase = true) || item.title.contains("CHIT", ignoreCase = true)
-    val isLoan = com.example.ui.components.isLoanOrEmi(item.category) || item.principalAmount > 0.0
+    val isLoan = com.example.ui.components.isLoanOrEmi(item.category) || item.principalAmount > 0.0 || item.category.contains("EMI", ignoreCase = true)
+    val isCcItem = item.isActualCreditCardTransaction()
+    val displayTitle = subTitle?.let { primaryTagLabel(it) } ?: item.title.ifBlank { categoryLabel }
 
-    // Calculate Amortization Outstanding Balance for Loans
+    val paidMonths = if (item.isPaid) item.currentMonthTenure else (item.currentMonthTenure - 1).coerceAtLeast(0)
+
+    // Calculate Amortization Outstanding Balance for Loans/EMIs
     val outstandingBalance = remember(item.principalAmount, item.interestRate, item.totalTenureMonths, item.currentMonthTenure, item.isPaid) {
         if (item.principalAmount <= 0.0 || item.totalTenureMonths <= 0) return@remember 0.0
         val p = item.principalAmount
         val n = item.totalTenureMonths
-        val m = if (item.isPaid) item.currentMonthTenure else (item.currentMonthTenure - 1).coerceAtLeast(0)
+        val m = paidMonths
         val r = (item.interestRate / 12.0) / 100.0
 
         if (r > 0.0) {
@@ -1336,261 +1398,123 @@ fun DebitItemCard(
         }
     }
 
+    val subtitleText = remember(categoryLabel, isCcItem, item.isPaid, item.isRecurring, isChit, isLoan, paidMonths, item.currentMonthTenure, item.totalTenureMonths, outstandingBalance, currencySymbol) {
+        buildString {
+            val catPretty = prettyCategory(categoryLabel)
+            if (isLoan && item.totalTenureMonths > 0) {
+                append("Paid EMI: $paidMonths/${item.totalTenureMonths}")
+                if (outstandingBalance > 0.0) {
+                    append(" • O/S : ${formatShortAmount(outstandingBalance, currencySymbol)}")
+                }
+            } else if (isChit && item.totalTenureMonths > 0) {
+                append("Paid ${item.currentMonthTenure} out of ${item.totalTenureMonths}")
+            } else {
+                append(catPretty)
+            }
+            if (isCcItem) {
+                append(" • 💳 CC")
+            }
+            append(" • ")
+            append(if (item.isPaid) "🟢 Paid" else "⏳ Due")
+            if (item.isRecurring) {
+                append(" • 🔁 Recurring")
+            }
+        }
+    }
+
     IndCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onEdit() }
+            .testTag("debit_card_item_${item.id}"),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Left: Icon + Title & Subtitle details
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.weight(1f)
+                DebitExpenseLeadingBadge(
+                    item = item,
+                    customCategories = customCategories,
+                    customExpenseTags = customExpenseTags
+                )
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    DebitExpenseLeadingBadge(
-                        item = item,
-                        customCategories = customCategories,
-                        customExpenseTags = customExpenseTags
+                    Text(
+                        text = displayTitle,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = IndTextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    Column(modifier = Modifier.clickable { onEdit() }) {
-                        Text(
-                            text = subTitle?.let { primaryTagLabel(it) } ?: item.title.ifBlank { categoryLabel },
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = IndTextPrimary
-                        )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            val isCcItem = item.isActualCreditCardTransaction()
-                            Text(
-                                text = "$categoryLabel • Transaction Date: Day ${item.dueDateDay}" + if (isCcItem) " • 💳 CC" else "",
-                                fontSize = 11.sp,
-                                color = if (isCcItem) Color(0xFF7C3AED) else IndTextSecondary
-                            )
-                        }
-                    }
-                }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = "$currencySymbol${"%,.0f".format(item.amount)}",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = if (item.isPaid) IndGreenDark else IndRed
-                        )
-                    }
+                    Text(
+                        text = subtitleText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = IndTextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
 
-            // Render Special Chit / Loan Status Badges
-            if (isChit && item.totalTenureMonths > 0) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = Color(0xFFFEF3C7),
-                    border = BorderStroke(0.5.dp, Color(0xFFD97706))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(Icons.Filled.GroupWork, contentDescription = null, tint = Color(0xFFB45309), modifier = Modifier.size(12.dp))
-                        Text(
-                            text = "Chit Installment: Month ${item.currentMonthTenure} of ${item.totalTenureMonths}",
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFB45309)
-                        )
-                    }
-                }
-            }
+            Spacer(modifier = Modifier.width(6.dp))
 
-            if (isLoan && item.principalAmount > 0.0) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = Color(0xFFECFDF5),
-                    border = BorderStroke(0.5.dp, IndGreen)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(Icons.Filled.AccountBalance, contentDescription = null, tint = IndGreenDark, modifier = Modifier.size(12.dp))
-                        Text(
-                            text = "Outstanding Loan Balance: $currencySymbol${"%,.0f".format(outstandingBalance)}" +
-                                   if (item.totalTenureMonths > 0) " (Month ${item.currentMonthTenure}/${item.totalTenureMonths})" else "",
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = IndGreenDark
-                        )
-                    }
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    // Quick Recurring Toggle Button
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (item.isRecurring) Color(0xFFE0F2FE) else IndSurface,
-                        border = BorderStroke(0.5.dp, if (item.isRecurring) Color(0xFF0284C7) else IndBorder),
-                        modifier = Modifier
-                            .clickable(onClick = onToggleRecurring)
-                            .testTag("toggle_recurring_${item.id}")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Repeat,
-                                contentDescription = "Recurring Toggle",
-                                tint = if (item.isRecurring) Color(0xFF0284C7) else IndTextSecondary,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            if (item.isRecurring) {
-                                Text(
-                                    text = "Repeat",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0284C7)
-                                )
-                            }
-                        }
-                    }
-
-                    // Quick Credit Card Toggle Button
-                    val isCc = item.isActualCreditCardTransaction()
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (isCc) Color(0xFFEDE9FE) else IndSurface,
-                        border = BorderStroke(0.5.dp, if (isCc) Color(0xFF7C3AED) else IndBorder),
-                        modifier = Modifier
-                            .clickable(onClick = onToggleCreditCard)
-                            .testTag("toggle_cc_${item.id}")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.CreditCard,
-                                contentDescription = "CC Toggle",
-                                tint = if (isCc) Color(0xFF7C3AED) else IndTextSecondary,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Text(
-                                text = if (isCc) "CC" else "No CC",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isCc) Color(0xFF7C3AED) else IndTextSecondary
-                            )
-                        }
-                    }
-
-                    // Paid Radio / Toggle Button
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (item.isPaid) IndGreenLight else IndAmberLight,
-                        modifier = Modifier
-                            .clickable(onClick = onTogglePaid)
-                            .testTag("toggle_paid_${item.id}")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            RadioButton(
-                                selected = item.isPaid,
-                                onClick = onTogglePaid,
-                                colors = RadioButtonDefaults.colors(
-                                    selectedColor = IndGreenDark,
-                                    unselectedColor = Color(0xFFB45309)
-                                ),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = if (item.isPaid) "Paid" else "Yet to Pay",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (item.isPaid) IndGreenDark else Color(0xFFB45309)
-                            )
-                        }
-                    }
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    // Explicit Labeled Edit Chip
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFFEFF6FF),
-                        border = BorderStroke(0.5.dp, IndBlue),
-                        modifier = Modifier
-                            .clickable(onClick = onEdit)
-                            .testTag("edit_debit_chip_${item.id}")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Edit,
-                                contentDescription = "Edit",
-                                tint = IndBlue,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Text(
-                                text = "Edit",
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = IndBlue
-                            )
-                        }
-                    }
-
-                    // Delete Button
-                    IconButton(
-                        onClick = onDelete,
-                        modifier = Modifier.size(28.dp).testTag("delete_debit_${item.id}")
-                    ) {
-                        Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = IndTextMuted, modifier = Modifier.size(14.dp))
-                    }
-                }
-            }
+            // Right: Clean Amount Text
+            Text(
+                text = "-$currencySymbol${"%,.0f".format(item.amount)}",
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = if (item.isPaid) IndGreenDark else IndRed
+            )
         }
     }
 }
 
+private fun formatShortAmount(amount: Double, currencySymbol: String): String {
+    return when {
+        amount >= 10_000_000 -> "${currencySymbol}${"%.2f".format(amount / 10_000_000)}Cr"
+        amount >= 100_000 -> "${currencySymbol}${"%.2f".format(amount / 100_000)}L"
+        amount >= 1_000 -> "${currencySymbol}${"%.1f".format(amount / 1_000)}k"
+        else -> "${currencySymbol}${"%,.0f".format(amount)}"
+    }
+}
+
 private fun prettyCategory(raw: String): String {
+    val trimmed = raw.trim()
+    if (trimmed.equals("OTT", ignoreCase = true)) return "OTT"
+    if (trimmed.equals("EMI", ignoreCase = true)) return "EMI"
+    if (trimmed.equals("CC", ignoreCase = true)) return "CC"
     return raw.replace('_', ' ').lowercase().split(' ')
         .filter { it.isNotBlank() }
-        .joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }
+        .joinToString(" ") { word ->
+            when {
+                word.equals("ott", ignoreCase = true) -> "OTT"
+                word.equals("emi", ignoreCase = true) -> "EMI"
+                word.equals("cc", ignoreCase = true) -> "CC"
+                else -> word.replaceFirstChar { it.uppercase() }
+            }
+        }
+}
+
+private fun formatDayToDateString(day: Int, month: Int, year: Int): String {
+    val cal = java.util.Calendar.getInstance().apply {
+        set(year, month - 1, day.coerceIn(1, 31))
+    }
+    val sdf = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.ENGLISH)
+    return sdf.format(cal.time)
 }
 
 @Composable
@@ -1827,166 +1751,89 @@ fun CreditItemCard(
     onToggleReceived: () -> Unit,
     onToggleRecurring: () -> Unit = {},
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit = {}
 ) {
+    val subtitleText = remember(item.category, item.isReceived, item.isRecurring) {
+        buildString {
+            append(prettyCategory(item.category))
+            append(" • ")
+            append(if (item.isReceived) "🟢 Received ✓" else "⏳ Pending Inflow")
+            if (item.isRecurring) {
+                append(" • 🔁 Recurring")
+            }
+        }
+    }
+
     IndCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onEdit() }
+            .testTag("credit_card_item_${item.id}"),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Left: Icon + Title & Subtitle details
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    CategoryIconBadge(categoryKey = item.category)
-                    Column(modifier = Modifier.clickable { onEdit() }) {
-                        Text(item.title.ifBlank { item.name }, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = IndTextPrimary)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = item.category,
-                                fontSize = 11.sp,
-                                color = IndTextSecondary
-                            )
-                        }
-                    }
-                }
+                CategoryIconBadge(categoryKey = item.category)
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = "+$currencySymbol${"%,.0f".format(item.amount)}",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = Color(0xFF16A34A)
-                        )
-                    }
+                    Text(
+                        text = item.title.ifBlank { item.name },
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.5.sp,
+                        color = IndTextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Text(
+                        text = subtitleText,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = IndTextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
 
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Right: Clean Amount Text + Delete Action
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                Text(
+                    text = "+$currencySymbol${"%,.0f".format(item.amount)}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.5.sp,
+                    color = Color(0xFF16A34A)
+                )
+
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("delete_credit_item_${item.id}")
                 ) {
-                    // Received Radio / Toggle Button
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (item.isReceived) IndGreenLight else IndAmberLight,
-                        modifier = Modifier
-                            .clickable(onClick = onToggleReceived)
-                            .testTag("toggle_received_${item.id}")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            RadioButton(
-                                selected = item.isReceived,
-                                onClick = onToggleReceived,
-                                colors = RadioButtonDefaults.colors(
-                                    selectedColor = IndGreenDark,
-                                    unselectedColor = Color(0xFFB45309)
-                                ),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = if (item.isReceived) "Received ✓" else "Pending Inflow",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (item.isReceived) IndGreenDark else Color(0xFFB45309)
-                            )
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (item.isRecurring) IndGreenLight else IndSurface,
-                        border = BorderStroke(0.5.dp, if (item.isRecurring) IndGreen else IndBorder),
-                        modifier = Modifier
-                            .clickable(onClick = onToggleRecurring)
-                            .testTag("toggle_recurring_credit_${item.id}")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Repeat,
-                                contentDescription = "Recurring Toggle",
-                                tint = if (item.isRecurring) IndGreenDark else IndTextSecondary,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            if (item.isRecurring) {
-                                Text(
-                                    text = "Repeat",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = IndGreenDark
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    // Explicit Labeled Edit Chip
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFFEFF6FF),
-                        border = BorderStroke(0.5.dp, IndBlue),
-                        modifier = Modifier
-                            .clickable(onClick = onEdit)
-                            .testTag("edit_credit_chip_${item.id}")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Edit,
-                                contentDescription = "Edit",
-                                tint = IndBlue,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Text(
-                                text = "Edit",
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = IndBlue
-                            )
-                        }
-                    }
-
-                    // Delete Button
-                    IconButton(
-                        onClick = onDelete,
-                        modifier = Modifier.size(28.dp).testTag("delete_credit_${item.id}")
-                    ) {
-                        Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = IndTextMuted, modifier = Modifier.size(14.dp))
-                    }
+                    Icon(
+                        imageVector = Icons.Outlined.Delete,
+                        contentDescription = "Delete income source",
+                        tint = IndRed.copy(alpha = 0.85f),
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
         }

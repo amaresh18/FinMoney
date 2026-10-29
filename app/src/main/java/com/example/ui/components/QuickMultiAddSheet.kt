@@ -225,6 +225,7 @@ fun QuickMultiAddSheet(
     editingDebit: DebitItem? = null,
     onDismiss: () -> Unit,
     onSaveBatch: (List<DebitItem>) -> Unit,
+    onDeleteDebit: ((DebitItem) -> Unit)? = null,
     onOpenAddCustomCategory: (rowIdForSelection: String?) -> Unit = { _ -> },
     onSaveCustomExpenseTag: (name: String, iconName: String, colorHex: String) -> Unit = { _, _, _ -> }
 ) {
@@ -449,11 +450,25 @@ fun QuickMultiAddSheet(
                     }
                 }
 
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(Icons.Filled.Close, contentDescription = "Close", tint = IndTextMuted, modifier = Modifier.size(20.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (isEditMode && editingDebit != null && onDeleteDebit != null) {
+                        IconButton(
+                            onClick = {
+                                onDeleteDebit(editingDebit)
+                                onDismiss()
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Outlined.Delete, contentDescription = "Delete expense", tint = IndRed, modifier = Modifier.size(20.dp))
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close", tint = IndTextMuted, modifier = Modifier.size(20.dp))
+                    }
                 }
             }
 

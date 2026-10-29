@@ -34,7 +34,8 @@ fun IndCard(
     onClick: (() -> Unit)? = null,
     backgroundColor: Color = IndSurface,
     borderColor: Color = IndBorder,
-    shape: RoundedCornerShape = RoundedCornerShape(16.dp),
+    shape: RoundedCornerShape = RoundedCornerShape(12.dp),
+    contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
     content: @Composable ColumnScope.() -> Unit
 ) {
     val cardShape = RoundedCornerShape(AppTheme.dimensions.cardCornerRadius)
@@ -55,7 +56,7 @@ fun IndCard(
         shadowElevation = 1.dp
     ) {
         Column(
-            modifier = Modifier.padding(AppTheme.dimensions.cardPadding),
+            modifier = Modifier.padding(contentPadding),
             content = content
         )
     }

@@ -473,6 +473,24 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             return "Matches banking alert / reminder pattern"
         }
 
+        // 11. Stock Market, IPO News & Corporate Financial / Earnings Reports
+        if (lower.contains("ipo open") || lower.contains("ipo opens") || lower.contains("ipo news") ||
+            lower.contains("issue size") || lower.contains("price range") || lower.contains("price band") ||
+            lower.contains("gmp") || lower.contains("bidding opens") || lower.contains("subscription opens") ||
+            lower.contains("allotment status") || lower.contains("profit soars") || lower.contains("net profit") ||
+            lower.contains("profit rises") || lower.contains("revenue rises") || lower.contains("revenue grows") ||
+            lower.contains("q1 profit") || lower.contains("q2 profit") || lower.contains("q3 profit") || lower.contains("q4 profit") ||
+            lower.contains("q1 results") || lower.contains("q2 results") || lower.contains("q3 results") || lower.contains("q4 results") ||
+            lower.contains("financial results") || lower.contains("earnings report") || lower.contains("share price") ||
+            lower.contains("stock price") || lower.contains("sensex") || lower.contains("nifty")) {
+            val isActualDematDebitCredit = lower.contains("debited for ipo") || lower.contains("amount blocked") ||
+                lower.contains("upi mandate created for ipo") || lower.contains("ipo allotment debited") ||
+                lower.contains("dividend credited") || lower.contains("credited for dividend")
+            if (!isActualDematDebitCredit) {
+                return "Matches stock market/IPO news or corporate earnings report"
+            }
+        }
+
         val hasExplicitVerb = NotificationTransactionGate.hasExplicitTransactionVerb(lower)
         val hasRefHint = lower.contains("utr") || lower.contains("txn id") || lower.contains("transaction id") ||
             lower.contains("ref no") || lower.contains("reference no") || lower.contains("rrn")

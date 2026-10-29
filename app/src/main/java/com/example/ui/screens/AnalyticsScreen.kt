@@ -429,6 +429,7 @@ fun AnalyticsScreen(
             debitItems = matchingDebits,
             monthName = monthName,
             year = year,
+            month = month,
             currencySymbol = currencySymbol,
             onDismiss = { selectedCategoryForDrillDown = null },
             onEditItem = null,
@@ -636,6 +637,7 @@ fun CategoryDrillDownDialog(
     debitItems: List<DebitItem>,
     monthName: String,
     year: Int,
+    month: Int = 10,
     currencySymbol: String,
     onDismiss: () -> Unit,
     onEditItem: ((DebitItem) -> Unit)? = null,
@@ -650,13 +652,13 @@ fun CategoryDrillDownDialog(
     val livePaidAmount = remember(debitItems) { debitItems.filter { it.isPaid }.sumOf { it.amount } }
     val livePendingAmount = remember(liveTotalAmount, livePaidAmount) { (liveTotalAmount - livePaidAmount).coerceAtLeast(0.0) }
 
-    val filteredItems = remember(debitItems, filterMode) {
+    val filteredItems = remember(debitItems, filterMode, month, year) {
         val list = when (filterMode) {
             "PAID" -> debitItems.filter { it.isPaid }
             "PENDING" -> debitItems.filter { !it.isPaid }
             else -> debitItems
         }
-        list.sortedWith(compareByDescending<DebitItem> { it.createdAt }.thenByDescending { it.id })
+        list.sortedWith(compareDebitsByRecency(month, year))
     }
 
     Dialog(onDismissRequest = onDismiss) {

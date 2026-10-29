@@ -368,15 +368,33 @@ object BankTransactionParser {
             // Health & Pharmacy
             CategoryRule(
                 categoryKey = DebitCategory.PHARMACY.name,
-                displayName = "Pharmacy & Health",
+                displayName = "Pharmacy & Medicines",
                 merchantKeywords = listOf(
                     "apollo", "apollo pharmacy", "1mg", "tata 1mg", "pharmeasy", "netmeds", "medplus",
-                    "practo", "truemeds", "max healthcare", "fortis", "manipal"
+                    "med plus", "truemeds", "orange health", "orange pharmacy", "wellness forever",
+                    "guardian pharmacy", "practo"
                 ),
                 textKeywords = listOf(
-                    "pharmacy", "chemist", "medicine", "meds", "hospital", "clinic", "doctor", "diagnostics", "lab", "pathology", "scan", "health"
+                    "pharmacy", "chemist", "medicine", "meds", "druggist", "pharma", "prescription"
                 ),
                 priority = 18
+            ),
+
+            // Hospitals & Healthcare
+            CategoryRule(
+                categoryKey = DebitCategory.HOSPITAL.name,
+                displayName = "Hospital & Healthcare",
+                merchantKeywords = listOf(
+                    "apollo hospital", "apollo hospitals", "fortis", "max healthcare", "manipal hospital",
+                    "manipal", "narayana health", "narayana hrudayalaya", "aster dm", "aster hospital",
+                    "kims hospital", "kims", "yashoda hospital", "yashoda", "medanta", "columbia asia",
+                    "rainbow hospital", "cloudnine", "care hospital", "sims hospital"
+                ),
+                textKeywords = listOf(
+                    "hospital", "healthcare", "nursing home", "clinic", "inpatient", "outpatient",
+                    "opd", "ipd", "surgery", "icu", "maternity", "doctor fee"
+                ),
+                priority = 19
             ),
 
             // Investment & Savings
@@ -489,7 +507,23 @@ object BankTransactionParser {
             val lowerText = rawText.lowercase()
             val lowerTitle = title.lowercase()
             val lowerMerchant = merchantName.lowercase()
-            val combined = "$lowerTitle $lowerMerchant $lowerText"
+
+            val isRechargeContext = MerchantEnrichmentEngine.isTelecomRechargeOrBillContext(rawText) ||
+                MerchantEnrichmentEngine.telecomBrandFromPayee(merchantName) != null
+
+            val safeText = if (!isRechargeContext) {
+                lowerText.replace("airtel", "").replace("jio", "").replace("vodafone", "").replace("idea", "")
+            } else {
+                lowerText
+            }
+
+            val safeTitle = if (!isRechargeContext && MerchantEnrichmentEngine.isCarrierNotificationTitle(title)) {
+                ""
+            } else {
+                lowerTitle
+            }
+
+            val combined = "$safeTitle $lowerMerchant $safeText"
 
             var bestRule: CategoryRule? = null
             var bestScore = 0

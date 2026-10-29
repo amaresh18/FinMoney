@@ -177,7 +177,12 @@ object CloudAccountRestore {
         val loanDocs = cloud.listUserSubcollection(uid, "loans")
         for ((docId, data) in loanDocs) {
             val cloudId = str(data["cloudId"]).ifBlank { docId }
-            val isDeleted = bool(data["isDeleted"]) || str(data["actionType"]) == "DELETE" || docId in pendingDeletedDocIds || cloudId in pendingDeletedDocIds
+            val isDeleted = bool(data["isDeleted"]) ||
+                str(data["actionType"]) == "DELETE" ||
+                docId in pendingDeletedDocIds ||
+                cloudId in pendingDeletedDocIds ||
+                CloudSyncPreferences.isLoanDeleted(context, uid, docId) ||
+                CloudSyncPreferences.isLoanDeleted(context, uid, cloudId)
             if (isDeleted) {
                 dao.deleteLoanByCloudId(cloudId)
                 continue

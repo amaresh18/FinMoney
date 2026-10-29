@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- Netmeds Teal Background -->
+    <path
+        android:fillColor="#00A88F"
+        android:pathData="M8,4h32a4,4 0 0,1 4,4v32a4,4 0 0,1 -4,4h-32a4,4 0 0,1 -4,-4v-32a4,4 0 0,1 4,-4z" />
+    <!-- White Capsule Pill -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M16,14c-4.4,0 -8,3.6 -8,8s3.6,8 8,8h16c4.4,0 8,-3.6 8,-8s-3.6,-8 -8,-8z" />
+    <path
+        android:fillColor="#00A88F"
+        android:pathData="M24,14h8c4.4,0 8,3.6 8,8s-3.6,8 -8,8h-8z" />
+</vector>

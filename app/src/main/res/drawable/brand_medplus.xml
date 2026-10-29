@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- MedPlus Red Rounded Square -->
+    <path
+        android:fillColor="#C2185B"
+        android:pathData="M8,4h32a4,4 0 0,1 4,4v32a4,4 0 0,1 -4,4h-32a4,4 0 0,1 -4,-4v-32a4,4 0 0,1 4,-4z" />
+    <!-- White Medical Cross -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M20,12h8v8h8v8h-8v8h-8v-8h-8v-8h8z" />
+</vector>

@@ -101,6 +101,26 @@ val knownExpenseTags: List<KnownExpenseTag> = listOf(
     tag("apollo", "Apollo Pharmacy", R.drawable.brand_apollo, listOf("apollo 247", "apollo pharmacy")),
     tag("byjus", "BYJU'S", R.drawable.brand_byjus, listOf("byju")),
     tag("unacademy", "Unacademy", R.drawable.brand_unacademy),
+    tag("hdfc", "HDFC Bank", R.drawable.brand_hdfc, listOf("hdfc bank", "hdfc bank loan", "hdfc credit card", "hdfc emi"), bg = "#EFF6FF"),
+    tag("sbi", "State Bank of India", R.drawable.brand_sbi, listOf("sbi", "sbi bank", "sbi loan", "state bank of india", "sbi card"), bg = "#E0F2FE"),
+    tag("icici", "ICICI Bank", R.drawable.brand_icici, listOf("icici", "icici bank", "icici loan", "icici bank emi"), bg = "#FFF7ED"),
+    tag("axis", "Axis Bank", R.drawable.brand_axis, listOf("axis", "axis bank", "axis bank loan", "axis emi"), bg = "#FDF2F8"),
+    tag("kotak", "Kotak Mahindra Bank", R.drawable.brand_kotak, listOf("kotak", "kotak bank", "kotak loan"), bg = "#FEF2F2"),
+    tag("bajaj", "Bajaj Finserv", R.drawable.brand_bajaj, listOf("bajaj", "bajaj finserv", "bajaj finance"), bg = "#F0F9FF"),
+    tag("medplus", "MedPlus", R.drawable.brand_medplus, listOf("med plus", "optival health")),
+    tag("netmeds", "Netmeds", R.drawable.brand_netmeds, listOf("net meds")),
+    tag("orange_health", "Orange Health", R.drawable.brand_orange, listOf("orange health", "orange pharmacy")),
+    tag("wellness_forever", "Wellness Forever", R.drawable.brand_medplus, listOf("wellness forever")),
+    tag("apollo_hospitals", "Apollo Hospitals", R.drawable.brand_apollo, listOf("apollo hospital", "apollo hospitals")),
+    tag("fortis", "Fortis Hospital", R.drawable.brand_fortis, listOf("fortis", "fortis healthcare")),
+    tag("max_healthcare", "Max Healthcare", R.drawable.brand_max, listOf("max hospital", "max healthcare")),
+    tag("manipal", "Manipal Hospital", R.drawable.brand_manipal, listOf("manipal", "manipal hospital")),
+    tag("narayana_health", "Narayana Health", R.drawable.brand_manipal, listOf("narayana hrudayalaya", "narayana health")),
+    tag("kims", "KIMS Hospital", R.drawable.brand_fortis, listOf("kims hospital", "kims")),
+    tag("yashoda", "Yashoda Hospital", R.drawable.brand_manipal, listOf("yashoda hospital", "yashoda")),
+    tag("medanta", "Medanta", R.drawable.brand_max, listOf("medanta hospital", "medanta")),
+    tag("rainbow", "Rainbow Children's Hospital", R.drawable.brand_manipal, listOf("rainbow hospital")),
+    tag("cloudnine", "Cloudnine Hospital", R.drawable.brand_manipal, listOf("cloudnine")),
 )
 
 private val tagById = knownExpenseTags.associateBy { it.id }
@@ -126,10 +146,18 @@ val expenseTagsByDebitCategory: Map<String, List<String>> = mapOf(
     DebitCategory.OTT.name to listOf(
         "netflix", "prime_video", "hotstar", "sonyliv", "spotify", "youtube"
     ),
+    DebitCategory.EMI.name to listOf(
+        "hdfc", "sbi", "icici", "axis", "kotak", "bajaj", "cred", "paytm", "phonepe"
+    ),
     DebitCategory.RECHARGE.name to listOf("jio", "airtel", "vi", "bsnl"),
     DebitCategory.INTERNET.name to listOf("jio", "airtel", "vi", "bsnl"),
     DebitCategory.ELECTRICITY.name to listOf("paytm", "phonepe", "googlepay"),
-    DebitCategory.PHARMACY.name to listOf("pharmeasy", "tata_1mg", "apollo"),
+    DebitCategory.PHARMACY.name to listOf(
+        "apollo", "medplus", "tata_1mg", "pharmeasy", "netmeds", "orange_health", "wellness_forever"
+    ),
+    DebitCategory.HOSPITAL.name to listOf(
+        "apollo_hospitals", "fortis", "max_healthcare", "manipal", "narayana_health", "kims", "yashoda", "medanta", "rainbow", "cloudnine"
+    ),
     DebitCategory.SCHOOL_FEES.name to listOf("byjus", "unacademy"),
     DebitCategory.HOSTEL_FEES.name to listOf("byjus", "unacademy"),
     DebitCategory.GENERAL.name to listOf("amazon", "flipkart", "phonepe", "paytm", "googlepay", "cred"),

@@ -38,7 +38,7 @@ class AuthAndBiometricTest {
     fun testPhoneAuthErrorMessage_operationNotAllowed() {
         val fakeEx = RuntimeException("OPERATION_NOT_ALLOWED: Phone OTP is disabled")
         val message = FinMoneyAuthService.userMessageForPhoneAuthError(fakeEx)
-        assertTrue(message.contains("SHA-1") || message.contains("Google Sign-In") || message.contains("123456"))
+        assertTrue(message.contains("Firebase Phone provider is not enabled") || message.contains("Firebase Console") || message.contains("Sign-in method"))
     }
 
     @Test

@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- Kotak Red Square Background -->
+    <path
+        android:fillColor="#ED1C24"
+        android:pathData="M8,4h32a4,4 0 0,1 4,4v32a4,4 0 0,1 -4,4h-32a4,4 0 0,1 -4,-4v-32a4,4 0 0,1 4,-4z" />
+    <!-- White Kotak Infinite Ribbon Symbol -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M14,14h6v20h-6zM22,14l12,10l-12,10z" />
+    <path
+        android:fillColor="#003366"
+        android:pathData="M24,20h10v8h-10z" />
+</vector>

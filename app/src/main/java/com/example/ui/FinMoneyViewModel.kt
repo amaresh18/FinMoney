@@ -1302,7 +1302,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         val activeUid = getActiveUserId()
         val newJson = FinMoneyRepository.encodeIncomeSources(sources)
         val salaryItem = sources.find { it.category == "SALARY" || it.id == "1" }
-        val newBase = overrideBaseSalary ?: salaryItem?.amount ?: (existing?.baseSalary ?: 0.0)
+        val newBase = overrideBaseSalary ?: salaryItem?.amount ?: 0.0
         val newAdditional = sources.filter { it.category != "SALARY" && it.id != "1" }.sumOf { it.amount }
 
         val updatedRecord = if (existing != null) {
@@ -1474,10 +1474,13 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         launchSafe {
             val activeUid = getActiveUserId()
             val existing = dao.getSalaryRecordDirect(m, y, activeUid)
+                ?: dao.getSalaryRecordDirect(m, y, "")
+                ?: dao.getSalaryRecordDirect(m, y, "user_default")
             val currentSources = getOrCreateIncomeSources(existing)
             val removed = currentSources.removeAll { it.id == id }
             if (removed) {
                 saveUpdatedIncomeSources(existing, currentSources, m, y)
+                notifyUser("✓ Income entry deleted.")
             }
         }
     }
@@ -1907,7 +1910,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 currentStatus = loan.status
             )
             when (check) {
-                is ValidationResult.Valid -> repository.deleteLoanById(loanId)
+                is ValidationResult.Valid -> deleteLoan(loanId)
                 is ValidationResult.Denied -> _loanActionMessage.emit(check.reason)
             }
         }
@@ -1916,6 +1919,29 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     fun deleteLoan(id: Long) {
         launchSafe {
             val loan = dao.getLoanById(id)
+            val activeUid = getActiveUserId()
+            if (loan != null) {
+                if (loan.cloudId.isNotBlank()) {
+                    CloudSyncPreferences.markLoanDeleted(app, activeUid, loan.cloudId)
+                }
+                CloudSyncPreferences.markLoanDeleted(app, activeUid, "loan_${loan.id}")
+                CloudSyncPreferences.markLoanDeleted(app, activeUid, loan.id.toString())
+
+                val entries = dao.listLedgerEntries(id)
+                for (entry in entries) {
+                    val loanCid = loan.cloudId.ifBlank { "loan_${loan.id}" }
+                    val keysToMark = listOf(
+                        "loan_${loanCid}_entry_${entry.id}",
+                        "loan_${loan.id}_entry_${entry.id}",
+                        "loan_${loanCid}_entry_${entry.amount}_${entry.createdAt}",
+                        "loan_${loan.id}_entry_${entry.amount}_${entry.createdAt}",
+                        "entry_${entry.id}",
+                        "loan_entry_${loan.id}_${entry.id}",
+                        "loan_entry_${loanCid}_${entry.id}"
+                    )
+                    keysToMark.forEach { k -> CloudSyncPreferences.markLedgerEntryDeleted(app, activeUid, k) }
+                }
+            }
             dao.deleteLedgerEntriesByLoanId(id)
             repository.deleteLoanById(id)
             if (loan != null) {
@@ -2032,6 +2058,21 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             dao.updateLedgerEntry(
                 entry.copy(status = LoanApprovalStatus.REJECTED, updatedAt = System.currentTimeMillis())
             )
+            val activeUid = getActiveUserId()
+            val loanCid = loan.cloudId.ifBlank { "loan_${loan.id}" }
+            val keysToMark = listOf(
+                "loan_${loanCid}_entry_${entry.id}",
+                "loan_${loan.id}_entry_${entry.id}",
+                "loan_${loanCid}_entry_${entry.amount}_${entry.createdAt}",
+                "loan_${loan.id}_entry_${entry.amount}_${entry.createdAt}",
+                "entry_${entry.id}",
+                "loan_entry_${loan.id}_${entry.id}",
+                "loan_entry_${loanCid}_${entry.id}"
+            )
+            keysToMark.forEach { k -> CloudSyncPreferences.markLedgerEntryDeleted(app, activeUid, k) }
+
+            queueCloudAfterLocal { user -> LocalFirstCloudSync.queueLedgerEntryDeletion(app, user, entry) }
+
             val myPhone = currentUserPhone10()
             val otherPhone = LoanPartyAuth.phone10(loan.personContact.ifBlank { loan.counterpartyContact })
             launchSafe(Dispatchers.IO) {

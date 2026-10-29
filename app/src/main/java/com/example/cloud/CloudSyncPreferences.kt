@@ -104,4 +104,30 @@ object CloudSyncPreferences {
             prefs.edit().putStringSet("deleted_ledger_entries_$userId", current).apply()
         }
     }
+
+    // --- Deleted Loans Tracking ---
+    fun isLoanDeleted(context: Context, userId: String, loanKey: String): Boolean {
+        if (userId.isBlank() || loanKey.isBlank()) return false
+        val set = context.applicationContext
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getStringSet("deleted_loans_$userId", emptySet()) ?: emptySet()
+        return set.contains(loanKey.trim().lowercase())
+    }
+
+    fun markLoanDeleted(context: Context, userId: String, loanKey: String) {
+        if (userId.isBlank() || loanKey.isBlank()) return
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val current = prefs.getStringSet("deleted_loans_$userId", emptySet())?.toMutableSet() ?: mutableSetOf()
+        current.add(loanKey.trim().lowercase())
+        prefs.edit().putStringSet("deleted_loans_$userId", current).apply()
+    }
+
+    fun unmarkLoanDeleted(context: Context, userId: String, loanKey: String) {
+        if (userId.isBlank() || loanKey.isBlank()) return
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val current = prefs.getStringSet("deleted_loans_$userId", emptySet())?.toMutableSet() ?: return
+        if (current.remove(loanKey.trim().lowercase())) {
+            prefs.edit().putStringSet("deleted_loans_$userId", current).apply()
+        }
+    }
 }

@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- SBI Blue Circle -->
+    <path
+        android:fillColor="#00A3E0"
+        android:pathData="M24,4A20,20 0 1,0 44,24 20,20 0 0,0 24,4z" />
+    <!-- White Inner Circle Cutout -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,14A10,10 0 1,0 34,24 10,10 0 0,0 24,14z" />
+    <!-- White Keyhole Slot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M22,24h4v16h-4z" />
+</vector>

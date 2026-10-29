@@ -489,7 +489,8 @@ object BankSyncManager {
         val tx = findBankTransaction(dao, txId, cloudId, fingerprint)
             ?: return "Transaction record not found."
 
-        val cal = Calendar.getInstance().apply { timeInMillis = tx.timestamp }
+        val txTs = if (tx.timestamp > 0L) tx.timestamp else System.currentTimeMillis()
+        val cal = Calendar.getInstance().apply { timeInMillis = txTs }
         val txMonth = cal.get(Calendar.MONTH) + 1
         val txYear = cal.get(Calendar.YEAR)
         val txDay = cal.get(Calendar.DAY_OF_MONTH)
@@ -497,14 +498,14 @@ object BankSyncManager {
 
         val cloudUser = CloudUserContextResolver.resolve(dao)
         val ownerId = cloudUser.userId.ifBlank { tx.userId }
-        val updatedTx = tx.copy(isConfirmed = true, status = "APPROVED", userId = ownerId)
+        val updatedTx = tx.copy(isConfirmed = true, status = "APPROVED", userId = ownerId, timestamp = txTs)
         val ledgerToken = "bankTx:${if (tx.cloudId.isNotBlank()) tx.cloudId else tx.id}"
 
-        val resultMsg: String
-        if (isCreditType(tx.type)) {
-            resultMsg = createIncomeFromApprovedTx(dao, updatedTx, ownerId, txMonth, txYear, monthYear, customCategory, ledgerToken)
+        val isCredit = isCreditTransaction(updatedTx)
+        val resultMsg: String = if (isCredit) {
+            createIncomeFromApprovedTx(dao, updatedTx, ownerId, txMonth, txYear, monthYear, customCategory, ledgerToken)
         } else {
-            resultMsg = createExpenseFromApprovedTx(
+            createExpenseFromApprovedTx(
                 dao = dao,
                 tx = updatedTx,
                 ownerId = ownerId,
@@ -599,7 +600,18 @@ object BankSyncManager {
 
     private fun isCreditType(type: String): Boolean {
         val t = type.trim().uppercase()
-        return t == "CREDIT" || t == "CR" || t == "INCOME"
+        return t == "CREDIT" || t == "CR" || t == "INCOME" || t == "REFUND" || t == "CASHBACK" || t == "DEPOSIT"
+    }
+
+    private fun isCreditTransaction(tx: BankTransactionRecord): Boolean {
+        if (isCreditType(tx.type)) return true
+        val cat = (tx.category + " " + tx.classification).trim().uppercase()
+        if (cat.contains("INCOME") || cat.contains("SALARY") || cat.contains("REFUND") || cat.contains("CASHBACK") ||
+            cat.contains("FREELANCE") || cat.contains("INVESTMENT") || cat.contains("RENTAL")) return true
+        val text = tx.originalText.lowercase()
+        if (text.contains("credited") || text.contains("refund") || text.contains("cashback") || text.contains("deposited") ||
+            text.contains("received from") || text.contains("salary") || text.contains("inward") || text.contains("incoming")) return true
+        return false
     }
 
     private fun dismissIncomingNotification(context: Context, tx: BankTransactionRecord) {
@@ -672,9 +684,25 @@ object BankSyncManager {
     ): String {
         val existingSalary = dao.getSalaryRecordDirect(txMonth, txYear, ownerId)
             ?: dao.getSalaryRecordDirect(txMonth, txYear)
-        val currentSources = if (!existingSalary?.incomeSourcesJson.isNullOrBlank()) {
-            FinMoneyRepository.parseIncomeSources(existingSalary!!.incomeSourcesJson)
-        } else emptyList()
+            ?: dao.getSalaryRecordDirect(txMonth, txYear, "")
+            ?: dao.getSalaryRecordDirect(txMonth, txYear, "user_default")
+
+        val currentSources = if (existingSalary != null && !existingSalary.incomeSourcesJson.isNullOrBlank() && existingSalary.incomeSourcesJson != "[]") {
+            FinMoneyRepository.parseIncomeSources(existingSalary.incomeSourcesJson).toMutableList()
+        } else if (existingSalary != null && (existingSalary.baseSalary > 0 || existingSalary.salaryAmount > 0 || existingSalary.additionalIncome > 0)) {
+            val list = mutableListOf<IncomeSource>()
+            val base = if (existingSalary.baseSalary > 0) existingSalary.baseSalary else existingSalary.salaryAmount
+            if (base > 0) {
+                list.add(IncomeSource(id = "1", title = "Primary Salary", name = "Primary Salary", amount = base, category = "SALARY", isReceived = true))
+            }
+            if (existingSalary.additionalIncome > 0) {
+                list.add(IncomeSource(id = "2", title = "Additional Income", name = "Additional Income", amount = existingSalary.additionalIncome, category = "FREELANCE", isReceived = true))
+            }
+            list
+        } else {
+            mutableListOf()
+        }
+
         if (currentSources.any { it.id == ledgerToken }) {
             return "✓ Income already recorded (₹${"%,.0f".format(tx.amount)})."
         }
@@ -686,7 +714,14 @@ object BankSyncManager {
         if (already) return "✓ Income already recorded (₹${"%,.0f".format(tx.amount)})."
 
         val sourceName = if (tx.merchant.isNotBlank()) tx.merchant else "${tx.bankName} Credit"
-        val categoryToUse = customCategory ?: tx.category.ifBlank { IncomeCategory.OTHER.name }
+        val categoryToUse = if (!customCategory.isNullOrBlank() && customCategory != "GENERAL") {
+            customCategory
+        } else if (tx.category.isNotBlank() && tx.category != "GENERAL") {
+            tx.category
+        } else {
+            IncomeCategory.OTHER.name
+        }
+
         val newSource = IncomeSource(
             id = ledgerToken,
             name = sourceName,
@@ -699,23 +734,31 @@ object BankSyncManager {
         )
         val updatedSources = currentSources + newSource
         val json = FinMoneyRepository.encodeIncomeSources(updatedSources)
-        val totalAdditional = updatedSources.sumOf { it.amount }
+
+        val salaryItem = updatedSources.find { it.category == "SALARY" || it.id == "1" }
+        val newBase = salaryItem?.amount ?: (existingSalary?.baseSalary ?: 0.0)
+        val newAdditional = updatedSources.filter { it.category != "SALARY" && it.id != "1" }.sumOf { it.amount }
+
+        val targetUserId = ownerId.ifBlank { existingSalary?.userId ?: "user_default" }
         val updatedSalaryRecord = if (existingSalary != null) {
             existingSalary.copy(
-                userId = ownerId.ifBlank { existingSalary.userId },
-                additionalIncome = totalAdditional,
+                userId = targetUserId,
+                baseSalary = newBase,
+                salaryAmount = newBase,
+                additionalIncome = newAdditional,
                 incomeSourcesJson = json,
                 monthYear = existingSalary.monthYear.ifBlank { monthYear },
                 updatedAt = System.currentTimeMillis()
             )
         } else {
             SalaryRecord(
-                userId = ownerId,
+                userId = targetUserId,
                 month = txMonth,
                 year = txYear,
                 monthYear = monthYear,
-                salaryAmount = 0.0,
-                additionalIncome = totalAdditional,
+                baseSalary = newBase,
+                salaryAmount = newBase,
+                additionalIncome = newAdditional,
                 incomeSourcesJson = json,
                 updatedAt = System.currentTimeMillis()
             )
