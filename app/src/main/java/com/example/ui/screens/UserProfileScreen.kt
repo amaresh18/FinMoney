@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -655,6 +657,78 @@ fun UserProfileScreen(
                                 android.widget.Toast.makeText(context, "Daily reminder disabled.", android.widget.Toast.LENGTH_SHORT).show()
                             }
                         }
+                    )
+                }
+            }
+
+            IndCard(modifier = Modifier.fillMaxWidth().testTag("profile_google_youtube_hub_card")) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ProfileSectionTitle(
+                        title = "Google & YouTube Hub",
+                        subtitle = "Tutorials, Google Play reviews & community guides",
+                        icon = Icons.Filled.PlayCircleFilled
+                    )
+
+                    ProfileSettingsNavRow(
+                        title = "Watch YouTube Video Tutorials",
+                        subtitle = "Learn SMS auto-sync, Kubera AI & Khaata debt tracker",
+                        titleColor = IndNavyHeader,
+                        icon = Icons.Filled.OndemandVideo,
+                        iconTint = Color(0xFFFF0000),
+                        onClick = {
+                            try {
+                                val ytIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=FinMoney+App+Tutorials")).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(ytIntent)
+                            } catch (_: Exception) {
+                                android.widget.Toast.makeText(context, "Opening YouTube channel...", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        testTag = "open_youtube_tutorials_button"
+                    )
+
+                    HorizontalDivider(color = IndBorderSubtle, modifier = Modifier.padding(vertical = 4.dp))
+
+                    ProfileSettingsNavRow(
+                        title = "Rate FinMoney on Google Play",
+                        subtitle = "Package: com.aistudio.finmoney.vqpz",
+                        titleColor = IndNavyHeader,
+                        icon = Icons.Filled.Star,
+                        iconTint = Color(0xFFFBBC04),
+                        onClick = {
+                            try {
+                                val playStoreIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.aistudio.finmoney.vqpz")).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(playStoreIntent)
+                            } catch (_: Exception) {
+                                val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=com.aistudio.finmoney.vqpz")).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(webIntent)
+                            }
+                        },
+                        testTag = "rate_google_play_button"
+                    )
+
+                    HorizontalDivider(color = IndBorderSubtle, modifier = Modifier.padding(vertical = 4.dp))
+
+                    ProfileSettingsNavRow(
+                        title = "Search FinMoney on Google",
+                        subtitle = "Official updates, FAQs & user community",
+                        titleColor = IndNavyHeader,
+                        icon = Icons.Filled.Search,
+                        iconTint = IndBlue,
+                        onClick = {
+                            try {
+                                val googleIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=FinMoney+App+com.aistudio.finmoney.vqpz")).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(googleIntent)
+                            } catch (_: Exception) {}
+                        },
+                        testTag = "search_google_app_button"
                     )
                 }
             }

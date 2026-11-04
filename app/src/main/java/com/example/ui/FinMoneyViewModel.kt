@@ -121,10 +121,11 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     val userProfile: StateFlow<UserProfile?> = dao.getUserProfile()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    private val _currentMonth = MutableStateFlow(10)
+    private val initialCalendar = java.util.Calendar.getInstance()
+    private val _currentMonth = MutableStateFlow(initialCalendar.get(java.util.Calendar.MONTH) + 1)
     val currentMonth: StateFlow<Int> = _currentMonth.asStateFlow()
 
-    private val _currentYear = MutableStateFlow(2026)
+    private val _currentYear = MutableStateFlow(initialCalendar.get(java.util.Calendar.YEAR))
     val currentYear: StateFlow<Int> = _currentYear.asStateFlow()
 
     private val _selectedSpecificDay = MutableStateFlow<Int?>(null)
@@ -140,14 +141,14 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         _isFinancialSafetyVisible.value = !_isFinancialSafetyVisible.value
     }
 
-
-    private val todayDayOfMonth: Int = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_MONTH)
-
-    private val _selectedStartDay = MutableStateFlow<Int?>(1)
+    private val _selectedStartDay = MutableStateFlow<Int?>(null)
     val selectedStartDay: StateFlow<Int?> = _selectedStartDay.asStateFlow()
 
-    private val _selectedEndDay = MutableStateFlow<Int?>(todayDayOfMonth)
+    private val _selectedEndDay = MutableStateFlow<Int?>(null)
     val selectedEndDay: StateFlow<Int?> = _selectedEndDay.asStateFlow()
+
+    private val _customDateRange = MutableStateFlow<com.example.data.model.CustomDateRange?>(null)
+    val customDateRange: StateFlow<com.example.data.model.CustomDateRange?> = _customDateRange.asStateFlow()
 
     fun nextMonth() {
         if (_currentMonth.value == 12) {
@@ -156,7 +157,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         } else {
             _currentMonth.value += 1
         }
-        resetToMonthToDate()
+        clearDateFilter()
+        checkAndAutoPrefillNewMonth(_currentMonth.value, _currentYear.value)
     }
 
     fun previousMonth() {
@@ -166,32 +168,23 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         } else {
             _currentMonth.value -= 1
         }
-        resetToMonthToDate()
+        clearDateFilter()
+        checkAndAutoPrefillNewMonth(_currentMonth.value, _currentYear.value)
+    }
+
+    fun clearDateFilter() {
+        _customDateRange.value = null
+        _selectedSpecificDay.value = null
+        _selectedStartDay.value = null
+        _selectedEndDay.value = null
     }
 
     fun resetToMonthToDate() {
-        val cal = java.util.Calendar.getInstance()
-        val currentRealMonth = cal.get(java.util.Calendar.MONTH) + 1
-        val currentRealYear = cal.get(java.util.Calendar.YEAR)
-        val realToday = cal.get(java.util.Calendar.DAY_OF_MONTH)
-
-        val targetCal = java.util.Calendar.getInstance().apply {
-            set(_currentYear.value, _currentMonth.value - 1, 1)
-        }
-        val maxDays = targetCal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
-
-        _selectedStartDay.value = 1
-        if (_currentYear.value == currentRealYear && _currentMonth.value == currentRealMonth) {
-            _selectedEndDay.value = realToday.coerceIn(1, maxDays)
-        } else if (_currentYear.value < currentRealYear || (_currentYear.value == currentRealYear && _currentMonth.value < currentRealMonth)) {
-            _selectedEndDay.value = maxDays
-        } else {
-            _selectedEndDay.value = 1
-        }
-        _selectedSpecificDay.value = null
+        clearDateFilter()
     }
 
     fun setMonthYear(month: Int, year: Int, day: Int? = null) {
+        _customDateRange.value = null
         _currentMonth.value = month.coerceIn(1, 12)
         _currentYear.value = year
         if (day != null) {
@@ -199,43 +192,71 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             _selectedStartDay.value = day
             _selectedEndDay.value = day
         } else {
-            resetToMonthToDate()
+            clearDateFilter()
         }
+        checkAndAutoPrefillNewMonth(_currentMonth.value, _currentYear.value)
     }
 
     fun setDateRangeFilter(month: Int, year: Int, startDay: Int?, endDay: Int?) {
-        _currentMonth.value = month.coerceIn(1, 12)
-        _currentYear.value = year
         if (startDay != null && endDay != null) {
-            val minD = minOf(startDay, endDay)
-            val maxD = maxOf(startDay, endDay)
-            _selectedStartDay.value = minD
-            _selectedEndDay.value = maxD
-            _selectedSpecificDay.value = minD
+            setFullDateRange(year, month, startDay, year, month, endDay)
         } else if (startDay != null) {
-            _selectedStartDay.value = startDay
-            _selectedEndDay.value = startDay
-            _selectedSpecificDay.value = startDay
+            setFullDateRange(year, month, startDay, year, month, startDay)
         } else {
-            resetToMonthToDate()
+            clearDateFilter()
+            _currentMonth.value = month.coerceIn(1, 12)
+            _currentYear.value = year
+            checkAndAutoPrefillNewMonth(_currentMonth.value, _currentYear.value)
         }
     }
 
-    fun clearDateFilter() {
-        resetToMonthToDate()
+    fun setFullDateRange(startYear: Int, startMonth: Int, startDay: Int, endYear: Int, endMonth: Int, endDay: Int) {
+        val startVal = startYear * 10000 + startMonth * 100 + startDay
+        val endVal = endYear * 10000 + endMonth * 100 + endDay
+        val sy: Int
+        val sm: Int
+        val sd: Int
+        val ey: Int
+        val em: Int
+        val ed: Int
+        if (startVal <= endVal) {
+            sy = startYear; sm = startMonth; sd = startDay
+            ey = endYear; em = endMonth; ed = endDay
+        } else {
+            sy = endYear; sm = endMonth; sd = endDay
+            ey = startYear; em = startMonth; ed = startDay
+        }
+
+        if (sy == ey && sm == em) {
+            _customDateRange.value = null
+            _currentMonth.value = sm
+            _currentYear.value = sy
+            _selectedStartDay.value = sd
+            _selectedEndDay.value = ed
+            _selectedSpecificDay.value = if (sd == ed) sd else null
+        } else {
+            _customDateRange.value = com.example.data.model.CustomDateRange(sy, sm, sd, ey, em, ed)
+            _currentMonth.value = sm
+            _currentYear.value = sy
+            _selectedStartDay.value = sd
+            _selectedEndDay.value = ed
+            _selectedSpecificDay.value = null
+        }
+        checkAndAutoPrefillNewMonth(_currentMonth.value, _currentYear.value)
     }
 
     fun setSelectedSpecificDay(day: Int?) {
+        _customDateRange.value = null
         _selectedSpecificDay.value = day
         _selectedStartDay.value = day
         _selectedEndDay.value = day
     }
 
     // Dedicated Analytics Date Filter State (isolated from Dashboard)
-    private val _analyticsMonth = MutableStateFlow(10)
+    private val _analyticsMonth = MutableStateFlow(initialCalendar.get(java.util.Calendar.MONTH) + 1)
     val analyticsMonth: StateFlow<Int> = _analyticsMonth.asStateFlow()
 
-    private val _analyticsYear = MutableStateFlow(2026)
+    private val _analyticsYear = MutableStateFlow(initialCalendar.get(java.util.Calendar.YEAR))
     val analyticsYear: StateFlow<Int> = _analyticsYear.asStateFlow()
 
     private val _analyticsSelectedSpecificDay = MutableStateFlow<Int?>(null)
@@ -244,10 +265,14 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     private val _analyticsSelectedStartDay = MutableStateFlow<Int?>(1)
     val analyticsSelectedStartDay: StateFlow<Int?> = _analyticsSelectedStartDay.asStateFlow()
 
-    private val _analyticsSelectedEndDay = MutableStateFlow<Int?>(todayDayOfMonth)
+    private val _analyticsSelectedEndDay = MutableStateFlow<Int?>(initialCalendar.get(java.util.Calendar.DAY_OF_MONTH))
     val analyticsSelectedEndDay: StateFlow<Int?> = _analyticsSelectedEndDay.asStateFlow()
 
+    private val _analyticsCustomDateRange = MutableStateFlow<com.example.data.model.CustomDateRange?>(null)
+    val analyticsCustomDateRange: StateFlow<com.example.data.model.CustomDateRange?> = _analyticsCustomDateRange.asStateFlow()
+
     fun nextAnalyticsMonth() {
+        _analyticsCustomDateRange.value = null
         if (_analyticsMonth.value == 12) {
             _analyticsMonth.value = 1
             _analyticsYear.value += 1
@@ -258,6 +283,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun previousAnalyticsMonth() {
+        _analyticsCustomDateRange.value = null
         if (_analyticsMonth.value == 1) {
             _analyticsMonth.value = 12
             _analyticsYear.value -= 1
@@ -268,6 +294,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun resetAnalyticsToMonthToDate() {
+        _analyticsCustomDateRange.value = null
         val cal = java.util.Calendar.getInstance()
         val currentRealMonth = cal.get(java.util.Calendar.MONTH) + 1
         val currentRealYear = cal.get(java.util.Calendar.YEAR)
@@ -290,6 +317,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun setAnalyticsMonthYear(month: Int, year: Int, day: Int? = null) {
+        _analyticsCustomDateRange.value = null
         _analyticsMonth.value = month.coerceIn(1, 12)
         _analyticsYear.value = year
         if (day != null) {
@@ -302,20 +330,49 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun setAnalyticsDateRangeFilter(month: Int, year: Int, startDay: Int?, endDay: Int?) {
-        _analyticsMonth.value = month.coerceIn(1, 12)
-        _analyticsYear.value = year
         if (startDay != null && endDay != null) {
-            val minD = minOf(startDay, endDay)
-            val maxD = maxOf(startDay, endDay)
-            _analyticsSelectedStartDay.value = minD
-            _analyticsSelectedEndDay.value = maxD
-            _analyticsSelectedSpecificDay.value = minD
+            setAnalyticsFullDateRange(year, month, startDay, year, month, endDay)
         } else if (startDay != null) {
-            _analyticsSelectedStartDay.value = startDay
-            _analyticsSelectedEndDay.value = startDay
-            _analyticsSelectedSpecificDay.value = startDay
+            setAnalyticsFullDateRange(year, month, startDay, year, month, startDay)
         } else {
+            _analyticsCustomDateRange.value = null
+            _analyticsMonth.value = month.coerceIn(1, 12)
+            _analyticsYear.value = year
             resetAnalyticsToMonthToDate()
+        }
+    }
+
+    fun setAnalyticsFullDateRange(startYear: Int, startMonth: Int, startDay: Int, endYear: Int, endMonth: Int, endDay: Int) {
+        val startVal = startYear * 10000 + startMonth * 100 + startDay
+        val endVal = endYear * 10000 + endMonth * 100 + endDay
+        val sy: Int
+        val sm: Int
+        val sd: Int
+        val ey: Int
+        val em: Int
+        val ed: Int
+        if (startVal <= endVal) {
+            sy = startYear; sm = startMonth; sd = startDay
+            ey = endYear; em = endMonth; ed = endDay
+        } else {
+            sy = endYear; sm = endMonth; sd = endDay
+            ey = startYear; em = startMonth; ed = startDay
+        }
+
+        if (sy == ey && sm == em) {
+            _analyticsCustomDateRange.value = null
+            _analyticsMonth.value = sm
+            _analyticsYear.value = sy
+            _analyticsSelectedStartDay.value = sd
+            _analyticsSelectedEndDay.value = ed
+            _analyticsSelectedSpecificDay.value = if (sd == ed) sd else null
+        } else {
+            _analyticsCustomDateRange.value = com.example.data.model.CustomDateRange(sy, sm, sd, ey, em, ed)
+            _analyticsMonth.value = sm
+            _analyticsYear.value = sy
+            _analyticsSelectedStartDay.value = sd
+            _analyticsSelectedEndDay.value = ed
+            _analyticsSelectedSpecificDay.value = null
         }
     }
 
@@ -342,10 +399,24 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val currentDebits: StateFlow<List<DebitItem>> = combine(_currentMonth, _currentYear, userProfile) { m, y, u ->
-        Triple(m, y, u?.userId ?: getActiveUserId())
-    }.flatMapLatest { (m, y, uid) -> dao.getDebitsForMonth(m, y, uid) }
-    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val allSalaryRecords: StateFlow<List<SalaryRecord>> = userProfile
+        .flatMapLatest { u -> dao.getAllSalaryRecords(u?.userId ?: getActiveUserId()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val currentDebits: StateFlow<List<DebitItem>> = combine(_currentMonth, _currentYear, _customDateRange, userProfile) { m, y, range, u ->
+        val uid = u?.userId ?: getActiveUserId()
+        Pair(range, Triple(m, y, uid))
+    }.flatMapLatest { (range, monthData) ->
+        val (m, y, uid) = monthData
+        if (range != null && range.isMultiMonth) {
+            dao.getAllDebits(uid).map { list ->
+                list.filter { range.containsDate(it.year, it.month, it.dueDateDay) }
+            }
+        } else {
+            dao.getDebitsForMonth(m, y, uid)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val currentReconciliation: StateFlow<MonthlyReconciliation?> = combine(_currentMonth, _currentYear, userProfile) { m, y, u ->
@@ -361,10 +432,19 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val analyticsDebits: StateFlow<List<DebitItem>> = combine(_analyticsMonth, _analyticsYear, userProfile) { m, y, u ->
-        Triple(m, y, u?.userId ?: getActiveUserId())
-    }.flatMapLatest { (m, y, uid) -> dao.getDebitsForMonth(m, y, uid) }
-    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val analyticsDebits: StateFlow<List<DebitItem>> = combine(_analyticsMonth, _analyticsYear, _analyticsCustomDateRange, userProfile) { m, y, range, u ->
+        val uid = u?.userId ?: getActiveUserId()
+        Pair(range, Triple(m, y, uid))
+    }.flatMapLatest { (range, monthData) ->
+        val (m, y, uid) = monthData
+        if (range != null && range.isMultiMonth) {
+            dao.getAllDebits(uid).map { list ->
+                list.filter { range.containsDate(it.year, it.month, it.dueDateDay) }
+            }
+        } else {
+            dao.getDebitsForMonth(m, y, uid)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val analyticsReconciliation: StateFlow<MonthlyReconciliation?> = combine(_analyticsMonth, _analyticsYear, userProfile) { m, y, u ->
@@ -421,17 +501,52 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         customCats: List<CustomCategory>,
         recon: MonthlyReconciliation?,
         m: Int,
-        y: Int
+        y: Int,
+        allSalaries: List<SalaryRecord> = emptyList(),
+        customRange: com.example.data.model.CustomDateRange? = null
     ): MonthlyFinanceSummary {
-        val incomeSources = if (salary != null && salary.incomeSourcesJson.isNotBlank() && salary.incomeSourcesJson != "[]") {
-            FinMoneyRepository.parseIncomeSources(salary.incomeSourcesJson)
+        val incomeSources = if (customRange != null && customRange.isMultiMonth && allSalaries.isNotEmpty()) {
+            val list = mutableListOf<IncomeSource>()
+            allSalaries.forEach { record ->
+                val recMonth = record.month
+                val recYear = record.year
+                val recSources = if (record.incomeSourcesJson.isNotBlank() && record.incomeSourcesJson != "[]") {
+                    FinMoneyRepository.parseIncomeSources(record.incomeSourcesJson)
+                } else if (record.baseSalary > 0 || record.additionalIncome > 0) {
+                    val sList = mutableListOf<IncomeSource>()
+                    if (record.baseSalary > 0) {
+                        sList.add(IncomeSource("${record.id}_1", "Primary Salary", "Employer Transfer", record.baseSalary, "SALARY", true))
+                    }
+                    if (record.additionalIncome > 0) {
+                        sList.add(IncomeSource("${record.id}_2", "Secondary / Extra", "Additional Earnings", record.additionalIncome, "FREELANCE", true))
+                    }
+                    sList
+                } else {
+                    emptyList()
+                }
+
+                recSources.forEach { src ->
+                    val day = if (src.receivedDateTimestamp != null && src.receivedDateTimestamp > 0) {
+                        val cal = java.util.Calendar.getInstance().apply { timeInMillis = src.receivedDateTimestamp }
+                        cal.get(java.util.Calendar.DAY_OF_MONTH)
+                    } else 1
+                    if (customRange.containsDate(recYear, recMonth, day)) {
+                        list.add(src.copy(sourceMonth = recMonth, sourceYear = recYear))
+                    }
+                }
+            }
+            list
+        } else if (salary != null && salary.incomeSourcesJson.isNotBlank() && salary.incomeSourcesJson != "[]") {
+            FinMoneyRepository.parseIncomeSources(salary.incomeSourcesJson).map {
+                it.copy(sourceMonth = m, sourceYear = y)
+            }
         } else if (salary != null && (salary.baseSalary > 0 || salary.additionalIncome > 0)) {
             val list = mutableListOf<IncomeSource>()
             if (salary.baseSalary > 0) {
-                list.add(IncomeSource("1", "Primary Salary", "Employer Transfer", salary.baseSalary, "SALARY", true))
+                list.add(IncomeSource("1", "Primary Salary", "Employer Transfer", salary.baseSalary, "SALARY", true, sourceMonth = m, sourceYear = y))
             }
             if (salary.additionalIncome > 0) {
-                list.add(IncomeSource("2", "Secondary / Extra", "Additional Earnings", salary.additionalIncome, "FREELANCE", true))
+                list.add(IncomeSource("2", "Secondary / Extra", "Additional Earnings", salary.additionalIncome, "FREELANCE", true, sourceMonth = m, sourceYear = y))
             }
             list
         } else {
@@ -507,38 +622,42 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     val monthlySummary: StateFlow<MonthlyFinanceSummary?> = combine(
-        combine(currentSalaryRecord, currentDebits, customCategories) { salary, debits, customCats ->
-            Triple(salary, debits, customCats)
+        combine(currentSalaryRecord, currentDebits, customCategories, _customDateRange) { salary, debits, customCats, range ->
+            Triple(salary, debits, Pair(customCats, range))
         },
-        combine(currentReconciliation, _currentMonth, _currentYear) { recon, m, y ->
-            Triple(recon, m, y)
+        combine(currentReconciliation, _currentMonth, _currentYear, allSalaryRecords) { recon, m, y, allSalaries ->
+            Triple(recon, Pair(m, y), allSalaries)
         }
     ) { debitData, periodData ->
         buildMonthlyFinanceSummary(
             salary = debitData.first,
             debits = debitData.second,
-            customCats = debitData.third,
+            customCats = debitData.third.first,
             recon = periodData.first,
-            m = periodData.second,
-            y = periodData.third
+            m = periodData.second.first,
+            y = periodData.second.second,
+            allSalaries = periodData.third,
+            customRange = debitData.third.second
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MonthlyFinanceSummary())
 
     val analyticsMonthlySummary: StateFlow<MonthlyFinanceSummary?> = combine(
-        combine(analyticsSalaryRecord, analyticsDebits, customCategories) { salary, debits, customCats ->
-            Triple(salary, debits, customCats)
+        combine(analyticsSalaryRecord, analyticsDebits, customCategories, _analyticsCustomDateRange) { salary, debits, customCats, range ->
+            Triple(salary, debits, Pair(customCats, range))
         },
-        combine(analyticsReconciliation, _analyticsMonth, _analyticsYear) { recon, m, y ->
-            Triple(recon, m, y)
+        combine(analyticsReconciliation, _analyticsMonth, _analyticsYear, allSalaryRecords) { recon, m, y, allSalaries ->
+            Triple(recon, Pair(m, y), allSalaries)
         }
     ) { debitData, periodData ->
         buildMonthlyFinanceSummary(
             salary = debitData.first,
             debits = debitData.second,
-            customCats = debitData.third,
+            customCats = debitData.third.first,
             recon = periodData.first,
-            m = periodData.second,
-            y = periodData.third
+            m = periodData.second.first,
+            y = periodData.second.second,
+            allSalaries = periodData.third,
+            customRange = debitData.third.second
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MonthlyFinanceSummary())
 
@@ -947,11 +1066,21 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 val currentMonthItems = dao.getDebitsForMonthDirect(targetMonth, targetYear, activeUid)
                 val newDebitsToInsert = mutableListOf<DebitItem>()
 
-                for (template in recurringDebits) {
+                // Consolidate latest unique recurring obligation templates across earlier months
+                val templates = linkedMapOf<String, DebitItem>()
+                recurringDebits.sortedWith(
+                    compareBy<DebitItem> { it.year }.thenBy { it.month }.thenBy { it.id }
+                ).forEach { item ->
+                    if (item.month != targetMonth || item.year != targetYear) {
+                        val key = "${item.title.trim().lowercase()}|${item.category.trim().lowercase()}"
+                        templates[key] = item
+                    }
+                }
+
+                for (template in templates.values) {
                     val alreadyPresent = currentMonthItems.any { item ->
-                        item.title.equals(template.title, ignoreCase = true) &&
-                        item.category.equals(template.category, ignoreCase = true) &&
-                        kotlin.math.abs(item.amount - template.amount) < 0.01
+                        item.title.trim().equals(template.title.trim(), ignoreCase = true) &&
+                        item.category.trim().equals(template.category.trim(), ignoreCase = true)
                     }
                     if (!alreadyPresent) {
                         val nextTenure = if (template.totalTenureMonths > 0) template.currentMonthTenure + 1 else template.currentMonthTenure
@@ -977,7 +1106,10 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
                 if (newDebitsToInsert.isNotEmpty()) {
                     newDebitsToInsert.forEach { persistExpense(it) }
+                    notifyUser("✓ Prefilled ${newDebitsToInsert.size} recurring expense(s) for this month.")
                     Log.i("FinMoneyViewModel", "Prefilled ${newDebitsToInsert.size} recurring debits into $targetMonth/$targetYear for $activeUid")
+                } else {
+                    notifyUser("No new recurring expenses to prefill.")
                 }
 
             } catch (e: Exception) {
@@ -1004,17 +1136,40 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                     }
                 }
 
-                if (templates.isEmpty()) return@launchSafe
-
                 val existing = dao.getSalaryRecordDirect(targetMonth, targetYear, activeUid)
                 val currentSources = getOrCreateIncomeSources(existing)
                 val toAdd = mutableListOf<IncomeSource>()
 
+                // Check if target month is missing primary base salary
+                val hasBaseSalary = currentSources.any { it.category == "SALARY" || it.id == "1" } || (existing != null && existing.baseSalary > 0.0)
+                if (!hasBaseSalary) {
+                    val prevRecordWithSalary = allRecords.firstOrNull { (it.month != targetMonth || it.year != targetYear) && (it.baseSalary > 0.0 || it.salaryAmount > 0.0) }
+                    val salaryAmountToCarry = prevRecordWithSalary?.baseSalary?.takeIf { it > 0.0 }
+                        ?: prevRecordWithSalary?.salaryAmount?.takeIf { it > 0.0 }
+                        ?: 0.0
+                    if (salaryAmountToCarry > 0.0) {
+                        toAdd.add(
+                            IncomeSource(
+                                id = "1",
+                                title = "Primary Salary",
+                                name = "Primary Salary",
+                                amount = salaryAmountToCarry,
+                                category = "SALARY",
+                                isReceived = false,
+                                isRecurring = true,
+                                receivedDateTimestamp = System.currentTimeMillis()
+                            )
+                        )
+                    }
+                }
+
                 for (template in templates.values) {
                     val alreadyPresent = currentSources.any { item ->
-                        item.title.equals(template.title, ignoreCase = true) &&
-                            item.category.equals(template.category, ignoreCase = true) &&
-                            kotlin.math.abs(item.amount - template.amount) < 0.01
+                        item.title.trim().equals(template.title.trim(), ignoreCase = true) &&
+                            item.category.trim().equals(template.category.trim(), ignoreCase = true)
+                    } || toAdd.any { item ->
+                        item.title.trim().equals(template.title.trim(), ignoreCase = true) &&
+                            item.category.trim().equals(template.category.trim(), ignoreCase = true)
                     }
                     if (!alreadyPresent) {
                         toAdd.add(
@@ -1031,12 +1186,30 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 if (toAdd.isNotEmpty()) {
                     currentSources.addAll(toAdd)
                     saveUpdatedIncomeSources(existing, currentSources, targetMonth, targetYear)
-                    notifyUser("Added ${toAdd.size} recurring income line(s) for this month.")
+                    notifyUser("✓ Added ${toAdd.size} recurring income line(s) for this month.")
                     Log.i("FinMoneyViewModel", "Prefilled ${toAdd.size} recurring credits into $targetMonth/$targetYear")
                 }
             } catch (e: Exception) {
                 Log.e("FinMoneyViewModel", "Failed to prefill recurring credits: ${e.message}", e)
             }
+        }
+    }
+
+    fun checkAndAutoPrefillNewMonth(targetMonth: Int, targetYear: Int) {
+        launchSafe {
+            try {
+                val activeUid = getActiveUserId()
+                val monthDebits = dao.getDebitsForMonthDirect(targetMonth, targetYear, activeUid)
+                val monthSalary = dao.getSalaryRecordDirect(targetMonth, targetYear, activeUid)
+                if (monthDebits.isEmpty() && (monthSalary == null || monthSalary.baseSalary == 0.0)) {
+                    val anyPreviousDebits = dao.getAllDebitsDirect(activeUid).any { it.isRecurring }
+                    val anyPreviousSalary = dao.getAllSalaryRecordsDirect(activeUid).isNotEmpty()
+                    if (anyPreviousDebits || anyPreviousSalary) {
+                        prefillRecurringDebitsForMonth(targetMonth, targetYear)
+                        prefillRecurringCreditsForMonth(targetMonth, targetYear)
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -1343,7 +1516,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         dateString: String? = null,
         month: Int? = null,
         year: Int? = null,
-        isRecurring: Boolean = false
+        isRecurring: Boolean = false,
+        isReceived: Boolean = true
     ) {
         val parsedTimestamp = if (!dateString.isNullOrBlank()) {
             try {
@@ -1360,6 +1534,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         launchSafe {
             val activeUid = getActiveUserId()
             val existing = dao.getSalaryRecordDirect(m, y, activeUid)
+                ?: dao.getSalaryRecordDirect(m, y, "")
+                ?: dao.getSalaryRecordDirect(m, y, "user_default")
             val currentSources = getOrCreateIncomeSources(existing)
             val newSource = IncomeSource(
                 id = java.util.UUID.randomUUID().toString(),
@@ -1367,13 +1543,13 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 name = title,
                 amount = amount,
                 category = category,
-                isReceived = true,
+                isReceived = isReceived,
                 isRecurring = isRecurring,
                 receivedDateTimestamp = timestamp
             )
             currentSources.add(newSource)
             saveUpdatedIncomeSources(existing, currentSources, m, y)
-            notifyUser("Income saved on this device.")
+            notifyUser(if (isReceived) "✓ Income credit saved as Received." else "✓ Income credit saved as Pending.")
         }
     }
 
@@ -1385,7 +1561,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         dateString: String? = null,
         month: Int? = null,
         year: Int? = null,
-        isRecurring: Boolean? = null
+        isRecurring: Boolean? = null,
+        isReceived: Boolean? = null
     ) {
         val parsedTimestamp = if (!dateString.isNullOrBlank()) {
             try {
@@ -1401,20 +1578,52 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
         launchSafe {
             val activeUid = getActiveUserId()
-            val existing = dao.getSalaryRecordDirect(m, y, activeUid)
-            val currentSources = getOrCreateIncomeSources(existing)
-            val index = currentSources.indexOfFirst { it.id == id }
+            var targetMonth = m
+            var targetYear = y
+            var existing = dao.getSalaryRecordDirect(m, y, activeUid)
+                ?: dao.getSalaryRecordDirect(m, y, "")
+                ?: dao.getSalaryRecordDirect(m, y, "user_default")
+
+            var currentSources = getOrCreateIncomeSources(existing)
+            var index = currentSources.indexOfFirst {
+                it.id == id || (id.endsWith("_1") && it.id == "1") || (id.endsWith("_2") && it.id == "2")
+            }
+
+            // If not found in current month, scan all records
+            if (index == -1) {
+                val allSalaries = dao.getAllSalaryRecordsDirect(activeUid)
+                    .ifEmpty { dao.getAllSalaryRecordsDirect("") }
+                    .ifEmpty { dao.getAllSalaryRecordsDirect("user_default") }
+                for (sal in allSalaries) {
+                    val sources = getOrCreateIncomeSources(sal)
+                    val foundIdx = sources.indexOfFirst {
+                        it.id == id || (id.endsWith("_1") && it.id == "1") || (id.endsWith("_2") && it.id == "2")
+                    }
+                    if (foundIdx != -1) {
+                        existing = sal
+                        currentSources = sources
+                        index = foundIdx
+                        targetMonth = sal.month
+                        targetYear = sal.year
+                        break
+                    }
+                }
+            }
+
             if (index != -1) {
                 val old = currentSources[index]
+                val updatedReceived = isReceived ?: old.isReceived
                 currentSources[index] = old.copy(
                     title = newTitle,
                     name = newTitle,
                     amount = newAmount,
                     category = newCategory,
                     isRecurring = isRecurring ?: old.isRecurring,
+                    isReceived = updatedReceived,
                     receivedDateTimestamp = timestamp
                 )
-                saveUpdatedIncomeSources(existing, currentSources, m, y)
+                saveUpdatedIncomeSources(existing, currentSources, targetMonth, targetYear)
+                notifyUser(if (updatedReceived) "✓ Income updated (Received)." else "✓ Income updated (Pending Inflow).")
             }
         }
     }
@@ -1429,13 +1638,41 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
         launchSafe {
             val activeUid = getActiveUserId()
-            val existing = dao.getSalaryRecordDirect(m, y, activeUid)
-            val currentSources = getOrCreateIncomeSources(existing)
-            val index = currentSources.indexOfFirst { it.id == id }
+            var targetMonth = m
+            var targetYear = y
+            var existing = dao.getSalaryRecordDirect(m, y, activeUid)
+                ?: dao.getSalaryRecordDirect(m, y, "")
+                ?: dao.getSalaryRecordDirect(m, y, "user_default")
+
+            var currentSources = getOrCreateIncomeSources(existing)
+            var index = currentSources.indexOfFirst {
+                it.id == id || (id.endsWith("_1") && it.id == "1") || (id.endsWith("_2") && it.id == "2")
+            }
+
+            if (index == -1) {
+                val allSalaries = dao.getAllSalaryRecordsDirect(activeUid)
+                    .ifEmpty { dao.getAllSalaryRecordsDirect("") }
+                    .ifEmpty { dao.getAllSalaryRecordsDirect("user_default") }
+                for (sal in allSalaries) {
+                    val sources = getOrCreateIncomeSources(sal)
+                    val foundIdx = sources.indexOfFirst {
+                        it.id == id || (id.endsWith("_1") && it.id == "1") || (id.endsWith("_2") && it.id == "2")
+                    }
+                    if (foundIdx != -1) {
+                        existing = sal
+                        currentSources = sources
+                        index = foundIdx
+                        targetMonth = sal.month
+                        targetYear = sal.year
+                        break
+                    }
+                }
+            }
+
             if (index != -1) {
                 val old = currentSources[index]
                 currentSources[index] = old.copy(isRecurring = !old.isRecurring)
-                saveUpdatedIncomeSources(existing, currentSources, m, y)
+                saveUpdatedIncomeSources(existing, currentSources, targetMonth, targetYear)
             }
         }
     }
@@ -1450,15 +1687,51 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
         launchSafe {
             val activeUid = getActiveUserId()
-            val existing = dao.getSalaryRecordDirect(m, y, activeUid)
-            val currentSources = getOrCreateIncomeSources(existing)
-            val index = currentSources.indexOfFirst { it.id == id }
+            var targetMonth = m
+            var targetYear = y
+            var existing = dao.getSalaryRecordDirect(m, y, activeUid)
+                ?: dao.getSalaryRecordDirect(m, y, "")
+                ?: dao.getSalaryRecordDirect(m, y, "user_default")
+
+            var currentSources = getOrCreateIncomeSources(existing)
+            var index = currentSources.indexOfFirst {
+                it.id == id || (id.endsWith("_1") && it.id == "1") || (id.endsWith("_2") && it.id == "2")
+            }
+
+            // If not found in the current month, scan all salary records
+            if (index == -1) {
+                val allSalaries = dao.getAllSalaryRecordsDirect(activeUid)
+                    .ifEmpty { dao.getAllSalaryRecordsDirect("") }
+                    .ifEmpty { dao.getAllSalaryRecordsDirect("user_default") }
+                for (sal in allSalaries) {
+                    val sources = getOrCreateIncomeSources(sal)
+                    val foundIdx = sources.indexOfFirst {
+                        it.id == id || (id.endsWith("_1") && it.id == "1") || (id.endsWith("_2") && it.id == "2")
+                    }
+                    if (foundIdx != -1) {
+                        existing = sal
+                        currentSources = sources
+                        index = foundIdx
+                        targetMonth = sal.month
+                        targetYear = sal.year
+                        break
+                    }
+                }
+            }
+
             if (index != -1) {
                 val old = currentSources[index]
+                val newStatus = !old.isReceived
                 currentSources[index] = old.copy(
-                    isReceived = !old.isReceived
+                    isReceived = newStatus,
+                    receivedDateTimestamp = if (newStatus && (old.receivedDateTimestamp == null || old.receivedDateTimestamp == 0L)) {
+                        System.currentTimeMillis()
+                    } else old.receivedDateTimestamp
                 )
-                saveUpdatedIncomeSources(existing, currentSources, m, y)
+                saveUpdatedIncomeSources(existing, currentSources, targetMonth, targetYear)
+                notifyUser(if (newStatus) "✓ Income credit marked as Received" else "Income credit marked as Pending Inflow")
+            } else {
+                notifyUser("Unable to find income credit entry to update.")
             }
         }
     }
@@ -2908,6 +3181,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     init {
         launchSafe(Dispatchers.IO) {
             DatabaseHealthGuard.verifyAndRepairDatabase(dao, forceReset = false)
+            checkAndAutoPrefillNewMonth(_currentMonth.value, _currentYear.value)
         }
         try {
             com.google.firebase.Firebase.auth.addAuthStateListener(authStateListener)

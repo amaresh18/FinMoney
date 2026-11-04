@@ -85,8 +85,29 @@ data class IncomeSource(
     val category: String = "General",
     val isReceived: Boolean = false,
     val isRecurring: Boolean = false,
-    val receivedDateTimestamp: Long? = null
+    val receivedDateTimestamp: Long? = null,
+    val sourceMonth: Int = 0,
+    val sourceYear: Int = 0
 )
+
+data class CustomDateRange(
+    val startYear: Int,
+    val startMonth: Int,
+    val startDay: Int,
+    val endYear: Int,
+    val endMonth: Int,
+    val endDay: Int
+) {
+    val isMultiMonth: Boolean
+        get() = startYear != endYear || startMonth != endMonth
+
+    fun containsDate(year: Int, month: Int, day: Int): Boolean {
+        val minVal = minOf(startYear * 10000 + startMonth * 100 + startDay, endYear * 10000 + endMonth * 100 + endDay)
+        val maxVal = maxOf(startYear * 10000 + startMonth * 100 + startDay, endYear * 10000 + endMonth * 100 + endDay)
+        val targetVal = year * 10000 + month * 100 + day
+        return targetVal in minVal..maxVal
+    }
+}
 
 @Entity(tableName = "user_profiles")
 data class UserProfile(

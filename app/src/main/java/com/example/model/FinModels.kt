@@ -12,6 +12,7 @@ typealias CategorySummary = com.example.data.model.CategorySummary
 typealias IncomeSource = com.example.data.model.IncomeSource
 typealias DebitItem = com.example.data.model.DebitItem
 typealias SalaryRecord = com.example.data.model.SalaryRecord
+typealias CustomDateRange = com.example.data.model.CustomDateRange
 typealias LoanType = com.example.data.model.LoanType
 typealias LoanApprovalStatus = com.example.data.model.LoanApprovalStatus
 typealias ApprovalStatus = com.example.data.model.LoanApprovalStatus

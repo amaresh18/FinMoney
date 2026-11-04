@@ -50,6 +50,7 @@ fun AnalyticsScreen(
     val selectedSpecificDay by viewModel.analyticsSelectedSpecificDay.collectAsStateWithLifecycle()
     val selectedStartDay by viewModel.analyticsSelectedStartDay.collectAsStateWithLifecycle()
     val selectedEndDay by viewModel.analyticsSelectedEndDay.collectAsStateWithLifecycle()
+    val analyticsCustomDateRange by viewModel.analyticsCustomDateRange.collectAsStateWithLifecycle()
     val reconciliation by viewModel.analyticsReconciliation.collectAsStateWithLifecycle()
 
     val startingBankBalance = remember(reconciliation) {
@@ -109,8 +110,17 @@ fun AnalyticsScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.weight(1f, fill = false).padding(horizontal = 4.dp)
                 ) {
-                    val dateLabel = remember(monthName, year, selectedStartDay, selectedEndDay, selectedSpecificDay) {
-                        when {
+                    val dateLabel = remember(monthName, year, selectedStartDay, selectedEndDay, selectedSpecificDay, analyticsCustomDateRange) {
+                        val range = analyticsCustomDateRange
+                        if (range != null && range.isMultiMonth) {
+                            val startMName = FinMoneyViewModel.getMonthName(range.startMonth)
+                            val endMName = FinMoneyViewModel.getMonthName(range.endMonth)
+                            if (range.startYear == range.endYear) {
+                                "$startMName ${range.startDay} – $endMName ${range.endDay}, ${range.startYear}"
+                            } else {
+                                "$startMName ${range.startDay}, ${range.startYear} – $endMName ${range.endDay}, ${range.endYear}"
+                            }
+                        } else when {
                             selectedStartDay != null && selectedEndDay != null && selectedStartDay != selectedEndDay -> {
                                 val minD = minOf(selectedStartDay!!, selectedEndDay!!)
                                 val maxD = maxOf(selectedStartDay!!, selectedEndDay!!)
@@ -149,12 +159,17 @@ fun AnalyticsScreen(
             }
 
             if (showCalendarPicker) {
+                val range = analyticsCustomDateRange
                 IndGoogleCalendarDatePicker(
                     currentMonth = month,
                     currentYear = year,
                     currentSelectedDay = selectedSpecificDay,
-                    currentStartDay = selectedStartDay,
-                    currentEndDay = selectedEndDay,
+                    currentStartDay = range?.startDay ?: selectedStartDay,
+                    currentEndDay = range?.endDay ?: selectedEndDay,
+                    currentStartMonth = range?.startMonth ?: month,
+                    currentStartYear = range?.startYear ?: year,
+                    currentEndMonth = range?.endMonth ?: month,
+                    currentEndYear = range?.endYear ?: year,
                     onDismiss = { showCalendarPicker = false },
                     onSelectDate = { m, y, d ->
                         viewModel.setAnalyticsMonthYear(m, y, d)
@@ -162,6 +177,10 @@ fun AnalyticsScreen(
                     },
                     onSelectDateRange = { m, y, s, e ->
                         viewModel.setAnalyticsDateRangeFilter(m, y, s, e)
+                        showCalendarPicker = false
+                    },
+                    onSelectFullDateRange = { sy, sm, sd, ey, em, ed ->
+                        viewModel.setAnalyticsFullDateRange(sy, sm, sd, ey, em, ed)
                         showCalendarPicker = false
                     }
                 )

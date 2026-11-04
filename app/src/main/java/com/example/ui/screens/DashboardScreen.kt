@@ -79,6 +79,33 @@ fun DashboardScreen(
     val selectedSpecificDay by viewModel.selectedSpecificDay.collectAsStateWithLifecycle()
     val selectedStartDay by viewModel.selectedStartDay.collectAsStateWithLifecycle()
     val selectedEndDay by viewModel.selectedEndDay.collectAsStateWithLifecycle()
+    val customDateRange by viewModel.customDateRange.collectAsStateWithLifecycle()
+
+    val dateHeaderLabel = remember(monthName, year, selectedStartDay, selectedEndDay, selectedSpecificDay, customDateRange) {
+        val range = customDateRange
+        if (range != null && range.isMultiMonth) {
+            val startMName = FinMoneyViewModel.getMonthName(range.startMonth)
+            val endMName = FinMoneyViewModel.getMonthName(range.endMonth)
+            if (range.startYear == range.endYear) {
+                "$startMName ${range.startDay} – $endMName ${range.endDay}, ${range.startYear}"
+            } else {
+                "$startMName ${range.startDay}, ${range.startYear} – $endMName ${range.endDay}, ${range.endYear}"
+            }
+        } else when {
+            selectedStartDay != null && selectedEndDay != null && selectedStartDay != selectedEndDay -> {
+                val minD = minOf(selectedStartDay!!, selectedEndDay!!)
+                val maxD = maxOf(selectedStartDay!!, selectedEndDay!!)
+                "$monthName $minD–$maxD, $year"
+            }
+            selectedStartDay != null -> {
+                "$monthName $selectedStartDay, $year"
+            }
+            selectedSpecificDay != null -> {
+                "$monthName $selectedSpecificDay, $year"
+            }
+            else -> "$monthName $year"
+        }
+    }
 
     var mainLedgerTab by remember { mutableStateOf("DEBITS") } // "DEBITS" or "CREDITS"
 
@@ -97,7 +124,18 @@ fun DashboardScreen(
     var expandedCreditCategoryKeys by remember { mutableStateOf(setOf<String>()) }
 
     val currentIncomeSources = summary.incomeSources
-    val filteredCredits = remember(currentIncomeSources, selectedCreditStatusFilter, selectedCreditCategoryFilter, creditsViewMode) {
+    val filteredCredits = remember(
+        currentIncomeSources,
+        selectedCreditStatusFilter,
+        selectedCreditCategoryFilter,
+        selectedSpecificDay,
+        selectedStartDay,
+        selectedEndDay,
+        customDateRange,
+        creditsViewMode,
+        month,
+        year
+    ) {
         val list = currentIncomeSources.filter { item ->
             val matchesStatus = when (selectedCreditStatusFilter) {
                 "RECEIVED" -> item.isReceived
@@ -109,14 +147,45 @@ fun DashboardScreen(
             } else {
                 item.category.equals(selectedCreditCategoryFilter, true)
             }
-            matchesStatus && matchesCategory
+            val itemDay = incomeDayOfMonth(item, month, year)
+            val itemMonth = if (item.sourceMonth > 0) item.sourceMonth else month
+            val itemYear = if (item.sourceYear > 0) item.sourceYear else year
+            val matchesDay = if (customDateRange != null && customDateRange!!.isMultiMonth) {
+                customDateRange!!.containsDate(itemYear, itemMonth, itemDay)
+            } else when {
+                selectedStartDay != null && selectedEndDay != null -> {
+                    val minD = minOf(selectedStartDay!!, selectedEndDay!!)
+                    val maxD = maxOf(selectedStartDay!!, selectedEndDay!!)
+                    itemDay in minD..maxD
+                }
+                selectedStartDay != null -> {
+                    itemDay == selectedStartDay
+                }
+                selectedSpecificDay != null -> {
+                    itemDay == selectedSpecificDay
+                }
+                else -> true
+            }
+            matchesStatus && matchesCategory && matchesDay
         }
 
         if (creditsViewMode == "LIST") {
-            list.sortedWith(compareCreditsByRecency())
+            list.sortedWith(compareCreditsByRecency(month, year))
         } else {
             list
         }
+    }
+
+    val creditsByDate = remember(filteredCredits, month, year) {
+        filteredCredits.groupBy {
+            val d = incomeDayOfMonth(it, month, year)
+            val m = if (it.sourceMonth > 0) it.sourceMonth else month
+            val y = if (it.sourceYear > 0) it.sourceYear else year
+            DateGroupKey(y, m, d)
+        }
+        .entries
+        .sortedByDescending { it.key }
+        .map { it.key to it.value.sortedWith(compareCreditsByRecency(it.key.month, it.key.year)) }
     }
 
     val totalFilteredCredits = remember(filteredCredits) { filteredCredits.sumOf { it.amount } }
@@ -154,6 +223,7 @@ fun DashboardScreen(
         selectedSpecificDay,
         selectedStartDay,
         selectedEndDay,
+        customDateRange,
         dashboardViewMode,
         month,
         year
@@ -179,7 +249,9 @@ fun DashboardScreen(
                 true
             }
             val matchesCategory = matchesDebitCategoryFilter(item, selectedCategoryFilter)
-            val matchesDay = when {
+            val matchesDay = if (customDateRange != null && customDateRange!!.isMultiMonth) {
+                customDateRange!!.containsDate(item.year, item.month, item.dueDateDay)
+            } else when {
                 selectedStartDay != null && selectedEndDay != null -> {
                     val minD = minOf(selectedStartDay!!, selectedEndDay!!)
                     val maxD = maxOf(selectedStartDay!!, selectedEndDay!!)
@@ -236,10 +308,10 @@ fun DashboardScreen(
     }
 
     val debitsByDate = remember(filteredDebits, month, year) {
-        filteredDebits.groupBy { it.dueDateDay }
+        filteredDebits.groupBy { DateGroupKey(it.year, it.month, it.dueDateDay) }
             .entries
             .sortedByDescending { it.key }
-            .map { it.key to it.value.sortedWith(compareDebitsByRecency(month, year)) }
+            .map { it.key to it.value.sortedWith(compareDebitsByRecency(it.key.month, it.key.year)) }
     }
 
     LazyColumn(
@@ -259,22 +331,6 @@ fun DashboardScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-                    val dateHeaderLabel = remember(monthName, year, selectedStartDay, selectedEndDay, selectedSpecificDay) {
-                        when {
-                            selectedStartDay != null && selectedEndDay != null && selectedStartDay != selectedEndDay -> {
-                                val minD = minOf(selectedStartDay!!, selectedEndDay!!)
-                                val maxD = maxOf(selectedStartDay!!, selectedEndDay!!)
-                                "$monthName $minD–$maxD, $year"
-                            }
-                            selectedStartDay != null -> {
-                                "$monthName $selectedStartDay, $year"
-                            }
-                            selectedSpecificDay != null -> {
-                                "$monthName $selectedSpecificDay, $year"
-                            }
-                            else -> "$monthName $year"
-                        }
-                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -352,12 +408,17 @@ fun DashboardScreen(
                 }
             }
             if (showCalendarPicker) {
+                val range = customDateRange
                 IndGoogleCalendarDatePicker(
                     currentMonth = month,
                     currentYear = year,
                     currentSelectedDay = selectedSpecificDay,
-                    currentStartDay = selectedStartDay,
-                    currentEndDay = selectedEndDay,
+                    currentStartDay = range?.startDay ?: selectedStartDay,
+                    currentEndDay = range?.endDay ?: selectedEndDay,
+                    currentStartMonth = range?.startMonth ?: month,
+                    currentStartYear = range?.startYear ?: year,
+                    currentEndMonth = range?.endMonth ?: month,
+                    currentEndYear = range?.endYear ?: year,
                     onDismiss = { showCalendarPicker = false },
                     onSelectDate = { m, y, d ->
                         viewModel.setMonthYear(m, y, d)
@@ -365,6 +426,10 @@ fun DashboardScreen(
                     },
                     onSelectDateRange = { m, y, s, e ->
                         viewModel.setDateRangeFilter(m, y, s, e)
+                        showCalendarPicker = false
+                    },
+                    onSelectFullDateRange = { sy, sm, sd, ey, em, ed ->
+                        viewModel.setFullDateRange(sy, sm, sd, ey, em, ed)
                         showCalendarPicker = false
                     }
                 )
@@ -724,14 +789,46 @@ fun DashboardScreen(
 
         if (filteredDebits.isEmpty()) {
             item {
-                EmptyState(
-                    title = "No Transactions Found for $monthName $year",
-                    subtitle = "Add your first transaction manually or import bank statements (PhonePe, Google Pay, Super Money) to start tracking.",
-                    primaryButtonText = "Add Your First Transaction",
-                    secondaryButtonText = "Import Statement",
-                    onPrimaryAction = { onOpenAddDebit() },
-                    onSecondaryAction = { showImportStatementDialog = true }
+                val hasDebitFilters = currentDebits.isNotEmpty() && (
+                    selectedStatusFilter != "ALL" ||
+                    creditCardOnlyFilter ||
+                    recurringOnlyFilter ||
+                    selectedCategoryFilter != "ALL" ||
+                    selectedSpecificDay != null ||
+                    selectedStartDay != null ||
+                    selectedEndDay != null ||
+                    (customDateRange != null && customDateRange!!.isMultiMonth)
                 )
+                if (hasDebitFilters) {
+                    EmptyState(
+                        title = "No Expenses Match Filters",
+                        subtitle = "You have ${currentDebits.size} transactions ($currencySymbol${"%,.0f".format(summary.totalDebits)}) recorded, but none match your active filters or date selection.",
+                        primaryButtonText = "Show All Month",
+                        secondaryButtonText = "Clear Filters",
+                        onPrimaryAction = {
+                            viewModel.clearDateFilter()
+                            selectedStatusFilter = "ALL"
+                            creditCardOnlyFilter = false
+                            recurringOnlyFilter = false
+                            selectedCategoryFilter = "ALL"
+                        },
+                        onSecondaryAction = {
+                            selectedStatusFilter = "ALL"
+                            creditCardOnlyFilter = false
+                            recurringOnlyFilter = false
+                            selectedCategoryFilter = "ALL"
+                        }
+                    )
+                } else {
+                    EmptyState(
+                        title = "No Transactions Found for $dateHeaderLabel",
+                        subtitle = "Add your first transaction manually or prefill recurring expenses from previous months to start tracking.",
+                        primaryButtonText = "Prefill Recurring",
+                        secondaryButtonText = "Add Expense",
+                        onPrimaryAction = { viewModel.prefillRecurringForMonth(month, year) },
+                        onSecondaryAction = { onOpenAddDebit() }
+                    )
+                }
             }
         } else if (dashboardViewMode == "GROUP_BY_CATEGORY") {
             items(dashboardCategorySummaries, key = { "cat_${it.categoryKey}" }) { cat ->
@@ -740,6 +837,12 @@ fun DashboardScreen(
                 val categoryItems = remember(filteredDebits, cat.categoryKey, month, year) {
                     filteredDebits.filter { debitMatchesCategorySummary(it, cat) }
                         .sortedWith(compareDebitsByRecency(month, year))
+                }
+                val categoryDebitsByDate = remember(categoryItems, month, year) {
+                    categoryItems.groupBy { DateGroupKey(it.year, it.month, it.dueDateDay) }
+                        .entries
+                        .sortedByDescending { it.key }
+                        .map { it.key to it.value.sortedWith(compareDebitsByRecency(it.key.month, it.key.year)) }
                 }
 
                 IndCard(
@@ -845,19 +948,68 @@ fun DashboardScreen(
                         if (isExpanded) {
                             Spacer(modifier = Modifier.height(4.dp))
                             HorizontalDivider(color = IndBorderSubtle, thickness = 0.5.dp)
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                categoryItems.forEach { item ->
-                                    DebitItemCard(
-                                        item = item,
-                                        currencySymbol = currencySymbol,
-                                        onTogglePaid = { viewModel.toggleDebitPaid(item) },
-                                        onToggleCreditCard = { viewModel.toggleDebitCreditCardStatus(item) },
-                                        onToggleRecurring = { viewModel.toggleDebitRecurring(item) },
-                                        onEdit = { editingDebitItem = item },
-                                        onDelete = { expensePendingDelete = item },
-                                        customCategories = customCategories,
-                                        customExpenseTags = customExpenseTags
-                                    )
+                            Column(
+                                modifier = Modifier.padding(top = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                categoryDebitsByDate.forEach { (dateKey, dateDebits) ->
+                                    val (itemYear, itemMonth, day) = dateKey
+                                    val dateStr = formatDayToDateString(day, itemMonth, itemYear)
+                                    val dateTotal = dateDebits.sumOf { it.amount }
+                                    Surface(
+                                        color = IndBackground,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(0.5.dp, IndBorderSubtle),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 4.dp, bottom = 2.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.CalendarToday,
+                                                    contentDescription = null,
+                                                    tint = IndBlue,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Text(
+                                                    text = "Transaction Date: $dateStr",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = IndNavyHeader
+                                                )
+                                            }
+                                            Text(
+                                                text = "$currencySymbol${"%,.0f".format(dateTotal)}",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = IndNavyHeader
+                                            )
+                                        }
+                                    }
+
+                                    dateDebits.forEach { item ->
+                                        DebitItemCard(
+                                            item = item,
+                                            currencySymbol = currencySymbol,
+                                            onTogglePaid = { viewModel.toggleDebitPaid(item) },
+                                            onToggleCreditCard = { viewModel.toggleDebitCreditCardStatus(item) },
+                                            onToggleRecurring = { viewModel.toggleDebitRecurring(item) },
+                                            onEdit = { editingDebitItem = item },
+                                            onDelete = { expensePendingDelete = item },
+                                            customCategories = customCategories,
+                                            customExpenseTags = customExpenseTags
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -865,9 +1017,10 @@ fun DashboardScreen(
                 }
             }
         } else {
-            debitsByDate.forEach { (day, dayDebits) ->
-                item(key = "date_header_$day") {
-                    val dateStr = formatDayToDateString(day, month, year)
+            debitsByDate.forEach { (dateKey, dayDebits) ->
+                val (itemYear, itemMonth, day) = dateKey
+                item(key = "date_header_${itemYear}_${itemMonth}_${day}") {
+                    val dateStr = formatDayToDateString(day, itemMonth, itemYear)
                     val dayTotal = dayDebits.sumOf { it.amount }
                     Surface(
                         color = IndBackground,
@@ -895,7 +1048,7 @@ fun DashboardScreen(
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
-                                    text = "Transaction Date: Day $day ($dateStr)",
+                                    text = "Transaction Date: $dateStr",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = IndNavyHeader
@@ -937,7 +1090,8 @@ fun DashboardScreen(
                         .sortedByDescending { it.second }
                 }
                 val visibleCreditTotal = filteredCredits.sumOf { it.amount }
-                val creditFiltersActive = selectedCreditStatusFilter != "ALL" || selectedCreditCategoryFilter != "ALL"
+                val creditFiltersActive = selectedCreditStatusFilter != "ALL" || selectedCreditCategoryFilter != "ALL" ||
+                    selectedSpecificDay != null || selectedStartDay != null || selectedEndDay != null
 
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -957,7 +1111,7 @@ fun DashboardScreen(
                             )
                             Text(
                                 text = if (creditsViewMode == "LIST") {
-                                    "List view · newest first"
+                                    "Date-wise view · newest first"
                                 } else {
                                     "Grouped by category"
                                 },
@@ -1010,6 +1164,7 @@ fun DashboardScreen(
                                         DashIconChip("Clear", Icons.Filled.Close, false, IndRed) {
                                             selectedCreditStatusFilter = "ALL"
                                             selectedCreditCategoryFilter = "ALL"
+                                            viewModel.clearDateFilter()
                                         }
                                     }
                                 }
@@ -1039,7 +1194,7 @@ fun DashboardScreen(
                                 isListView = creditsViewMode == "LIST",
                                 accentColor = Color(0xFF16A34A),
                                 groupLabel = "Group by category",
-                                listLabel = "List view",
+                                listLabel = "Date-wise view",
                                 onGroupBy = { creditsViewMode = "GROUP_BY_CATEGORY" },
                                 onList = { creditsViewMode = "LIST" }
                             )
@@ -1051,23 +1206,60 @@ fun DashboardScreen(
 
             if (filteredCredits.isEmpty()) {
                 item {
-                    EmptyState(
-                        title = "No Credits / Income Found for $monthName $year",
-                        subtitle = "Add your primary salary, freelance earnings, or additional credit entries to track your inflows.",
-                        primaryButtonText = "Add Credit",
-                        secondaryButtonText = "Manage Base Salary",
-                        onPrimaryAction = { showAddCreditDialog = true },
-                        onSecondaryAction = { showManageIncomeDialog = true }
+                    val hasCreditDateFilter = currentIncomeSources.isNotEmpty() && (
+                        selectedCreditStatusFilter != "ALL" ||
+                        selectedCreditCategoryFilter != "ALL" ||
+                        selectedStartDay != null ||
+                        selectedEndDay != null ||
+                        selectedSpecificDay != null ||
+                        (customDateRange != null && customDateRange!!.isMultiMonth)
                     )
+                    if (hasCreditDateFilter) {
+                        EmptyState(
+                            title = "No Income in Date Range",
+                            subtitle = "You have ${currentIncomeSources.size} income records ($currencySymbol${"%,.0f".format(summary.totalIncome)}), but none match the active date/filter selection.",
+                            primaryButtonText = "Show All Month",
+                            secondaryButtonText = "Clear Filters",
+                            onPrimaryAction = {
+                                viewModel.clearDateFilter()
+                                selectedCreditStatusFilter = "ALL"
+                                selectedCreditCategoryFilter = "ALL"
+                            },
+                            onSecondaryAction = {
+                                selectedCreditStatusFilter = "ALL"
+                                selectedCreditCategoryFilter = "ALL"
+                            }
+                        )
+                    } else {
+                        EmptyState(
+                            title = "No Credits / Income Found for $dateHeaderLabel",
+                            subtitle = "Add your primary salary, freelance earnings, or additional credit entries to track your inflows.",
+                            primaryButtonText = "Add Credit",
+                            secondaryButtonText = "Manage Base Salary",
+                            onPrimaryAction = { showAddCreditDialog = true },
+                            onSecondaryAction = { showManageIncomeDialog = true }
+                        )
+                    }
                 }
             } else if (creditsViewMode == "GROUP_BY_CATEGORY") {
                 items(creditsCategorySummaries, key = { "credit_cat_${it.categoryKey}" }) { cat ->
                     val isExpanded = expandedCreditCategoryKeys.contains(cat.categoryKey)
-                    val categoryItems = remember(filteredCredits, cat.categoryKey) {
+                    val categoryItems = remember(filteredCredits, cat.categoryKey, month, year) {
                         filteredCredits.filter {
                             it.category.equals(cat.categoryKey, ignoreCase = true) ||
                             it.category.equals(cat.categoryName, ignoreCase = true)
-                        }.sortedWith(compareCreditsByRecency())
+                        }.sortedWith(compareCreditsByRecency(month, year))
+                    }
+                    val categoryCreditsByDate = remember(categoryItems, month, year) {
+                        categoryItems.groupBy {
+                            val d = incomeDayOfMonth(it, month, year)
+                            val m = if (it.sourceMonth > 0) it.sourceMonth else month
+                            val y = if (it.sourceYear > 0) it.sourceYear else year
+                            DateGroupKey(y, m, d)
+                        }
+                        .entries
+                        .sortedByDescending { it.key }
+                        .map { it.key to it.value.sortedWith(compareCreditsByRecency(it.key.month, it.key.year)) }
                     }
 
                     IndCard(
@@ -1142,16 +1334,73 @@ fun DashboardScreen(
                             if (isExpanded) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 HorizontalDivider(color = IndBorderSubtle, thickness = 0.5.dp)
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    categoryItems.forEach { item ->
-                                        CreditItemCard(
-                                            item = item,
-                                            currencySymbol = currencySymbol,
-                                            onToggleReceived = { viewModel.toggleIncomeReceived(item.id, month, year) },
-                                            onToggleRecurring = { viewModel.toggleIncomeRecurring(item.id, month, year) },
-                                            onEdit = { editingCreditSource = item },
-                                            onDelete = { creditPendingDelete = item }
-                                        )
+                                Column(
+                                    modifier = Modifier.padding(top = 4.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    categoryCreditsByDate.forEach { (dateKey, dateCredits) ->
+                                        val (itemYear, itemMonth, day) = dateKey
+                                        val dateStr = formatDayToDateString(day, itemMonth, itemYear)
+                                        val dateTotal = dateCredits.sumOf { it.amount }
+                                        Surface(
+                                            color = IndBackground,
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(0.5.dp, IndBorderSubtle),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 4.dp, bottom = 2.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.CalendarToday,
+                                                        contentDescription = null,
+                                                        tint = Color(0xFF16A34A),
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Text(
+                                                        text = "Credit Date: $dateStr",
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = IndNavyHeader
+                                                    )
+                                                }
+                                                Text(
+                                                    text = "+$currencySymbol${"%,.0f".format(dateTotal)}",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF16A34A)
+                                                )
+                                            }
+                                        }
+
+                                        dateCredits.forEach { item ->
+                                            CreditItemCard(
+                                                item = item,
+                                                currencySymbol = currencySymbol,
+                                                onToggleReceived = {
+                                                    val targetM = item.sourceMonth.takeIf { it > 0 } ?: itemMonth
+                                                    val targetY = item.sourceYear.takeIf { it > 0 } ?: itemYear
+                                                    viewModel.toggleIncomeReceived(item.id, targetM, targetY)
+                                                },
+                                                onToggleRecurring = {
+                                                    val targetM = item.sourceMonth.takeIf { it > 0 } ?: itemMonth
+                                                    val targetY = item.sourceYear.takeIf { it > 0 } ?: itemYear
+                                                    viewModel.toggleIncomeRecurring(item.id, targetM, targetY)
+                                                },
+                                                onEdit = { editingCreditSource = item },
+                                                onDelete = { creditPendingDelete = item }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1159,15 +1408,70 @@ fun DashboardScreen(
                     }
                 }
             } else {
-                items(filteredCredits, key = { "credit_${it.id}" }) { item ->
-                    CreditItemCard(
-                        item = item,
-                        currencySymbol = currencySymbol,
-                        onToggleReceived = { viewModel.toggleIncomeReceived(item.id, month, year) },
-                        onToggleRecurring = { viewModel.toggleIncomeRecurring(item.id, month, year) },
-                        onEdit = { editingCreditSource = item },
-                        onDelete = { creditPendingDelete = item }
-                    )
+                creditsByDate.forEach { (dateKey, dayCredits) ->
+                    val (itemYear, itemMonth, day) = dateKey
+                    item(key = "credit_date_header_${itemYear}_${itemMonth}_${day}") {
+                        val dateStr = formatDayToDateString(day, itemMonth, itemYear)
+                        val dayTotal = dayCredits.sumOf { it.amount }
+                        Surface(
+                            color = IndBackground,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(0.5.dp, IndBorderSubtle),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp, bottom = 2.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.CalendarToday,
+                                        contentDescription = null,
+                                        tint = Color(0xFF16A34A),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "Credit Date: $dateStr",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = IndNavyHeader
+                                    )
+                                }
+                                Text(
+                                    text = "+$currencySymbol${"%,.0f".format(dayTotal)}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF16A34A)
+                                )
+                            }
+                        }
+                    }
+                    items(dayCredits, key = { "credit_${it.id}_${itemYear}_${itemMonth}" }) { item ->
+                        CreditItemCard(
+                            item = item,
+                            currencySymbol = currencySymbol,
+                            onToggleReceived = {
+                                val targetM = item.sourceMonth.takeIf { it > 0 } ?: itemMonth
+                                val targetY = item.sourceYear.takeIf { it > 0 } ?: itemYear
+                                viewModel.toggleIncomeReceived(item.id, targetM, targetY)
+                            },
+                            onToggleRecurring = {
+                                val targetM = item.sourceMonth.takeIf { it > 0 } ?: itemMonth
+                                val targetY = item.sourceYear.takeIf { it > 0 } ?: itemYear
+                                viewModel.toggleIncomeRecurring(item.id, targetM, targetY)
+                            },
+                            onEdit = { editingCreditSource = item },
+                            onDelete = { creditPendingDelete = item }
+                        )
+                    }
                 }
             }
         }
@@ -1185,19 +1489,31 @@ fun DashboardScreen(
                 showAddCreditDialog = false
                 editingCreditSource = null
             },
-            onSaveNewCredit = { title, amount, category, dateString, isRecurring ->
-                viewModel.addIncomeCredit(title, amount, category, dateString, month, year, isRecurring)
+            onSaveNewCredit = { title, amount, category, dateString, isRecurring, isReceived ->
+                viewModel.addIncomeCredit(title, amount, category, dateString, month, year, isRecurring, isReceived)
                 showManageIncomeDialog = false
                 showAddCreditDialog = false
             },
-            onUpdateCredit = { id, title, amount, category, dateString, isRecurring ->
-                viewModel.updateIncomeSource(id, title, amount, category, dateString, month, year, isRecurring)
+            onUpdateCredit = { id, title, amount, category, dateString, isRecurring, isReceived ->
+                val src = summary.incomeSources.find { it.id == id }
+                val targetMonth = src?.sourceMonth?.takeIf { it > 0 } ?: month
+                val targetYear = src?.sourceYear?.takeIf { it > 0 } ?: year
+                viewModel.updateIncomeSource(id, title, amount, category, dateString, targetMonth, targetYear, isRecurring, isReceived)
                 showManageIncomeDialog = false
                 showAddCreditDialog = false
                 editingCreditSource = null
             },
+            onToggleReceived = { id ->
+                val src = summary.incomeSources.find { it.id == id }
+                val targetMonth = src?.sourceMonth?.takeIf { it > 0 } ?: month
+                val targetYear = src?.sourceYear?.takeIf { it > 0 } ?: year
+                viewModel.toggleIncomeReceived(id, targetMonth, targetYear)
+            },
             onDeleteCredit = { id ->
-                viewModel.deleteIncomeSource(id, month, year)
+                val src = summary.incomeSources.find { it.id == id }
+                val targetMonth = src?.sourceMonth?.takeIf { it > 0 } ?: month
+                val targetYear = src?.sourceYear?.takeIf { it > 0 } ?: year
+                viewModel.deleteIncomeSource(id, targetMonth, targetYear)
             },
             onUpdateBaseSalary = { newSalary ->
                 viewModel.updateBaseSalary(newSalary, month, year)
@@ -1398,7 +1714,7 @@ fun DebitItemCard(
         }
     }
 
-    val subtitleText = remember(categoryLabel, isCcItem, item.isPaid, item.isRecurring, isChit, isLoan, paidMonths, item.currentMonthTenure, item.totalTenureMonths, outstandingBalance, currencySymbol) {
+    val subtitleText = remember(categoryLabel, isCcItem, item.isPaid, item.isRecurring, isChit, isLoan, paidMonths, item.currentMonthTenure, item.totalTenureMonths, outstandingBalance, currencySymbol, item.dueDateDay, item.month, item.year) {
         buildString {
             val catPretty = prettyCategory(categoryLabel)
             if (isLoan && item.totalTenureMonths > 0) {
@@ -1411,6 +1727,7 @@ fun DebitItemCard(
             } else {
                 append(catPretty)
             }
+            append(" • 📅 ${formatDayToDateString(item.dueDateDay, item.month, item.year)}")
             if (isCcItem) {
                 append(" • 💳 CC")
             }
@@ -1753,11 +2070,20 @@ fun CreditItemCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit = {}
 ) {
-    val subtitleText = remember(item.category, item.isReceived, item.isRecurring) {
+    val subtitleText = remember(item.category, item.receivedDateTimestamp, item.sourceMonth, item.sourceYear, item.isRecurring) {
         buildString {
             append(prettyCategory(item.category))
-            append(" • ")
-            append(if (item.isReceived) "🟢 Received ✓" else "⏳ Pending Inflow")
+            val ts = item.receivedDateTimestamp
+            if (ts != null && ts > 0L) {
+                val dateFmt = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.ENGLISH).format(java.util.Date(ts))
+                append(" • 📅 $dateFmt")
+            } else {
+                val d = incomeDayOfMonth(item)
+                val m = if (item.sourceMonth > 0) item.sourceMonth else 10
+                val y = if (item.sourceYear > 0) item.sourceYear else 2026
+                val dateFmt = formatDayToDateString(d, m, y)
+                append(" • 📅 $dateFmt")
+            }
             if (item.isRecurring) {
                 append(" • 🔁 Recurring")
             }
@@ -1776,7 +2102,7 @@ fun CreditItemCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left: Icon + Title & Subtitle details
+            // Left: Icon + Title & Subtitle details + Interactive Status Chip
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1786,7 +2112,7 @@ fun CreditItemCard(
 
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     Text(
                         text = item.title.ifBlank { item.name },
@@ -1805,6 +2131,35 @@ fun CreditItemCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+
+                    // Interactive Status Chip to toggle Pending <-> Received directly
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (item.isReceived) Color(0xFFDCFCE7) else Color(0xFFFEF3C7),
+                        border = BorderStroke(0.6.dp, if (item.isReceived) Color(0xFF86EFAC) else Color(0xFFFDE68A)),
+                        modifier = Modifier
+                            .clickable(onClick = onToggleReceived)
+                            .testTag("toggle_received_credit_${item.id}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (item.isReceived) Icons.Filled.CheckCircle else Icons.Filled.Schedule,
+                                contentDescription = if (item.isReceived) "Mark Pending" else "Mark Received",
+                                tint = if (item.isReceived) Color(0xFF15803D) else Color(0xFFD97706),
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Text(
+                                text = if (item.isReceived) "Received ✓" else "Pending (Tap to receive)",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (item.isReceived) Color(0xFF15803D) else Color(0xFFB45309)
+                            )
+                        }
+                    }
                 }
             }
 
@@ -1840,12 +2195,22 @@ fun CreditItemCard(
     }
 }
 
+private data class DateGroupKey(val year: Int, val month: Int, val day: Int) : Comparable<DateGroupKey> {
+    override fun compareTo(other: DateGroupKey): Int {
+        val v1 = year * 10000 + month * 100 + day
+        val v2 = other.year * 10000 + other.month * 100 + other.day
+        return v1.compareTo(v2)
+    }
+}
+
 private fun debitRecencyMillis(item: DebitItem, month: Int, year: Int): Long {
     if (item.createdAt > 0L) return item.createdAt
     item.paidDateTimestamp?.takeIf { it > 0L }?.let { return it }
+    val itemM = if (item.month in 1..12) item.month else month
+    val itemY = if (item.year > 2000) item.year else year
     val day = item.dueDateDay.coerceIn(1, 28)
     return java.util.Calendar.getInstance().apply {
-        set(year, month - 1, day, 12, 0, 0)
+        set(itemY, itemM - 1, day, 12, 0, 0)
         set(java.util.Calendar.MILLISECOND, 0)
     }.timeInMillis
 }
@@ -1853,5 +2218,27 @@ private fun debitRecencyMillis(item: DebitItem, month: Int, year: Int): Long {
 private fun compareDebitsByRecency(month: Int, year: Int): Comparator<DebitItem> =
     compareByDescending<DebitItem> { debitRecencyMillis(it, month, year) }.thenByDescending { it.id }
 
-private fun compareCreditsByRecency(): Comparator<IncomeSource> =
-    compareByDescending<IncomeSource> { it.receivedDateTimestamp ?: 0L }.thenByDescending { it.id }
+private fun incomeDayOfMonth(item: IncomeSource, month: Int = 10, year: Int = 2026): Int {
+    val ts = item.receivedDateTimestamp
+    if (ts != null && ts > 0L) {
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = ts }
+        return cal.get(java.util.Calendar.DAY_OF_MONTH).coerceIn(1, 31)
+    }
+    return 1
+}
+
+private fun creditRecencyMillis(item: IncomeSource, month: Int, year: Int): Long {
+    val ts = item.receivedDateTimestamp
+    if (ts != null && ts > 0L) return ts
+    val itemM = if (item.sourceMonth in 1..12) item.sourceMonth else month
+    val itemY = if (item.sourceYear > 2000) item.sourceYear else year
+    val day = incomeDayOfMonth(item, itemM, itemY)
+    return java.util.Calendar.getInstance().apply {
+        set(itemY, itemM - 1, day, 12, 0, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }.timeInMillis
+}
+
+private fun compareCreditsByRecency(month: Int = 10, year: Int = 2026): Comparator<IncomeSource> =
+    compareByDescending<IncomeSource> { creditRecencyMillis(it, month, year) }.thenByDescending { it.id }
+

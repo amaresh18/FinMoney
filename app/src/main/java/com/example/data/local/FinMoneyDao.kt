@@ -57,7 +57,7 @@ interface FinMoneyDao {
     @Query("DELETE FROM salary_records WHERE userId = :userId OR :userId = '' OR userId = 'user_default'")
     suspend fun clearAllSalaryRecords(userId: String = "")
 
-    @Query("SELECT COUNT(*) FROM debit_items WHERE userId = :userId OR :userId = ''")
+    @Query("SELECT COUNT(*) FROM debit_items WHERE :userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default'")
     suspend fun getDebitsCount(userId: String = ""): Int
 
 
@@ -74,10 +74,10 @@ interface FinMoneyDao {
     @Query("SELECT * FROM debit_items WHERE cloudId = :cloudId AND cloudId != '' LIMIT 1")
     suspend fun getDebitByCloudId(cloudId: String): DebitItem?
 
-    @Query("SELECT * FROM debit_items WHERE (userId = :userId OR :userId = '') ORDER BY year DESC, month DESC")
+    @Query("SELECT * FROM debit_items WHERE (:userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default') ORDER BY year DESC, month DESC")
     fun getAllDebits(userId: String = ""): Flow<List<DebitItem>>
 
-    @Query("SELECT * FROM debit_items WHERE (userId = :userId OR :userId = '') ORDER BY year DESC, month DESC")
+    @Query("SELECT * FROM debit_items WHERE (:userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default') ORDER BY year DESC, month DESC")
     suspend fun getAllDebitsDirect(userId: String = ""): List<DebitItem>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -86,10 +86,10 @@ interface FinMoneyDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDebits(items: List<DebitItem>)
 
-    @Query("SELECT * FROM debit_items WHERE (userId = :userId OR :userId = '') AND isRecurring = 1")
+    @Query("SELECT * FROM debit_items WHERE (:userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default') AND isRecurring = 1")
     suspend fun getRecurringDebitsDirect(userId: String = ""): List<DebitItem>
 
-    @Query("SELECT * FROM debit_items WHERE (userId = :userId OR :userId = '') AND isRecurring = 1")
+    @Query("SELECT * FROM debit_items WHERE (:userId = '' OR :userId = 'user_default' OR userId = :userId OR userId = '' OR userId = 'user_default') AND isRecurring = 1")
     fun getRecurringDebitsFlow(userId: String = ""): Flow<List<DebitItem>>
 
     @Update

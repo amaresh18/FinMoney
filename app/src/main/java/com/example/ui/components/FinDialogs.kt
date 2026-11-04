@@ -347,18 +347,23 @@ fun IndGoogleCalendarDatePicker(
     currentSelectedDay: Int?,
     currentStartDay: Int? = null,
     currentEndDay: Int? = null,
+    currentStartMonth: Int = currentMonth,
+    currentStartYear: Int = currentYear,
+    currentEndMonth: Int = currentMonth,
+    currentEndYear: Int = currentYear,
     onDismiss: () -> Unit,
     onSelectDate: (month: Int, year: Int, day: Int?) -> Unit,
     onSelectDateRange: (month: Int, year: Int, startDay: Int?, endDay: Int?) -> Unit = { m, y, s, e ->
         onSelectDate(m, y, s)
-    }
+    },
+    onSelectFullDateRange: ((startYear: Int, startMonth: Int, startDay: Int, endYear: Int, endMonth: Int, endDay: Int) -> Unit)? = null
 ) {
-    val initialStartMillis = remember(currentYear, currentMonth, currentStartDay, currentSelectedDay) {
+    val initialStartMillis = remember(currentStartYear, currentStartMonth, currentStartDay, currentSelectedDay) {
         val day = currentStartDay ?: currentSelectedDay
         if (day != null) {
             val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
                 clear()
-                set(currentYear, currentMonth - 1, day, 0, 0, 0)
+                set(currentStartYear, currentStartMonth - 1, day, 0, 0, 0)
             }
             cal.timeInMillis
         } else {
@@ -366,12 +371,12 @@ fun IndGoogleCalendarDatePicker(
         }
     }
 
-    val initialEndMillis = remember(currentYear, currentMonth, currentEndDay) {
+    val initialEndMillis = remember(currentEndYear, currentEndMonth, currentEndDay) {
         val day = currentEndDay
         if (day != null) {
             val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
                 clear()
-                set(currentYear, currentMonth - 1, day, 0, 0, 0)
+                set(currentEndYear, currentEndMonth - 1, day, 0, 0, 0)
             }
             cal.timeInMillis
         } else {
@@ -402,10 +407,35 @@ fun IndGoogleCalendarDatePicker(
                 val endD = endCal.get(java.util.Calendar.DAY_OF_MONTH)
                 val endM = endCal.get(java.util.Calendar.MONTH) + 1
                 val endY = endCal.get(java.util.Calendar.YEAR)
-                onSelectDateRange(startM, startY, minOf(startD, endD), maxOf(startD, endD))
+
+                val startVal = startY * 10000 + startM * 100 + startD
+                val endVal = endY * 10000 + endM * 100 + endD
+                val sy: Int
+                val sm: Int
+                val sd: Int
+                val ey: Int
+                val em: Int
+                val ed: Int
+                if (startVal <= endVal) {
+                    sy = startY; sm = startM; sd = startD
+                    ey = endY; em = endM; ed = endD
+                } else {
+                    sy = endY; sm = endM; sd = endD
+                    ey = startY; em = startM; ed = startD
+                }
+
+                if (onSelectFullDateRange != null) {
+                    onSelectFullDateRange(sy, sm, sd, ey, em, ed)
+                } else {
+                    onSelectDateRange(sm, sy, sd, ed)
+                }
             } else {
-                onSelectDateRange(startM, startY, startD, startD)
-                onSelectDate(startM, startY, startD)
+                if (onSelectFullDateRange != null) {
+                    onSelectFullDateRange(startY, startM, startD, startY, startM, startD)
+                } else {
+                    onSelectDateRange(startM, startY, startD, startD)
+                    onSelectDate(startM, startY, startD)
+                }
             }
         }
         onDismiss()
@@ -461,24 +491,44 @@ fun IndGoogleCalendarDatePicker(
                         )
                     }
 
-                    Button(
-                        onClick = { applySelection() },
-                        enabled = dateRangePickerState.selectedStartDateMillis != null,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF00B050),
-                            disabledContainerColor = Color(0xFFE2E8F0),
-                            contentColor = Color.White,
-                            disabledContentColor = Color.Gray
-                        ),
-                        shape = RoundedCornerShape(20.dp),
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-                        modifier = Modifier.testTag("save_google_calendar_range_btn")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text(
-                            text = "Save",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
+                        TextButton(
+                            onClick = {
+                                onSelectDateRange(currentMonth, currentYear, null, null)
+                                onDismiss()
+                            },
+                            modifier = Modifier.testTag("all_month_calendar_btn")
+                        ) {
+                            Text(
+                                text = "All Month",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                color = IndBlue
+                            )
+                        }
+
+                        Button(
+                            onClick = { applySelection() },
+                            enabled = dateRangePickerState.selectedStartDateMillis != null,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF00B050),
+                                disabledContainerColor = Color(0xFFE2E8F0),
+                                contentColor = Color.White,
+                                disabledContentColor = Color.Gray
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+                            modifier = Modifier.testTag("save_google_calendar_range_btn")
+                        ) {
+                            Text(
+                                text = "Save",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
                     }
                 }
 
@@ -519,8 +569,9 @@ fun ManageIncomeCreditDialog(
     startInEditCredit: IncomeSource? = null,
     openOnAddCreditTab: Boolean = false,
     onDismiss: () -> Unit,
-    onSaveNewCredit: (title: String, amount: Double, category: String, dateString: String, isRecurring: Boolean) -> Unit,
-    onUpdateCredit: (id: String, title: String, amount: Double, category: String, dateString: String, isRecurring: Boolean) -> Unit,
+    onSaveNewCredit: (title: String, amount: Double, category: String, dateString: String, isRecurring: Boolean, isReceived: Boolean) -> Unit,
+    onUpdateCredit: (id: String, title: String, amount: Double, category: String, dateString: String, isRecurring: Boolean, isReceived: Boolean) -> Unit,
+    onToggleReceived: ((id: String) -> Unit)? = null,
     onDeleteCredit: (id: String) -> Unit,
     onUpdateBaseSalary: (amount: Double) -> Unit
 ) {
@@ -539,6 +590,7 @@ fun ManageIncomeCreditDialog(
     var category by remember { mutableStateOf(IncomeCategory.FREELANCE.name) }
     var dateString by remember { mutableStateOf(defaultDateStr) }
     var isRecurringCredit by remember { mutableStateOf(false) }
+    var isReceivedCredit by remember { mutableStateOf(true) }
     var salaryStr by remember { mutableStateOf(if (baseSalary > 0) baseSalary.toInt().toString() else "") }
 
     LaunchedEffect(startInEditCredit?.id) {
@@ -551,6 +603,7 @@ fun ManageIncomeCreditDialog(
             } else ""
             category = src.category
             isRecurringCredit = src.isRecurring
+            isReceivedCredit = src.isReceived
             val ts = src.receivedDateTimestamp ?: 0L
             dateString = if (ts > 0) {
                 SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(ts))
@@ -588,20 +641,22 @@ fun ManageIncomeCreditDialog(
                 editingSourceId != null -> {
                     val amt = amountStr.toDoubleOrNull() ?: 0.0
                     if (isFormValid) {
-                        onUpdateCredit(editingSourceId!!, title, amt, category, dateString, isRecurringCredit)
+                        onUpdateCredit(editingSourceId!!, title, amt, category, dateString, isRecurringCredit, isReceivedCredit)
                         editingSourceId = null
                         title = ""
                         amountStr = ""
                         isRecurringCredit = false
+                        isReceivedCredit = true
                     }
                 }
                 selectedTabIndex == 1 -> {
                     val amt = amountStr.toDoubleOrNull() ?: 0.0
                     if (isFormValid) {
-                        onSaveNewCredit(title, amt, category, dateString, isRecurringCredit)
+                        onSaveNewCredit(title, amt, category, dateString, isRecurringCredit, isReceivedCredit)
                         title = ""
                         amountStr = ""
                         isRecurringCredit = false
+                        isReceivedCredit = true
                     }
                 }
                 selectedTabIndex == 2 -> {
@@ -691,6 +746,61 @@ fun ManageIncomeCreditDialog(
                     isRecurring = isRecurringCredit,
                     onRecurringChange = { isRecurringCredit = it }
                 )
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isReceivedCredit) Color(0xFFDCFCE7) else Color(0xFFFEF3C7),
+                    border = BorderStroke(1.dp, if (isReceivedCredit) Color(0xFF86EFAC) else Color(0xFFFDE68A)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = if (isReceivedCredit) Icons.Filled.CheckCircle else Icons.Filled.Schedule,
+                                contentDescription = null,
+                                tint = if (isReceivedCredit) Color(0xFF15803D) else Color(0xFFD97706),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = if (isReceivedCredit) "Status: Received ✓" else "Status: Pending Inflow ⏳",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isReceivedCredit) Color(0xFF15803D) else Color(0xFFB45309)
+                                )
+                                Text(
+                                    text = if (isReceivedCredit) "Credited to account" else "Awaiting credit / inflow",
+                                    fontSize = 11.sp,
+                                    color = IndTextSecondary
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = isReceivedCredit,
+                            onCheckedChange = { isReceivedCredit = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF15803D),
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = Color(0xFFD97706)
+                            ),
+                            modifier = Modifier.testTag("toggle_edit_credit_received_switch")
+                        )
+                    }
+                }
 
                 Row(
                     modifier = Modifier
@@ -787,16 +897,48 @@ fun ManageIncomeCreditDialog(
                                                 text = buildString {
                                                     append(src.category)
                                                     append(" • ₹${"%,.0f".format(src.amount)}")
+                                                    append(if (src.isReceived) " • 🟢 Received" else " • ⏳ Pending")
                                                     if (src.isRecurring) append(" • ↻ Recurring")
                                                 },
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.SemiBold,
-                                                color = IndGreenDark
+                                                color = if (src.isReceived) Color(0xFF15803D) else Color(0xFFD97706)
                                             )
                                         }
                                     }
 
-                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (src.isReceived) Color(0xFFDCFCE7) else Color(0xFFFEF3C7),
+                                            border = BorderStroke(0.5.dp, if (src.isReceived) Color(0xFF86EFAC) else Color(0xFFFDE68A)),
+                                            modifier = Modifier
+                                                .clickable { onToggleReceived?.invoke(src.id) }
+                                                .testTag("dialog_toggle_received_${src.id}")
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (src.isReceived) Icons.Filled.CheckCircle else Icons.Filled.Schedule,
+                                                    contentDescription = null,
+                                                    tint = if (src.isReceived) Color(0xFF15803D) else Color(0xFFD97706),
+                                                    modifier = Modifier.size(11.dp)
+                                                )
+                                                Text(
+                                                    text = if (src.isReceived) "Received" else "Pending",
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (src.isReceived) Color(0xFF15803D) else Color(0xFFB45309)
+                                                )
+                                            }
+                                        }
+
                                         IconButton(
                                             onClick = {
                                                 editingSourceId = src.id
@@ -804,6 +946,7 @@ fun ManageIncomeCreditDialog(
                                                 amountStr = src.amount.toString()
                                                 category = src.category
                                                 isRecurringCredit = src.isRecurring
+                                                isReceivedCredit = src.isReceived
                                                 val ts = src.receivedDateTimestamp ?: 0L
                                                 dateString = if (ts > 0) {
                                                     SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(ts))
@@ -882,6 +1025,61 @@ fun ManageIncomeCreditDialog(
                     isRecurring = isRecurringCredit,
                     onRecurringChange = { isRecurringCredit = it }
                 )
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isReceivedCredit) Color(0xFFDCFCE7) else Color(0xFFFEF3C7),
+                    border = BorderStroke(1.dp, if (isReceivedCredit) Color(0xFF86EFAC) else Color(0xFFFDE68A)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = if (isReceivedCredit) Icons.Filled.CheckCircle else Icons.Filled.Schedule,
+                                contentDescription = null,
+                                tint = if (isReceivedCredit) Color(0xFF15803D) else Color(0xFFD97706),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = if (isReceivedCredit) "Status: Received ✓" else "Status: Pending Inflow ⏳",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isReceivedCredit) Color(0xFF15803D) else Color(0xFFB45309)
+                                )
+                                Text(
+                                    text = if (isReceivedCredit) "Already credited to account" else "Pending credit / inflow",
+                                    fontSize = 11.sp,
+                                    color = IndTextSecondary
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = isReceivedCredit,
+                            onCheckedChange = { isReceivedCredit = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF15803D),
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = Color(0xFFD97706)
+                            ),
+                            modifier = Modifier.testTag("toggle_add_credit_received_switch")
+                        )
+                    }
+                }
             }
 
             // Mode D: Tab 2 - Base Salary Update
@@ -942,8 +1140,10 @@ fun AddCreditDialog(
         incomeSources = emptyList(),
         baseSalary = 0.0,
         onDismiss = onDismiss,
-        onSaveNewCredit = onSave,
-        onUpdateCredit = { _, title, amount, category, dateString, isRecurring ->
+        onSaveNewCredit = { title, amount, category, dateString, isRecurring, _ ->
+            onSave(title, amount, category, dateString, isRecurring)
+        },
+        onUpdateCredit = { _, title, amount, category, dateString, isRecurring, _ ->
             onSave(title, amount, category, dateString, isRecurring)
         },
         onDeleteCredit = {},
