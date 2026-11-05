@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -163,11 +164,13 @@ fun MainScreen(
     var lastAddedCustomCategoryForEntry by remember { mutableStateOf<String?>(null) }
     var showAnalytics by remember { mutableStateOf(false) }
     var showKuberaAi by remember { mutableStateOf(false) }
+    var showProfileScreen by remember { mutableStateOf(false) }
 
     fun dismissFullScreenOverlays() {
         showPendingTransactions = false
         showKuberaAi = false
         showAnalytics = false
+        showProfileScreen = false
     }
 
     fun navigateToTab(tab: Int) {
@@ -175,10 +178,14 @@ fun MainScreen(
         selectedTab = tab
     }
 
-    val overlayObscuresMainContent = showPendingTransactions || showKuberaAi
+    val overlayObscuresMainContent = showPendingTransactions || showKuberaAi || showProfileScreen
 
     // Intercept back button on secondary views or tabs to navigate back safely
-    if (showPendingTransactions) {
+    if (showProfileScreen) {
+        BackHandler {
+            showProfileScreen = false
+        }
+    } else if (showPendingTransactions) {
         BackHandler {
             showPendingTransactions = false
         }
@@ -220,16 +227,45 @@ fun MainScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Left: Brand Logo & Title
+                        // Left: Google Profile Icon + Brand Title
                         Row(
                             modifier = Modifier.weight(1f, fill = false),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            BrandLogo(
-                                name = "FinMoney",
-                                badgeSize = 32.dp
-                            )
+                            val headerProfilePic = userProfile?.profilePicUri?.takeIf { it.isNotBlank() }
+                                ?: userProfile?.profileImageUri?.takeIf { it.isNotBlank() }
+
+                            Box(
+                                modifier = Modifier
+                                    .testTag("top_google_profile_button")
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(IndBlueLight)
+                                    .border(1.5.dp, IndBlue, CircleShape)
+                                    .clickable {
+                                        dismissFullScreenOverlays()
+                                        showProfileScreen = true
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!headerProfilePic.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = headerProfilePic,
+                                        contentDescription = "Profile",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Text(
+                                        text = (userProfile?.name?.takeIf { it != "Signed Out" && it.isNotBlank() }?.trim()?.take(1) ?: "G").uppercase(),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = IndBlue
+                                    )
+                                }
+                            }
+
                             Column(modifier = Modifier.weight(1f, fill = false)) {
                                 Text(
                                     text = "FinMoney",
@@ -339,32 +375,34 @@ fun MainScreen(
                             }
                         }
 
-                        // Profile Avatar
-                        val headerProfilePic = userProfile?.profilePicUri?.takeIf { it.isNotBlank() }
-                            ?: userProfile?.profileImageUri?.takeIf { it.isNotBlank() }
-                        Box(
+                        // My Bills Quick Action in place of old profile icon
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (selectedTab == 4 && !showProfileScreen) Color(0xFF0F172A) else Color(0xFFEFF6FF),
+                            border = BorderStroke(1.dp, if (selectedTab == 4 && !showProfileScreen) Color(0xFF0F172A) else Color(0xFF2563EB).copy(alpha = 0.3f)),
                             modifier = Modifier
-                                .testTag("top_profile_button")
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(if (selectedTab == 4 && !showKuberaAi) IndGreen else IndGreenLight)
-                                .border(1.5.dp, if (selectedTab == 4 && !showKuberaAi) IndGreenDark else IndGreen, CircleShape)
-                                .clickable { navigateToTab(4) },
-                            contentAlignment = Alignment.Center
+                                .clip(RoundedCornerShape(20.dp))
+                                .clickable {
+                                    navigateToTab(4)
+                                }
+                                .testTag("top_my_bills_button")
                         ) {
-                            if (!headerProfilePic.isNullOrBlank()) {
-                                AsyncImage(
-                                    model = headerProfilePic,
-                                    contentDescription = "Profile",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.ReceiptLong,
+                                    contentDescription = "My Bills",
+                                    tint = if (selectedTab == 4 && !showProfileScreen) Color.White else Color(0xFF2563EB),
+                                    modifier = Modifier.size(16.dp)
                                 )
-                            } else {
                                 Text(
-                                    text = (userProfile?.name?.takeIf { it != "Signed Out" && it.isNotBlank() }?.trim()?.take(1) ?: "A").uppercase(),
-                                    style = MaterialTheme.typography.titleMedium,
+                                    text = "My Bills",
+                                    fontSize = 11.5.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (selectedTab == 4 && !showKuberaAi) Color.White else IndGreenDark
+                                    color = if (selectedTab == 4 && !showProfileScreen) Color.White else Color(0xFF2563EB)
                                 )
                             }
                         }
@@ -498,20 +536,20 @@ fun MainScreen(
                     NavigationBarItem(
                         icon = {
                             Icon(
-                                imageVector = if (selectedTab == 4 && !showKuberaAi) Icons.Filled.Person else Icons.Outlined.Person,
-                                contentDescription = "Profile & Settings"
+                                imageVector = if (selectedTab == 4 && !showKuberaAi && !showProfileScreen) Icons.Filled.ReceiptLong else Icons.Outlined.ReceiptLong,
+                                contentDescription = "My Bills"
                             )
                         },
                         label = {
                             Text(
-                                "Profile",
+                                "My Bills",
                                 style = MaterialTheme.typography.labelSmall,
                                 maxLines = 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                 softWrap = false
                             )
                         },
-                        selected = selectedTab == 4 && !overlayObscuresMainContent,
+                        selected = selectedTab == 4 && !overlayObscuresMainContent && !showProfileScreen,
                         onClick = { navigateToTab(4) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = IndBlue,
@@ -530,7 +568,13 @@ fun MainScreen(
                 .padding(padding)
                 .background(IndBackground)
         ) {
-            if (showPendingTransactions) {
+            if (showProfileScreen) {
+                UserProfileScreen(
+                    viewModel = viewModel,
+                    onBack = { showProfileScreen = false },
+                    showShellHeader = true
+                )
+            } else if (showPendingTransactions) {
                 PendingTransactionsScreen(
                     viewModel = viewModel,
                     onBack = { showPendingTransactions = false },
@@ -590,10 +634,9 @@ fun MainScreen(
                         viewModel = viewModel,
                         onBack = { selectedTab = 0 }
                     )
-                    4 -> UserProfileScreen(
+                    4 -> MyBillsScreen(
                         viewModel = viewModel,
-                        onBack = { selectedTab = 0 },
-                        showShellHeader = false
+                        onBack = { selectedTab = 0 }
                     )
                 }
             }
