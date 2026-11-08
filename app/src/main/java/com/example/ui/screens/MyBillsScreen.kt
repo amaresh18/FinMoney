@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -795,6 +796,12 @@ private fun BillProviderAvatar(providerCode: String, category: BillCategory) {
             shape = CircleShape,
             color = when (category) {
                 BillCategory.UTILITY -> Color(0xFFFEF3C7)
+                BillCategory.MOBILE_RECHARGE -> Color(0xFFDBEAFE)
+                BillCategory.DTH -> Color(0xFFF3E8FF)
+                BillCategory.WATER -> Color(0xFFE0F2FE)
+                BillCategory.GAS -> Color(0xFFFFEDD5)
+                BillCategory.BROADBAND -> Color(0xFFCCFBF1)
+                BillCategory.FASTAG -> Color(0xFFDCFCE7)
                 BillCategory.INSURANCE -> Color(0xFFE0F2FE)
                 BillCategory.LOANS -> Color(0xFFF3E8FF)
                 else -> Color(0xFFDCFCE7)
@@ -805,6 +812,12 @@ private fun BillProviderAvatar(providerCode: String, category: BillCategory) {
                 Icon(
                     imageVector = when (category) {
                         BillCategory.UTILITY -> Icons.Filled.Bolt
+                        BillCategory.MOBILE_RECHARGE -> Icons.Filled.Smartphone
+                        BillCategory.DTH -> Icons.Filled.Tv
+                        BillCategory.WATER -> Icons.Filled.WaterDrop
+                        BillCategory.GAS -> Icons.Filled.LocalGasStation
+                        BillCategory.BROADBAND -> Icons.Filled.Wifi
+                        BillCategory.FASTAG -> Icons.Filled.DirectionsCar
                         BillCategory.INSURANCE -> Icons.Filled.HealthAndSafety
                         BillCategory.LOANS -> Icons.Filled.Home
                         else -> Icons.Filled.CreditCard
@@ -812,6 +825,12 @@ private fun BillProviderAvatar(providerCode: String, category: BillCategory) {
                     contentDescription = null,
                     tint = when (category) {
                         BillCategory.UTILITY -> Color(0xFFD97706)
+                        BillCategory.MOBILE_RECHARGE -> Color(0xFF2563EB)
+                        BillCategory.DTH -> Color(0xFF7C3AED)
+                        BillCategory.WATER -> Color(0xFF0284C7)
+                        BillCategory.GAS -> Color(0xFFEA580C)
+                        BillCategory.BROADBAND -> Color(0xFF0D9488)
+                        BillCategory.FASTAG -> Color(0xFF16A34A)
                         BillCategory.INSURANCE -> Color(0xFF0284C7)
                         BillCategory.LOANS -> Color(0xFF9333EA)
                         else -> IndGreenButton
@@ -1044,7 +1063,7 @@ private fun SingleClickPaymentSheet(
                         color = IndNavyHeader
                     )
                     Text(
-                        text = "Powered by Bharat Connect & INDpay",
+                        text = "Powered by PayNearby BBPS & INDpay",
                         fontSize = 11.5.sp,
                         color = IndTextSecondary
                     )
@@ -1417,12 +1436,16 @@ private fun BillPaymentSuccessDialog(
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("PayNearby BBPS Ref ID:", fontSize = 11.5.sp, color = IndTextSecondary)
+                            Text(bill.paynearbyTransactionId ?: "PNB_BBPS_${(100000..999999).random()}", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7))
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Transaction Ref (UTR):", fontSize = 11.5.sp, color = IndTextSecondary)
                             Text(bill.utrReference ?: "IND89240182", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = IndNavyHeader)
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Bharat Connect ID:", fontSize = 11.5.sp, color = IndTextSecondary)
-                            Text("BC-TXN-${(1000..9999).random()}", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Retailer Commission:", fontSize = 11.5.sp, color = Color(0xFF15803D), fontWeight = FontWeight.Bold)
+                            Text("Credited (PayNearby Hub)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15803D))
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Cashback Earned:", fontSize = 11.5.sp, color = Color(0xFF15803D), fontWeight = FontWeight.Bold)
@@ -1641,12 +1664,7 @@ private fun AddBillProviderDialog(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf(
-                            BillCategory.CREDIT_CARD,
-                            BillCategory.UTILITY,
-                            BillCategory.INSURANCE,
-                            BillCategory.LOANS
-                        ).forEach { cat ->
+                        BillCategory.entries.filter { it != BillCategory.ALL && it != BillCategory.NEW_CARDS }.forEach { cat ->
                             val isSelected = selectedCategory == cat
                             FilterChip(
                                 selected = isSelected,
@@ -2116,6 +2134,11 @@ private fun PartnerHubDialog(
 ) {
     var selectedTab by remember { mutableStateOf(0) } // 0 = Config, 1 = Ledger
 
+    var pnbAgentId by remember { mutableStateOf(credentials.paynearbyAgentId) }
+    var pnbApiKey by remember { mutableStateOf(credentials.paynearbyApiKey) }
+    var pnbMobile by remember { mutableStateOf(credentials.paynearbyMerchantMobile) }
+    var isPnbActive by remember { mutableStateOf(credentials.isPayNearbyActive) }
+
     var gromoCode by remember { mutableStateOf(credentials.gromoPartnerCode) }
     var ekoDevKey by remember { mutableStateOf(credentials.ekoDeveloperKey) }
     var ekoAuthKey by remember { mutableStateOf(credentials.ekoAuthKey) }
@@ -2150,8 +2173,8 @@ private fun PartnerHubDialog(
                             color = IndNavyHeader
                         )
                         Text(
-                            text = "GroMo Affiliates & Eko BBPS (No GST Required)",
-                            fontSize = 11.sp,
+                            text = "PayNearby BBPS, GroMo & Eko (No Business Entity Needed)",
+                            fontSize = 10.5.sp,
                             color = Color(0xFF059669),
                             fontWeight = FontWeight.SemiBold
                         )
@@ -2199,7 +2222,8 @@ private fun PartnerHubDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 380.dp),
+                            .heightIn(max = 420.dp)
+                            .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Surface(
@@ -2209,13 +2233,77 @@ private fun PartnerHubDialog(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = "Individual developer model: Payouts are transferred directly into your personal bank/UPI with 5% standard TDS. No business incorporation or GST needed.",
+                                text = "Individual developer model: PayNearby & GroMo payouts are transferred directly into your personal bank/UPI with 5% standard TDS. No business incorporation or GST needed.",
                                 fontSize = 11.sp,
                                 color = Color(0xFF065F46),
                                 lineHeight = 15.sp,
                                 modifier = Modifier.padding(8.dp)
                             )
                         }
+
+                        // PayNearby Toggle
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(IndSubBarBg, shape = RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("PayNearby Utility BBPS", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = IndNavyHeader)
+                                Text("Earn ₹5–₹15 commission per utility bill", fontSize = 10.5.sp, color = IndTextSecondary)
+                            }
+                            Switch(
+                                checked = isPnbActive,
+                                onCheckedChange = { isPnbActive = it }
+                            )
+                        }
+
+                        // PayNearby Agent ID
+                        OutlinedTextField(
+                            value = pnbAgentId,
+                            onValueChange = { pnbAgentId = it },
+                            label = { Text("PayNearby Agent / Retailer ID", fontSize = 11.5.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // PayNearby API Key
+                        OutlinedTextField(
+                            value = pnbApiKey,
+                            onValueChange = { pnbApiKey = it },
+                            label = { Text("PayNearby API Secret Key", fontSize = 11.5.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // PayNearby Merchant Mobile
+                        OutlinedTextField(
+                            value = pnbMobile,
+                            onValueChange = { pnbMobile = it },
+                            label = { Text("PayNearby Registered Mobile", fontSize = 11.5.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Open PayNearby Docs Button
+                        val context = LocalContext.current
+                        OutlinedButton(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://paynearby-collections-api.readme.io/reference/introduction"))
+                                context.startActivity(intent)
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Color(0xFF0284C7)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Filled.OpenInNew, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("PayNearby Collections API Documentation", fontSize = 11.sp, color = Color(0xFF0284C7), fontWeight = FontWeight.Bold)
+                        }
+
+                        HorizontalDivider(color = IndBorderSubtle)
 
                         // GroMo Partner Code
                         OutlinedTextField(
@@ -2231,15 +2319,6 @@ private fun PartnerHubDialog(
                             value = ekoDevKey,
                             onValueChange = { ekoDevKey = it },
                             label = { Text("Eko Developer Key", fontSize = 11.5.sp) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        // Eko Initiator ID
-                        OutlinedTextField(
-                            value = ekoInitiator,
-                            onValueChange = { ekoInitiator = it },
-                            label = { Text("Eko Initiator Mobile / User ID", fontSize = 11.5.sp) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -2274,6 +2353,10 @@ private fun PartnerHubDialog(
                             onClick = {
                                 onUpdateCredentials(
                                     credentials.copy(
+                                        paynearbyAgentId = pnbAgentId.trim(),
+                                        paynearbyApiKey = pnbApiKey.trim(),
+                                        paynearbyMerchantMobile = pnbMobile.trim(),
+                                        isPayNearbyActive = isPnbActive,
                                         gromoPartnerCode = gromoCode.trim(),
                                         ekoDeveloperKey = ekoDevKey.trim(),
                                         ekoAuthKey = ekoAuthKey.trim(),

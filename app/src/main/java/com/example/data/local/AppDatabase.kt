@@ -26,9 +26,10 @@ import kotlinx.coroutines.launch
         RawNotificationRecord::class,
         CloudSyncOutboxEntry::class,
         CustomExpenseTag::class,
-        UserActionAuditLog::class
+        UserActionAuditLog::class,
+        LearnedTransactionRule::class
     ],
-    version = 24,
+    version = 26,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -39,6 +40,38 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `learned_transaction_rules` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `userId` TEXT NOT NULL,
+                        `patternKey` TEXT NOT NULL,
+                        `merchantDisplayName` TEXT NOT NULL,
+                        `matchType` TEXT NOT NULL,
+                        `learnedCategory` TEXT NOT NULL,
+                        `learnedCustomCategoryName` TEXT NOT NULL,
+                        `learnedTitle` TEXT NOT NULL,
+                        `learnedTags` TEXT NOT NULL,
+                        `isAutoIgnored` INTEGER NOT NULL,
+                        `rejectCount` INTEGER NOT NULL,
+                        `approveCount` INTEGER NOT NULL,
+                        `editCount` INTEGER NOT NULL,
+                        `notes` TEXT NOT NULL,
+                        `lastAppliedTimestamp` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_learned_transaction_rules_patternKey_userId` ON `learned_transaction_rules` (`patternKey`, `userId`)")
+            }
+        }
+
+        val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE debit_items ADD COLUMN tags TEXT NOT NULL DEFAULT ''")
+            }
+        }
 
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -239,7 +272,9 @@ abstract class AppDatabase : RoomDatabase() {
                             MIGRATION_20_21,
                             MIGRATION_21_22,
                             MIGRATION_22_23,
-                            MIGRATION_23_24
+                            MIGRATION_23_24,
+                            MIGRATION_24_25,
+                            MIGRATION_25_26
                         )
                         .fallbackToDestructiveMigration()
                         .fallbackToDestructiveMigrationOnDowngrade()

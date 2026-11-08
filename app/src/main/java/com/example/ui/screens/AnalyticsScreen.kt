@@ -30,6 +30,8 @@ import com.example.data.model.CategorySummary
 import com.example.data.model.DebitItem
 import com.example.data.model.MonthlyFinanceSummary
 import com.example.data.model.SalaryRecord
+import com.example.data.model.getTagList
+import com.example.data.model.getDisplayTitle
 import com.example.ui.FinMoneyViewModel
 import com.example.ui.components.*
 import com.example.ui.theme.*
@@ -533,7 +535,7 @@ fun AnalyticsScreen(
     expensePendingDelete?.let { item ->
         ConfirmDeleteDialog(
             title = "Delete expense?",
-            message = "Remove \"${item.title.ifBlank { debitCategoryDisplayLabel(item) }}\"? This cannot be undone.",
+            message = "Remove \"${item.getDisplayTitle()}\"? This cannot be undone.",
             onDismiss = { expensePendingDelete = null },
             onConfirm = {
                 viewModel.deleteDebit(item)
@@ -810,7 +812,13 @@ fun CategoryDrillDownDialog(
                                             .weight(1f)
                                             .then(if (onEditItem != null) Modifier.clickable { onEditItem(item) } else Modifier)
                                     ) {
-                                        Text(item.title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = IndTextPrimary)
+                                        val itemTags = remember(item.tags, item.title, item.notes) { item.getTagList() }
+                                        Text(item.getDisplayTitle(), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = IndTextPrimary)
+                                        if (itemTags.isNotEmpty()) {
+                                            Spacer(Modifier.height(3.dp))
+                                            AxioExpenseTagsRow(tags = itemTags, maxVisible = 3)
+                                            Spacer(Modifier.height(3.dp))
+                                        }
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(4.dp)

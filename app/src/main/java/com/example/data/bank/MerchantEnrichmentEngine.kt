@@ -805,7 +805,7 @@ object MerchantEnrichmentEngine {
         }
 
         // 2. Strip standard POS & UPI prefixes: "POS 428192 SWIGGY BANGALORE"
-        clean = clean.replace(Regex("""^(?:POS|ECOMM|TXN|UPI|IMPS|CARD|AT|TO|INFO:)\s*""", RegexOption.IGNORE_CASE), "")
+        clean = clean.replace(Regex("""^(?:POS|ECOMM|TXN|UPI|IMPS|CARD|AT|TO|INFO:)\b\s*""", RegexOption.IGNORE_CASE), "")
 
         // 3. Strip corporate clutter suffixes
         val clutter = listOf(

@@ -223,6 +223,63 @@ object BankSyncManager {
             return null
         }
 
+        // Self-Learning Engine Evaluation: Check for auto-suppression or learned category/title enhancements
+        val learningDecision = kotlinx.coroutines.runBlocking {
+            try {
+                com.example.learning.AdaptiveLearningEngine.evaluateAndApply(
+                    dao = dao,
+                    parsedTx = parsed,
+                    rawText = text,
+                    sender = title
+                )
+            } catch (e: Exception) {
+                com.example.learning.AdaptiveLearningEngine.EvaluationResult(enhancedTx = parsed)
+            }
+        }
+
+        val nonNullParsed = parsed
+        if (learningDecision.isSuppressed && nonNullParsed != null) {
+            android.util.Log.i("BankSyncManager", "Notification suppressed by Self-Learning Engine: ${learningDecision.suppressionReason}")
+            scope.launch {
+                try {
+                    val cloudUser = CloudUserContextResolver.resolve(dao)
+                    val suppressedRecord = BankTransactionRecord(
+                        userId = cloudUser.userId,
+                        cloudId = nonNullParsed.id,
+                        bankName = nonNullParsed.bankName,
+                        accountNumberLast4 = nonNullParsed.accountNumberLast4,
+                        amount = nonNullParsed.amount,
+                        type = nonNullParsed.type.name,
+                        classification = nonNullParsed.classification,
+                        category = nonNullParsed.category,
+                        merchant = nonNullParsed.merchantOrParty,
+                        referenceNumber = nonNullParsed.referenceNumber,
+                        availableBalance = nonNullParsed.availableBalance ?: 0.0,
+                        originalText = nonNullParsed.rawText,
+                        source = if (packageName.contains("sms", ignoreCase = true)) "SMS_ALERT" else "NOTIFICATION",
+                        timestamp = nonNullParsed.timestamp,
+                        isConfirmed = true,
+                        status = "REJECTED",
+                        incorrectReason = learningDecision.suppressionReason,
+                        fingerprint = BankTransactionDeduplicator.computeFingerprint(
+                            bankName = nonNullParsed.bankName,
+                            amount = nonNullParsed.amount,
+                            transactionType = nonNullParsed.type.name,
+                            merchant = nonNullParsed.merchantOrParty,
+                            accountLast4 = nonNullParsed.accountNumberLast4,
+                            referenceNumber = nonNullParsed.referenceNumber
+                        )
+                    )
+                    dao.insertBankTransaction(suppressedRecord)
+                } catch (_: Exception) {}
+            }
+            return null
+        }
+
+        if (learningDecision.enhancedTx != null) {
+            parsed = learningDecision.enhancedTx
+        }
+
         // Compute SHA-256 fingerprint for idempotent deduplication
         val fingerprint = BankTransactionDeduplicator.computeFingerprint(
             bankName = parsed.bankName,
@@ -522,6 +579,9 @@ object BankSyncManager {
         dao.updateBankTransactionStatus(tx.id, true, "APPROVED")
         dismissIncomingNotification(context, tx)
         try {
+            com.example.learning.AdaptiveLearningEngine.learnFromTransactionApproval(context, tx, customCategory)
+        } catch (_: Exception) {}
+        try {
             com.example.audit.UserActionAuditLogger.logMessageApproved(context, tx, customCategory, resultMsg)
         } catch (_: Exception) {}
 
@@ -571,6 +631,9 @@ object BankSyncManager {
         val tx = findBankTransaction(dao, txId, cloudId, fingerprint) ?: return
         dao.updateBankTransactionStatus(tx.id, true, "REJECTED")
         dismissIncomingNotification(context, tx)
+        try {
+            com.example.learning.AdaptiveLearningEngine.learnFromTransactionRejection(context, tx)
+        } catch (_: Exception) {}
         try {
             com.example.audit.UserActionAuditLogger.logMessageRejected(context, tx)
         } catch (_: Exception) {}
@@ -646,8 +709,11 @@ object BankSyncManager {
                 return "✓ Planned debit '${tx.matchedDebitTitle ?: planned.title}' marked as Paid (₹${"%,.0f".format(tx.amount)})."
             }
         }
-        val categoryToUse = customCategory ?: tx.category.ifBlank { DebitCategory.GENERAL.name }
-        val titleToUse = if (tx.merchant.isNotBlank()) tx.merchant else "${tx.bankName} Expense"
+        val learnedRule = com.example.learning.AdaptiveLearningEngine.getLearnedRuleForTx(dao, tx, ownerId)
+        val categoryToUse = customCategory ?: learnedRule?.learnedCategory?.takeIf { it.isNotBlank() } ?: tx.category.ifBlank { DebitCategory.GENERAL.name }
+        val titleToUse = learnedRule?.learnedTitle?.takeIf { it.isNotBlank() } ?: if (tx.merchant.isNotBlank()) tx.merchant else "${tx.bankName} Expense"
+        val customCatNameToUse = learnedRule?.learnedCustomCategoryName ?: ""
+        val tagsToUse = learnedRule?.learnedTags ?: ""
         val isCc = tx.isCreditCardRecord()
         val debitItem = DebitItem(
             userId = ownerId,
@@ -656,7 +722,9 @@ object BankSyncManager {
             year = txYear,
             monthYear = monthYear,
             category = categoryToUse,
+            customCategoryName = customCatNameToUse,
             title = titleToUse,
+            tags = tagsToUse,
             amount = tx.amount,
             dueDateDay = txDay,
             dueDate = tx.timestamp,

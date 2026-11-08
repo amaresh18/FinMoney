@@ -25,17 +25,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CustomExpenseTag
 import com.example.data.model.DebitItem
+import com.example.data.model.getDisplayTitle
+import androidx.compose.foundation.clickable
+import com.example.ui.theme.IndBlue
+import com.example.ui.theme.IndBlueDark
 import com.example.ui.theme.IndBlueLight
 import com.example.ui.theme.IndBorderSubtle
 import com.example.ui.theme.IndNavyHeader
+import com.example.ui.theme.IndTextSecondary
 
 fun debitSubcategoryTitle(item: DebitItem): String? {
     val catLabel = debitCategoryDisplayLabel(item)
-    val title = item.title.trim()
-    if (title.isBlank()) return null
-    if (title.equals(catLabel, ignoreCase = true)) return null
-    if (title.equals(item.category, ignoreCase = true)) return null
-    return title
+    val resolvedTitle = item.getDisplayTitle()
+    if (resolvedTitle.isBlank()) return null
+    if (resolvedTitle.equals(catLabel, ignoreCase = true)) return null
+    if (resolvedTitle.equals(item.category, ignoreCase = true)) return null
+    return resolvedTitle
 }
 
 @Composable
@@ -128,3 +133,70 @@ fun DebitExpenseLeadingBadge(
         )
     }
 }
+
+/**
+ * Axio-style multiple tags row displayed underneath an expense/debit title.
+ * Formats tags as modern, compact hashtag pills with clean typography and rounded borders.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun AxioExpenseTagsRow(
+    tags: List<String>,
+    modifier: Modifier = Modifier,
+    maxVisible: Int = 3,
+    onTagClick: ((String) -> Unit)? = null
+) {
+    if (tags.isEmpty()) return
+
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = modifier,
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(3.dp)
+    ) {
+        val visibleTags = tags.take(maxVisible)
+        visibleTags.forEach { rawTag ->
+            val cleanTag = rawTag.trim().removePrefix("#").trim()
+            if (cleanTag.isNotBlank()) {
+                androidx.compose.material3.Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = IndBlueLight.copy(alpha = 0.85f),
+                    border = androidx.compose.foundation.BorderStroke(0.6.dp, IndBlue.copy(alpha = 0.35f)),
+                    modifier = Modifier.then(
+                        if (onTagClick != null) Modifier.clickable { onTagClick(cleanTag) } else Modifier
+                    )
+                ) {
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "#$cleanTag",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = IndBlueDark,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+        if (tags.size > maxVisible) {
+            androidx.compose.material3.Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = androidx.compose.ui.graphics.Color(0xFFF1F5F9),
+                border = androidx.compose.foundation.BorderStroke(0.5.dp, IndBorderSubtle)
+            ) {
+                Text(
+                    text = "+${tags.size - maxVisible}",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = IndTextSecondary,
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                )
+            }
+        }
+    }
+}
+

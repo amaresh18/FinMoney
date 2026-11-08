@@ -168,8 +168,83 @@ data class DebitItem(
     val totalTenureMonths: Int = 0,
     val currentMonthTenure: Int = 0,
     val isRecurring: Boolean = false,
+    val tags: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
+
+fun DebitItem.getTagList(): List<String> {
+    if (tags.isNotBlank()) {
+        return tags.split(",", ";", "•")
+            .map { it.trim().removePrefix("#").trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+    }
+    val noteHashtags = Regex("""#([A-Za-z0-9_]+)""").findAll(notes)
+        .map { it.groupValues[1].trim() }
+        .filter { it.isNotBlank() }
+        .toList()
+    if (noteHashtags.isNotEmpty()) {
+        return noteHashtags.distinct()
+    }
+    if (customCategoryName.isNotBlank() && !customCategoryName.equals(title, ignoreCase = true) && !customCategoryName.equals(category, ignoreCase = true)) {
+        return listOf(customCategoryName.trim())
+    }
+    return emptyList()
+}
+
+/**
+ * Resolves the display title of the expense.
+ * For historical records where title is not available (empty/blank or matching generic category),
+ * displays the subcategory name, attached tag name, or hashtag from notes.
+ */
+fun DebitItem.getDisplayTitle(): String {
+    val trimmed = title.trim()
+    val catDisplay = if (category.equals("CUSTOM", ignoreCase = true) || category.equals("Custom", ignoreCase = true)) {
+        customCategoryName.trim().ifBlank { "Custom" }
+    } else {
+        category.trim().ifBlank { "General" }
+    }
+
+    // 1. If a non-generic title is available, use it
+    if (trimmed.isNotBlank() &&
+        !trimmed.equals(category, ignoreCase = true) &&
+        !trimmed.equals("General", ignoreCase = true) &&
+        !trimmed.equals("Custom", ignoreCase = true)
+    ) {
+        return trimmed
+    }
+
+    // 2. Title is not available: fallback to attached tags
+    val tagList = getTagList()
+    val firstTag = tagList.firstOrNull()?.removePrefix("#")?.trim()
+    if (!firstTag.isNullOrBlank() && !firstTag.equals(category, ignoreCase = true)) {
+        return firstTag
+    }
+
+    // 3. Fallback to subcategory (customCategoryName)
+    val customSub = customCategoryName.trim()
+    if (customSub.isNotBlank() &&
+        !customSub.equals("Custom", ignoreCase = true) &&
+        !customSub.equals(category, ignoreCase = true)
+    ) {
+        return customSub
+    }
+
+    // 4. Fallback to note text if short and non-json
+    val trimmedNotes = notes.trim()
+    if (trimmedNotes.isNotBlank() && !trimmedNotes.startsWith("{")) {
+        val firstLine = trimmedNotes.lines().firstOrNull()?.trim()
+        if (!firstLine.isNullOrBlank() && firstLine.length <= 40) {
+            return firstLine.removePrefix("#").trim()
+        }
+    }
+
+    // 5. If title has at least something, use it, otherwise category label
+    if (trimmed.isNotBlank()) {
+        return trimmed
+    }
+    return catDisplay
+}
 
 fun DebitItem.isActualCreditCardTransaction(): Boolean =
     isPaidViaCreditCard || category.equals("Credit Card", ignoreCase = true)

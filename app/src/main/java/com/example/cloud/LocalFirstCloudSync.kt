@@ -74,6 +74,7 @@ object LocalFirstCloudSync {
                 "isPaidViaDebitCard" to item.isPaidViaDebitCard,
                 "notes" to item.notes,
                 "customCategoryName" to item.customCategoryName,
+                "tags" to item.tags,
                 "isRecurring" to item.isRecurring,
                 "principalAmount" to item.principalAmount,
                 "interestRate" to item.interestRate,

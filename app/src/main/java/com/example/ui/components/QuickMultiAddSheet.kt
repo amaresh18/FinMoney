@@ -38,6 +38,8 @@ import com.example.data.model.CustomCategory
 import com.example.data.model.CustomExpenseTag
 import com.example.data.model.DebitCategory
 import com.example.data.model.DebitItem
+import com.example.data.model.getTagList
+import com.example.data.model.getDisplayTitle
 import com.example.ui.theme.*
 import java.util.UUID
 
@@ -53,6 +55,8 @@ class MultiAddRowState(
     initialIsPaid: Boolean = true,
     initialIsPaidViaCreditCard: Boolean = false,
     initialTag: String = "",
+    initialTitleText: String = "",
+    initialTagsList: List<String> = emptyList(),
     initialNotes: String = "",
     initialDay: Int = 1,
     initialShowNotesField: Boolean = false,
@@ -69,6 +73,12 @@ class MultiAddRowState(
     var isPaid by mutableStateOf(initialIsPaid)
     var isPaidViaCreditCard by mutableStateOf(initialIsPaidViaCreditCard)
     var tag by mutableStateOf(initialTag)
+    var titleText by mutableStateOf(initialTitleText)
+    var tagsList by mutableStateOf(
+        if (initialTagsList.isNotEmpty()) initialTagsList
+        else if (initialTag.isNotBlank()) listOf(initialTag.removePrefix("#").trim())
+        else emptyList()
+    )
     var notes by mutableStateOf(initialNotes)
     var day by mutableStateOf(initialDay)
     var showNotesField by mutableStateOf(initialShowNotesField)
@@ -130,14 +140,26 @@ fun debitItemToMultiAddRowState(item: DebitItem, todayDay: Int): MultiAddRowStat
     }
     val customName = if (isCustom) item.customCategoryName else ""
     val defaultLabel = if (isCustom) customName.ifBlank { "Custom" } else categoryKey
-    val tagForRow = if (
-        item.title.isNotBlank() &&
-            !item.title.equals(defaultLabel, ignoreCase = true) &&
-            !item.title.equals(categoryKey, ignoreCase = true)
+    val itemTags = item.getTagList()
+    val resolvedTitle = item.getDisplayTitle()
+    val titleForInput = if (
+        resolvedTitle.isNotBlank() &&
+            !resolvedTitle.equals(defaultLabel, ignoreCase = true) &&
+            !resolvedTitle.equals(categoryKey, ignoreCase = true) &&
+            !resolvedTitle.equals("General", ignoreCase = true)
     ) {
-        item.title
+        resolvedTitle
     } else {
-        ""
+        item.title
+    }
+    val tagForRow = if (
+        titleForInput.isNotBlank() &&
+            !titleForInput.equals(defaultLabel, ignoreCase = true) &&
+            !titleForInput.equals(categoryKey, ignoreCase = true)
+    ) {
+        titleForInput
+    } else {
+        itemTags.firstOrNull() ?: ""
     }
     val itemMillis = item.dueDate?.takeIf { it > 0L }
         ?: item.paidDateTimestamp?.takeIf { it > 0L }
@@ -153,6 +175,8 @@ fun debitItemToMultiAddRowState(item: DebitItem, todayDay: Int): MultiAddRowStat
         initialIsPaid = item.isPaid,
         initialIsPaidViaCreditCard = item.isPaidViaCreditCard,
         initialTag = tagForRow,
+        initialTitleText = titleForInput,
+        initialTagsList = itemTags,
         initialNotes = item.notes,
         initialDay = item.dueDateDay.coerceIn(1, 31).takeIf { it > 0 } ?: todayDay,
         initialShowNotesField = item.notes.isNotBlank(),
@@ -755,11 +779,17 @@ fun QuickMultiAddSheet(
                                             DebitCategory.entries.find { it.name == row.categoryKey }?.name ?: row.categoryKey
                                         }
 
-                                        val finalTitle = if (row.tag.isNotBlank()) {
-                                            row.tag.removePrefix("#").trim()
-                                        } else {
-                                            displayCategoryName
+                                        val finalTitle = when {
+                                            row.titleText.isNotBlank() -> row.titleText.trim()
+                                            row.tagsList.isNotEmpty() -> row.tagsList.first().removePrefix("#").trim()
+                                            row.tag.isNotBlank() -> row.tag.removePrefix("#").trim()
+                                            else -> displayCategoryName
                                         }
+                                        val finalTags = row.tagsList
+                                            .map { it.removePrefix("#").trim() }
+                                            .filter { it.isNotBlank() }
+                                            .distinct()
+                                            .joinToString(",")
 
                                         val isChitCat = row.categoryKey.equals("CHIT", ignoreCase = true) || finalTitle.contains("CHIT", ignoreCase = true)
                                         val isLoanCat = isLoanOrEmi(row.categoryKey)
@@ -781,6 +811,7 @@ fun QuickMultiAddSheet(
                                                 category = row.categoryKey,
                                                 customCategoryName = row.customCategoryName,
                                                 title = finalTitle,
+                                                tags = finalTags,
                                                 amount = amt,
                                                 dueDateDay = rowDay,
                                                 dueDate = row.selectedDateMillis,
@@ -860,16 +891,23 @@ fun QuickMultiAddSheet(
         )
     }
 
-    // Subcategory / Tag Selection Dialog with contextual aligned suggestions
+    // Subcategory / Tag Selection Dialog with contextual aligned suggestions (Axio multi-tag support)
     if (activeTagPickerRow != null) {
         val targetRow = activeTagPickerRow!!
+        val currentSelectedTags = targetRow.tagsList.ifEmpty {
+            if (targetRow.tag.isNotBlank()) listOf(targetRow.tag.removePrefix("#").trim()) else emptyList()
+        }
         SubcategoryTagPickerDialog(
             categoryKey = targetRow.categoryKey,
-            currentTag = targetRow.tag,
+            currentTags = currentSelectedTags,
             customExpenseTags = customExpenseTags,
             onDismiss = { activeTagPickerRow = null },
-            onTagSelected = { selectedTag ->
-                targetRow.tag = selectedTag
+            onTagsSelected = { selectedTags ->
+                targetRow.tagsList = selectedTags
+                targetRow.tag = selectedTags.firstOrNull() ?: ""
+                if (targetRow.titleText.isBlank() && selectedTags.isNotEmpty()) {
+                    targetRow.titleText = selectedTags.first()
+                }
                 activeTagPickerRow = null
             },
             onOpenAddCustomTag = {
@@ -882,7 +920,15 @@ fun QuickMultiAddSheet(
     LaunchedEffect(pendingCustomTagName, customExpenseTags) {
         val name = pendingCustomTagName?.trim()?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         if (customExpenseTags.none { it.name.equals(name, ignoreCase = true) }) return@LaunchedEffect
-        pendingNewTagForRow?.tag = name
+        pendingNewTagForRow?.let { row ->
+            row.tag = name
+            if (!row.tagsList.any { it.equals(name, ignoreCase = true) }) {
+                row.tagsList = row.tagsList + name
+            }
+            if (row.titleText.isBlank()) {
+                row.titleText = name
+            }
+        }
         pendingCustomTagName = null
         pendingNewTagForRow = null
         showAddCustomExpenseTagDialog = false
@@ -1085,7 +1131,128 @@ private fun MultiAddRowCard(
                 }
             }
 
-            // Row 2: Control Chips (Credit Card Toggle, Paid Status Toggle, Subcategory Tag, Notes toggle)
+            // Expense Title Field (Axio style: e.g. "Swiggy dinner", "Airtel broadband", "Groceries")
+            OutlinedTextField(
+                value = rowState.titleText,
+                onValueChange = { input ->
+                    rowState.titleText = input
+                },
+                placeholder = {
+                    Text(
+                        text = if (currentMeta.displayName.isNotBlank() && currentMeta.key.isNotBlank()) {
+                            "Title: ${currentMeta.displayName} expense"
+                        } else {
+                            "Expense Title (e.g. Swiggy Lunch, Grocery run, Rent)"
+                        },
+                        fontSize = 12.sp,
+                        color = IndTextMuted
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Edit,
+                        contentDescription = null,
+                        tint = IndNavyHeader,
+                        modifier = Modifier.size(15.dp)
+                    )
+                },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = IndNavyHeader
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = IndCardSecondary,
+                    unfocusedContainerColor = IndCardSecondary.copy(alpha = 0.5f),
+                    focusedBorderColor = IndNavyHeader,
+                    unfocusedBorderColor = IndBorderSubtle
+                )
+            )
+
+            // Multiple Attached Tags (Axio style: displayed directly with #tag badges and +Attach Tags)
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                rowState.tagsList.forEach { tagItem ->
+                    val cleanTag = tagItem.removePrefix("#").trim()
+                    val tagVisual = resolveExpenseTagVisual(cleanTag, rowState.categoryKey, customExpenseTags)
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = IndBlueLight,
+                        border = androidx.compose.foundation.BorderStroke(0.6.dp, IndBlue.copy(alpha = 0.6f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (tagVisual != null) {
+                                ExpenseTagBadge(
+                                    visual = tagVisual,
+                                    badgeSize = 16.dp,
+                                    monogramSize = 8.sp,
+                                    cornerRadius = 4.dp
+                                )
+                            } else {
+                                Text("#", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndBlue)
+                            }
+                            Text(
+                                text = cleanTag,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = IndBlueDark
+                            )
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Remove tag $cleanTag",
+                                tint = IndBlueDark,
+                                modifier = Modifier
+                                    .size(13.dp)
+                                    .clickable {
+                                        rowState.tagsList = rowState.tagsList.filterNot { it.equals(cleanTag, ignoreCase = true) }
+                                        rowState.tag = rowState.tagsList.firstOrNull() ?: ""
+                                    }
+                            )
+                        }
+                    }
+                }
+
+                // + Attach Tags pill button
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = IndSurface,
+                    border = androidx.compose.foundation.BorderStroke(0.6.dp, IndBorderSubtle),
+                    modifier = Modifier.clickable { onOpenTagPicker() }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.LocalOffer,
+                            contentDescription = null,
+                            tint = IndBlue,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Text(
+                            text = if (rowState.tagsList.isEmpty()) "+ Attach Tags" else "+ Add Tag",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndBlueDark
+                        )
+                    }
+                }
+            }
+
+            // Row 2: Control Chips (Credit Card Toggle, Paid Status Toggle, Notes toggle)
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1224,61 +1391,6 @@ private fun MultiAddRowCard(
                             tint = IndNavyHeader,
                             modifier = Modifier.size(12.dp)
                         )
-                    }
-                }
-
-                // 🏷️ Subcategory / Tag Selector (Customizable per user wish with 1-tap remove)
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = if (rowState.tag.isNotBlank()) IndBlueLight else IndSurface,
-                    border = androidx.compose.foundation.BorderStroke(
-                        0.6.dp,
-                        if (rowState.tag.isNotBlank()) IndBlue else IndBorder
-                    ),
-                    modifier = Modifier.clickable { onOpenTagPicker() }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        val tagLabel = rowState.tag.removePrefix("#").trim()
-                        val tagVisual = if (tagLabel.isNotBlank()) {
-                            resolveExpenseTagVisual(tagLabel, rowState.categoryKey, customExpenseTags)
-                        } else null
-                        if (tagVisual != null) {
-                            ExpenseTagBadge(
-                                visual = tagVisual,
-                                badgeSize = 18.dp,
-                                monogramSize = 8.sp,
-                                cornerRadius = 5.dp
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Filled.LocalOffer,
-                                contentDescription = null,
-                                tint = if (rowState.tag.isNotBlank()) IndBlue else IndTextMuted,
-                                modifier = Modifier.size(11.dp)
-                            )
-                        }
-                        Text(
-                            text = if (rowState.tag.isNotBlank()) tagLabel else "+ Tag / Subcategory",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (rowState.tag.isNotBlank()) IndBlueDark else IndTextSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (rowState.tag.isNotBlank()) {
-                            Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = "Clear Tag",
-                                tint = IndBlueDark,
-                                modifier = Modifier
-                                    .size(12.dp)
-                                    .clickable { rowState.tag = "" }
-                            )
-                        }
                     }
                 }
 
@@ -1644,18 +1756,23 @@ private fun CategorySelectionModalDialog(
 }
 
 /**
- * Subcategory / Tag Picker Dialog with Category-Aligned Suggestions + Custom Tag entry
+ * Subcategory / Tag Picker Dialog with Category-Aligned Suggestions + Custom Tag entry (Axio style multi-tag)
  */
 @Composable
 private fun SubcategoryTagPickerDialog(
     categoryKey: String,
-    currentTag: String,
+    currentTags: List<String>,
     customExpenseTags: List<CustomExpenseTag> = emptyList(),
     onDismiss: () -> Unit,
-    onTagSelected: (String) -> Unit,
+    onTagsSelected: (List<String>) -> Unit,
     onOpenAddCustomTag: () -> Unit = {}
 ) {
-    var customTagInput by remember { mutableStateOf(currentTag.removePrefix("#")) }
+    var customTagInput by remember { mutableStateOf("") }
+    val selectedTags = remember {
+        mutableStateListOf<String>().apply {
+            addAll(currentTags.map { it.removePrefix("#").trim() }.filter { it.isNotBlank() }.distinct())
+        }
+    }
     val alignedTags = remember(categoryKey, customExpenseTags) {
         val curated = curatedTagSuggestionsForCategory(categoryKey)
         val generic = getAlignedTagsForCategory(categoryKey)
@@ -1673,7 +1790,7 @@ private fun SubcategoryTagPickerDialog(
             ) {
                 Icon(Icons.Filled.LocalOffer, contentDescription = null, tint = IndBlue, modifier = Modifier.size(20.dp))
                 Text(
-                    text = "Tag / Subcategory",
+                    text = "Attach Expense Tags",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = IndNavyHeader
@@ -1688,25 +1805,83 @@ private fun SubcategoryTagPickerDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "Pick a suggestion or type a custom tag / subcategory:",
+                    text = "Attach multiple tags to organize your expenses (similar to Axio):",
                     fontSize = 12.sp,
                     color = IndTextSecondary
                 )
 
-                // Custom Tag text input
-                OutlinedTextField(
-                    value = customTagInput,
-                    onValueChange = { customTagInput = it },
-                    placeholder = { Text("e.g. Swiggy, Birthday Treat, Snacks", fontSize = 12.sp, color = IndTextMuted) },
-                    prefix = { Text("#", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = IndBlue) },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold, color = IndNavyHeader),
+                // Currently attached tags
+                if (selectedTags.isNotEmpty()) {
+                    Text(
+                        text = "Attached Tags (${selectedTags.size}):",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = IndNavyHeader
+                    )
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        selectedTags.forEach { tag ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = IndBlueLight,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, IndBlue)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text("#$tag", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndBlueDark)
+                                    Icon(
+                                        imageVector = Icons.Filled.Close,
+                                        contentDescription = "Remove tag $tag",
+                                        tint = IndBlueDark,
+                                        modifier = Modifier
+                                            .size(13.dp)
+                                            .clickable { selectedTags.removeAll { it.equals(tag, ignoreCase = true) } }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Custom Tag text input with Add button
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp)
-                )
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedTextField(
+                        value = customTagInput,
+                        onValueChange = { customTagInput = it },
+                        placeholder = { Text("e.g. Swiggy, Birthday Treat", fontSize = 12.sp, color = IndTextMuted) },
+                        prefix = { Text("#", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = IndBlue) },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold, color = IndNavyHeader),
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    Button(
+                        onClick = {
+                            val clean = customTagInput.removePrefix("#").trim()
+                            if (clean.isNotBlank() && !selectedTags.any { it.equals(clean, ignoreCase = true) }) {
+                                selectedTags.add(clean)
+                                customTagInput = ""
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = IndNavyHeader)
+                    ) {
+                        Text("Add", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
 
                 Text(
-                    text = "Popular brands & tags:",
+                    text = "Tap to toggle popular tags:",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = IndNavyHeader
@@ -1718,16 +1893,22 @@ private fun SubcategoryTagPickerDialog(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     alignedTags.forEach { tag ->
-                        val isSelected = customTagInput.equals(tag, ignoreCase = true)
+                        val isSelected = selectedTags.any { it.equals(tag, ignoreCase = true) }
                         val visual = resolveExpenseTagVisual(tag, categoryKey, customExpenseTags)
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = if (isSelected) IndBlueLight else IndSurface,
                             border = androidx.compose.foundation.BorderStroke(
-                                0.8.dp,
+                                if (isSelected) 1.2.dp else 0.8.dp,
                                 if (isSelected) IndBlue else IndBorderSubtle
                             ),
-                            modifier = Modifier.clickable { customTagInput = tag }
+                            modifier = Modifier.clickable {
+                                if (isSelected) {
+                                    selectedTags.removeAll { it.equals(tag, ignoreCase = true) }
+                                } else {
+                                    selectedTags.add(tag)
+                                }
+                            }
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
@@ -1737,9 +1918,16 @@ private fun SubcategoryTagPickerDialog(
                                 if (visual != null) {
                                     ExpenseTagBadge(
                                         visual = visual,
-                                        badgeSize = 24.dp,
+                                        badgeSize = 22.dp,
                                         monogramSize = 9.sp,
-                                        cornerRadius = 7.dp
+                                        cornerRadius = 6.dp
+                                    )
+                                } else {
+                                    Text(
+                                        text = if (isSelected) "✓" else "#",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelected) IndBlueDark else IndTextMuted
                                     )
                                 }
                                 Text(
@@ -1762,17 +1950,30 @@ private fun SubcategoryTagPickerDialog(
                     Text("Custom tag", color = IndBlue, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
                 Button(
-                    onClick = { onTagSelected(customTagInput.trim()) },
+                    onClick = {
+                        val clean = customTagInput.removePrefix("#").trim()
+                        if (clean.isNotBlank() && !selectedTags.any { it.equals(clean, ignoreCase = true) }) {
+                            selectedTags.add(clean)
+                        }
+                        onTagsSelected(selectedTags.toList())
+                    },
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = IndNavyHeader)
                 ) {
-                    Text("Apply", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(
+                        text = if (selectedTags.isNotEmpty()) "Apply (${selectedTags.size})" else "Apply",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
                 }
             }
         },
         dismissButton = {
-            TextButton(onClick = { onTagSelected("") }) {
-                Text("Clear", color = IndRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            TextButton(onClick = {
+                selectedTags.clear()
+                onTagsSelected(emptyList())
+            }) {
+                Text("Clear All", color = IndRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
     )

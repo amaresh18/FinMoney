@@ -69,9 +69,11 @@ fun PendingTransactionsScreen(
 
     val context = LocalContext.current
     val isListenerConnected by BankSyncManager.isListenerConnected.collectAsStateWithLifecycle()
+    val learnedRules by viewModel.learnedRules.collectAsStateWithLifecycle()
     var isPermissionGranted by remember { mutableStateOf(BankSyncManager.isNotificationAccessGranted(context)) }
     var showPermissionDialog by remember { mutableStateOf(false) }
     var showAuditLogsDialog by remember { mutableStateOf(false) }
+    var showLearnedRulesDialog by remember { mutableStateOf(false) }
 
     var selectedTab by remember { mutableStateOf("PENDING") } // PENDING, DUPLICATES, INCORRECT
     var searchQuery by remember { mutableStateOf("") }
@@ -207,6 +209,29 @@ fun PendingTransactionsScreen(
                                 text = "Approve All (${pendingTransactions.size})",
                                 style = AppTheme.typography.labelSmall,
                                 color = Color.White
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = { showLearnedRulesDialog = true },
+                        modifier = Modifier.testTag("open_learned_rules_action_button")
+                    ) {
+                        BadgedBox(
+                            badge = {
+                                if (learnedRules.isNotEmpty()) {
+                                    Badge(
+                                        containerColor = AppTheme.colors.primary,
+                                        contentColor = Color.White
+                                    ) {
+                                        Text(learnedRules.size.toString())
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Psychology,
+                                contentDescription = "Self-Learning Memory Rules",
+                                tint = AppTheme.colors.primary
                             )
                         }
                     }
@@ -451,10 +476,16 @@ fun PendingTransactionsScreen(
                             dateFormatted = dateFormatter.format(Date(tx.timestamp)),
                             auditResult = auditMap[tx.id],
                             onApprove = { category ->
-                                viewModel.approvePendingTransaction(tx.id, category ?: "GENERAL")
+                                if (category != null && category != tx.category) {
+                                    viewModel.updatePendingTransactionCategory(tx, category, tx.merchant)
+                                }
+                                viewModel.checkAndPromptDuePaymentMatch(tx)
                             },
                             onReject = { viewModel.rejectPendingTransaction(tx.id) },
-                            onRefineWithGemini = { viewModel.reclassifyTransactionWithGemini(tx.id) }
+                            onRefineWithGemini = { viewModel.reclassifyTransactionWithGemini(tx.id) },
+                            onUpdateCategoryAndMerchant = { newCat, newMerchant ->
+                                viewModel.updatePendingTransactionCategory(tx, newCat, newMerchant)
+                            }
                         )
                     }
                 }
@@ -479,6 +510,46 @@ fun PendingTransactionsScreen(
         com.example.ui.components.ActionAuditLogsDialog(
             viewModel = viewModel,
             onDismiss = { showAuditLogsDialog = false }
+        )
+    }
+
+    if (showLearnedRulesDialog) {
+        com.example.ui.components.LearnedRulesDialog(
+            viewModel = viewModel,
+            onDismiss = { showLearnedRulesDialog = false }
+        )
+    }
+
+    val similarPrompt by viewModel.similarTransactionsPrompt.collectAsStateWithLifecycle()
+    if (similarPrompt != null) {
+        com.example.ui.components.SimilarTransactionsPromptDialog(
+            prompt = similarPrompt!!,
+            currencySymbol = currencySymbol,
+            onConfirmUpdate = { selectedIds ->
+                viewModel.applySimilarTransactionsBulkUpdate(selectedIds)
+            },
+            onDismiss = {
+                viewModel.dismissSimilarTransactionsPrompt()
+            }
+        )
+    }
+
+    val dueMatchPrompt by viewModel.duePaymentMatchPrompt.collectAsStateWithLifecycle()
+    if (dueMatchPrompt != null) {
+        com.example.ui.components.DuePaymentMatchPromptDialog(
+            prompt = dueMatchPrompt!!,
+            currencySymbol = currencySymbol,
+            onConfirmSettle = {
+                viewModel.confirmSettleDuePaymentMatch()
+            },
+            onRejectKeepSeparate = {
+                val tx = dueMatchPrompt!!.transaction
+                viewModel.dismissDuePaymentMatchPrompt()
+                viewModel.approvePendingTransaction(tx)
+            },
+            onDismiss = {
+                viewModel.dismissDuePaymentMatchPrompt()
+            }
         )
     }
 }
@@ -553,7 +624,8 @@ fun PendingTransactionCard(
     auditResult: EntryAuditResult? = null,
     onApprove: (selectedCategory: String?) -> Unit,
     onReject: () -> Unit,
-    onRefineWithGemini: () -> Unit = {}
+    onRefineWithGemini: () -> Unit = {},
+    onUpdateCategoryAndMerchant: (newCategory: String, newMerchant: String) -> Unit = { _, _ -> }
 ) {
     val isDup = transaction.isDuplicate || auditResult?.isDuplicate == true
     val dupReason = if (!transaction.duplicateReason.isNullOrBlank()) transaction.duplicateReason!! else (auditResult?.duplicateReason ?: "Potential duplicate transaction detected.")
@@ -564,6 +636,8 @@ fun PendingTransactionCard(
     val isCredit = transaction.type.equals("CREDIT", ignoreCase = true)
     var selectedCategory by remember { mutableStateOf(transaction.category.ifBlank { "GENERAL" }) }
     var showCategoryMenu by remember { mutableStateOf(false) }
+    var showEditDetailsDialog by remember { mutableStateOf(false) }
+    var editedMerchantName by remember(transaction.merchant) { mutableStateOf(transaction.merchant) }
 
     val categories = remember {
         listOf(
@@ -751,10 +825,26 @@ fun PendingTransactionCard(
                                     onClick = {
                                         selectedCategory = catKey
                                         showCategoryMenu = false
+                                        onUpdateCategoryAndMerchant(catKey, transaction.merchant)
                                     }
                                 )
                             }
                         }
+                    }
+
+                    // Edit details button (merchant name & category)
+                    IconButton(
+                        onClick = { showEditDetailsDialog = true },
+                        modifier = Modifier
+                            .size(28.dp)
+                            .testTag("edit_tx_btn_${transaction.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Edit,
+                            contentDescription = "Edit merchant & category",
+                            tint = AppTheme.colors.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }
@@ -928,5 +1018,87 @@ fun PendingTransactionCard(
                 }
             }
         }
+    }
+
+    if (showEditDetailsDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditDetailsDialog = false },
+            title = {
+                Text(
+                    text = "Edit Transaction",
+                    style = AppTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Customize merchant or category. Updating this will allow applying the change to similar transactions.",
+                        style = AppTheme.typography.bodySmall,
+                        color = AppTheme.colors.textSecondary
+                    )
+
+                    OutlinedTextField(
+                        value = editedMerchantName,
+                        onValueChange = { editedMerchantName = it },
+                        label = { Text("Merchant / Title") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Text(
+                        text = "Category:",
+                        style = AppTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = AppTheme.colors.textSecondary
+                    )
+
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = AppTheme.colors.background,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, AppTheme.colors.border),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showCategoryMenu = true }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = categories.find { it.first == selectedCategory }?.second ?: selectedCategory,
+                                    style = AppTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showEditDetailsDialog = false
+                        onUpdateCategoryAndMerchant(selectedCategory, editedMerchantName)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.primary)
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditDetailsDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

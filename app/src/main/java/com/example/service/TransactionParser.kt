@@ -473,7 +473,7 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             return "Matches banking alert / reminder pattern"
         }
 
-        // 11. Stock Market, IPO News & Corporate Financial / Earnings Reports
+        // 11. Stock Market, IPO News, Corporate Order Deals & Government Broadcasts (NOT user transactions)
         if (lower.contains("ipo open") || lower.contains("ipo opens") || lower.contains("ipo news") ||
             lower.contains("issue size") || lower.contains("price range") || lower.contains("price band") ||
             lower.contains("gmp") || lower.contains("bidding opens") || lower.contains("subscription opens") ||
@@ -482,12 +482,21 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             lower.contains("q1 profit") || lower.contains("q2 profit") || lower.contains("q3 profit") || lower.contains("q4 profit") ||
             lower.contains("q1 results") || lower.contains("q2 results") || lower.contains("q3 results") || lower.contains("q4 results") ||
             lower.contains("financial results") || lower.contains("earnings report") || lower.contains("share price") ||
-            lower.contains("stock price") || lower.contains("sensex") || lower.contains("nifty")) {
+            lower.contains("stock price") || lower.contains("sensex") || lower.contains("nifty") ||
+            lower.contains("cr order") || lower.contains("cr deal") || lower.contains("cr navy deal") ||
+            lower.contains("cr milestone") || lower.contains("bags ₹") || lower.contains("bags rs") ||
+            lower.contains("bags inr") || lower.contains("bagged order") || lower.contains("order win") ||
+            lower.contains("navy deal") || lower.contains("highway infra") || lower.contains("shares jump") ||
+            lower.contains("shares surge") || lower.contains("pm-kisan") || lower.contains("pm kisan") ||
+            lower.contains("dbt transfer") || lower.contains("transferred via dbt") ||
+            lower.contains("railway order") || lower.contains("defence deal") ||
+            (lower.contains("₹") && lower.contains(" cr ") && (lower.contains("bags") || lower.contains("milestone") || lower.contains("deal"))) ||
+            (lower.contains("rs.") && lower.contains(" cr ") && (lower.contains("bags") || lower.contains("milestone") || lower.contains("deal")))) {
             val isActualDematDebitCredit = lower.contains("debited for ipo") || lower.contains("amount blocked") ||
                 lower.contains("upi mandate created for ipo") || lower.contains("ipo allotment debited") ||
                 lower.contains("dividend credited") || lower.contains("credited for dividend")
             if (!isActualDematDebitCredit) {
-                return "Matches stock market/IPO news or corporate earnings report"
+                return "Matches stock market/government scheme news or corporate deal headline"
             }
         }
 
@@ -534,11 +543,11 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
         val regexes = listOf(
             // 1. Explicit payment phrases: payment of Rs 500, paid Rs 300, order payment of ₹450
             Regex("""(?:payment|order payment)\s+(?:of|for|amounting to)?\s*(?:inr|rs\.?|₹|usd|\$)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
-            // 2. Action verbs followed by prepositions/words and amount:
-            // "Paid ₹150 to Swiggy", "Debited by INR 450", "Received Rs 500 from Amit", "Sent Rs 200", etc.
-            Regex("""(?:debited|credited|paid|sent|spent|charged|withdrawn|transferred|transfer|withdrawal|done|received|recd|rec'd|added|deposited|refunded|refund|cashback)\s+(?:(?:by|with|for|of|to|from|is|was|has been)\s+)*(?:inr|rs\.?|₹|usd|\$)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
-            // 3. Amount followed by action verb: "Rs 500 debited", "₹150 paid", "INR 1,200 spent", "500.00 credited"
-            Regex("""(?:inr|rs\.?|₹|usd|\$)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?\s*(?:(?:is|was|has been|done|transferred|transfer|paid|debited|credited|spent|sent|charged|received|deposited|refunded)\s+)*(?:debited|credited|paid|spent|sent|charged|received|deposited|refunded)""", RegexOption.IGNORE_CASE),
+            // 2. Action verbs followed by optional colon/hyphen/prepositions and amount:
+            // "credited:Rs. 15,000.00", "Paid ₹150 to Swiggy", "Debited by INR 450", "Received Rs 500 from Amit", "Sent Rs 200", etc.
+            Regex("""(?:debited|credited|paid|sent|spent|charged|withdrawn|transferred|transfer|withdrawal|done|received|recd|rec'd|added|deposited|refunded|refund|cashback)\s*(?:[:\-\s]\s*|(?:(?:by|with|for|of|to|from|is|was|has been)\s+)*)(?:inr|rs\.?|₹|usd|\$)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
+            // 3. Amount with explicit currency followed by action verb: "Rs 500 debited", "₹150 paid", "INR 1,200 spent", "Rs. 500.00 credited"
+            Regex("""(?:inr|rs\.?|₹|usd|\$)\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?\s*(?:(?:is|was|has been|done|transferred|transfer|paid|debited|credited|spent|sent|charged|received|deposited|refunded)\s+)*(?:debited|credited|paid|spent|sent|charged|received|deposited|refunded)""", RegexOption.IGNORE_CASE),
             // 4. Mandate / Autopay / ATM / SIP / UPI / Salary / Deposit / Refund
             Regex("""(?:autopay|mandate|sip|atm|upi|salary|deposit|refund)\s+(?:of|for|by)?\s*(?:inr|rs\.?|₹|usd|\$)?\s*([\d,]+(?:\.\d{1,2})?)(?:\/\-|\/\=)?""", RegexOption.IGNORE_CASE),
             // 5. UPI / IMPS / NEFT format: UPI/DR/1234/500.00 or UPI:Rs.500
@@ -550,12 +559,20 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
         for (regex in regexes) {
             val matches = regex.findAll(normalizedText)
             for (match in matches) {
-                // Ensure this match is not explicitly the available balance or credit limit
+                // Ensure this match is not explicitly the available balance or credit limit or account number
                 val prefixStart = (match.range.first - 30).coerceAtLeast(0)
                 val prefix = normalizedText.substring(prefixStart, match.range.first).lowercase()
-                if (isBalanceOrLimitPrefix(prefix) || isPromotionalAmountPrefix(prefix)) {
+                if (isAccountOrCardPrefix(prefix) || isBalanceOrLimitPrefix(prefix) || isPromotionalAmountPrefix(prefix)) {
                     continue
                 }
+
+                // Check suffix: If number is followed by "Cr" or "Crore" (e.g. ₹198 Cr order), skip news amounts
+                val suffixEnd = (match.range.last + 10).coerceAtMost(normalizedText.length)
+                val suffix = normalizedText.substring((match.range.last + 1).coerceAtMost(normalizedText.length), suffixEnd).lowercase().trim()
+                if (suffix.startsWith("cr") || suffix.startsWith("crore")) {
+                    continue
+                }
+
                 val rawValStr = match.groupValues[1]
                 val num = cleanNumber(rawValStr) ?: continue
 
@@ -569,6 +586,16 @@ Return ONLY a valid JSON object matching the schema below. Do not include markdo
             }
         }
         return null
+    }
+
+    private fun isAccountOrCardPrefix(lowerPrefix: String): Boolean {
+        val trimmed = lowerPrefix.trim()
+        return trimmed.endsWith("xx") || trimmed.endsWith("**") ||
+            trimmed.endsWith("a/c") || trimmed.endsWith("account") ||
+            trimmed.endsWith("acct") || trimmed.endsWith("card") ||
+            trimmed.endsWith("ending") || trimmed.endsWith("no.") ||
+            trimmed.endsWith("no") ||
+            Regex("""(?:a\/c|account|acct|card|ending)\s*(?:no\.?)?\s*[\*xX]*$""").containsMatchIn(trimmed)
     }
 
     private fun isPromotionalAmountPrefix(lowerPrefix: String): Boolean {

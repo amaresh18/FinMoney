@@ -36,6 +36,8 @@ import com.example.data.model.BankTransactionRecord
 import com.example.data.model.MonthlyFinanceSummary
 import com.example.data.model.IncomeSource
 import com.example.data.model.isActualCreditCardTransaction
+import com.example.data.model.getTagList
+import com.example.data.model.getDisplayTitle
 import com.example.ui.FinMoneyViewModel
 import com.example.ui.components.*
 import com.example.ui.theme.*
@@ -1642,7 +1644,7 @@ fun DashboardScreen(
     expensePendingDelete?.let { item ->
         ConfirmDeleteDialog(
             title = "Delete expense?",
-            message = "Remove \"${item.title.ifBlank { debitCategoryDisplayLabel(item) }}\"? This cannot be undone.",
+            message = "Remove \"${item.getDisplayTitle()}\"? This cannot be undone.",
             onDismiss = { expensePendingDelete = null },
             onConfirm = {
                 viewModel.deleteDebit(item)
@@ -1674,6 +1676,39 @@ fun DashboardScreen(
             }
         )
     }
+
+    val similarPrompt by viewModel.similarTransactionsPrompt.collectAsStateWithLifecycle()
+    if (similarPrompt != null) {
+        com.example.ui.components.SimilarTransactionsPromptDialog(
+            prompt = similarPrompt!!,
+            currencySymbol = currencySymbol,
+            onConfirmUpdate = { selectedIds ->
+                viewModel.applySimilarTransactionsBulkUpdate(selectedIds)
+            },
+            onDismiss = {
+                viewModel.dismissSimilarTransactionsPrompt()
+            }
+        )
+    }
+
+    val dueMatchPrompt by viewModel.duePaymentMatchPrompt.collectAsStateWithLifecycle()
+    if (dueMatchPrompt != null) {
+        com.example.ui.components.DuePaymentMatchPromptDialog(
+            prompt = dueMatchPrompt!!,
+            currencySymbol = currencySymbol,
+            onConfirmSettle = {
+                viewModel.confirmSettleDuePaymentMatch()
+            },
+            onRejectKeepSeparate = {
+                val tx = dueMatchPrompt!!.transaction
+                viewModel.dismissDuePaymentMatchPrompt()
+                viewModel.approvePendingTransaction(tx)
+            },
+            onDismiss = {
+                viewModel.dismissDuePaymentMatchPrompt()
+            }
+        )
+    }
 }
 
 @Composable
@@ -1693,7 +1728,8 @@ fun DebitItemCard(
     val isChit = item.category.equals("CHIT", ignoreCase = true) || item.title.contains("CHIT", ignoreCase = true)
     val isLoan = com.example.ui.components.isLoanOrEmi(item.category) || item.principalAmount > 0.0 || item.category.contains("EMI", ignoreCase = true)
     val isCcItem = item.isActualCreditCardTransaction()
-    val displayTitle = subTitle?.let { primaryTagLabel(it) } ?: item.title.ifBlank { categoryLabel }
+    val itemTags = remember(item.tags, item.title, item.notes) { item.getTagList() }
+    val displayTitle = item.getDisplayTitle()
 
     val paidMonths = if (item.isPaid) item.currentMonthTenure else (item.currentMonthTenure - 1).coerceAtLeast(0)
 
@@ -1775,6 +1811,13 @@ fun DebitItemCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+
+                    if (itemTags.isNotEmpty()) {
+                        com.example.ui.components.AxioExpenseTagsRow(
+                            tags = itemTags,
+                            maxVisible = 3
+                        )
+                    }
 
                     Text(
                         text = subtitleText,

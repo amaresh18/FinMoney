@@ -495,6 +495,9 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     val auditLogs: StateFlow<List<UserActionAuditLog>> = dao.getAllAuditLogs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val learnedRules: StateFlow<List<LearnedTransactionRule>> = dao.getAllLearnedRules()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private fun buildMonthlyFinanceSummary(
         salary: SalaryRecord?,
         debits: List<DebitItem>,
@@ -913,6 +916,113 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // --- Self-Learning Engine Rule Management ---
+    fun deleteLearnedRule(id: Long) {
+        launchSafe {
+            dao.deleteLearnedRule(id)
+            notifyUser("Learned rule removed.")
+        }
+    }
+
+    fun toggleRuleAutoIgnored(rule: LearnedTransactionRule) {
+        launchSafe {
+            val newIgnored = !rule.isAutoIgnored
+            dao.updateRuleAutoIgnored(rule.id, newIgnored)
+            notifyUser(if (newIgnored) "Pattern '${rule.patternKey}' will now be auto-ignored." else "Pattern '${rule.patternKey}' restored to active learning.")
+        }
+    }
+
+    fun clearAllLearnedRules() {
+        launchSafe {
+            dao.clearAllLearnedRules(getActiveUserId())
+            notifyUser("All self-learning rules cleared.")
+        }
+    }
+
+    // --- Axio-Style Similarity Intelligence & Retroactive Bulk Updates ---
+    private val _similarTransactionsPrompt = MutableStateFlow<com.example.learning.SimilarTransactionsPrompt?>(null)
+    val similarTransactionsPrompt: StateFlow<com.example.learning.SimilarTransactionsPrompt?> = _similarTransactionsPrompt.asStateFlow()
+
+    fun dismissSimilarTransactionsPrompt() {
+        _similarTransactionsPrompt.value = null
+    }
+
+    fun applySimilarTransactionsBulkUpdate(selectedCandidateIds: Set<String>) {
+        val prompt = _similarTransactionsPrompt.value ?: return
+        launchSafe {
+            val count = com.example.learning.SimilarTransactionsManager.executeBulkUpdate(
+                context = app,
+                dao = dao,
+                prompt = prompt,
+                selectedCandidateIds = selectedCandidateIds,
+                userId = getActiveUserId()
+            )
+            _similarTransactionsPrompt.value = null
+            notifyUser("Updated $count similar transaction(s) for '${prompt.merchantName}'.")
+        }
+    }
+
+    fun updatePendingTransactionCategory(tx: BankTransactionRecord, newCategory: String, newTitle: String = "") {
+        launchSafe {
+            val updated = tx.copy(
+                category = newCategory,
+                merchant = newTitle.ifBlank { tx.merchant }
+            )
+            dao.updateBankTransaction(updated)
+
+            // Scan for other similar transactions like Axio
+            val pendingList = dao.getPendingBankTransactionsDirect(getActiveUserId())
+            val debits = dao.getAllDebitsDirect(getActiveUserId())
+            val prompt = com.example.learning.SimilarTransactionsManager.findSimilarForPendingTx(
+                editedTx = updated,
+                newCategory = newCategory,
+                newTitle = newTitle,
+                pendingList = pendingList,
+                debitList = debits
+            )
+            if (prompt != null && prompt.candidates.isNotEmpty()) {
+                _similarTransactionsPrompt.value = prompt
+            }
+        }
+    }
+
+    // --- Axio-Style Due Payment Match Engine ---
+    private val _duePaymentMatchPrompt = MutableStateFlow<com.example.learning.DuePaymentMatchPrompt?>(null)
+    val duePaymentMatchPrompt: StateFlow<com.example.learning.DuePaymentMatchPrompt?> = _duePaymentMatchPrompt.asStateFlow()
+
+    fun dismissDuePaymentMatchPrompt() {
+        _duePaymentMatchPrompt.value = null
+    }
+
+    fun confirmSettleDuePaymentMatch() {
+        val prompt = _duePaymentMatchPrompt.value ?: return
+        launchSafe {
+            val resultMsg = com.example.learning.DuePaymentMatchEngine.executeSettleAndApprove(
+                context = app,
+                dao = dao,
+                prompt = prompt,
+                userId = getActiveUserId()
+            )
+            _duePaymentMatchPrompt.value = null
+            notifyUser(resultMsg)
+        }
+    }
+
+    fun checkAndPromptDuePaymentMatch(tx: BankTransactionRecord) {
+        launchSafe {
+            val prompt = com.example.learning.DuePaymentMatchEngine.findMatchingDueItem(
+                dao = dao,
+                tx = tx,
+                userId = getActiveUserId()
+            )
+            if (prompt != null) {
+                _duePaymentMatchPrompt.value = prompt
+            } else {
+                approvePendingTransaction(tx)
+            }
+        }
+    }
+
     // Kubera AI Chat State
     private val _kuberaMessages = MutableStateFlow(
         listOf(
@@ -1062,26 +1172,53 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
         launchSafe {
             try {
                 val activeUid = getActiveUserId()
-                val recurringDebits = dao.getRecurringDebitsDirect(activeUid)
+                val allRecurringDebits = dao.getRecurringDebitsDirect(activeUid)
+                    .filter { it.isRecurring && !(it.month == targetMonth && it.year == targetYear) }
+
+                if (allRecurringDebits.isEmpty()) {
+                    notifyUser("No previous recurring expenses found to prefill.")
+                    return@launchSafe
+                }
+
+                // Find the most recent previous month/year that has recurring debits
+                val targetCode = targetYear * 100 + targetMonth
+                val recentPair = allRecurringDebits
+                    .map { (it.year * 100 + it.month) to (it.year to it.month) }
+                    .filter { it.first < targetCode }
+                    .maxByOrNull { it.first }
+                    ?.second
+                    ?: allRecurringDebits
+                        .map { (it.year * 100 + it.month) to (it.year to it.month) }
+                        .maxByOrNull { it.first }
+                        ?.second
+
+                if (recentPair == null) {
+                    notifyUser("No previous recurring expenses found.")
+                    return@launchSafe
+                }
+
+                val (recentYear, recentMonth) = recentPair
+                val recentRecurringDebits = allRecurringDebits.filter { it.year == recentYear && it.month == recentMonth }
+
                 val currentMonthItems = dao.getDebitsForMonthDirect(targetMonth, targetYear, activeUid)
                 val newDebitsToInsert = mutableListOf<DebitItem>()
 
-                // Consolidate latest unique recurring obligation templates across earlier months
                 val templates = linkedMapOf<String, DebitItem>()
-                recurringDebits.sortedWith(
-                    compareBy<DebitItem> { it.year }.thenBy { it.month }.thenBy { it.id }
-                ).forEach { item ->
-                    if (item.month != targetMonth || item.year != targetYear) {
-                        val key = "${item.title.trim().lowercase()}|${item.category.trim().lowercase()}"
-                        templates[key] = item
-                    }
+                recentRecurringDebits.forEach { item ->
+                    val key = "${item.title.trim().lowercase()}|${item.category.trim().lowercase()}|${item.customCategoryName.trim().lowercase()}"
+                    templates[key] = item
                 }
 
                 for (template in templates.values) {
                     val alreadyPresent = currentMonthItems.any { item ->
-                        item.title.trim().equals(template.title.trim(), ignoreCase = true) &&
-                        item.category.trim().equals(template.category.trim(), ignoreCase = true)
+                        val titleMatches = item.title.trim().isNotBlank() && item.title.trim().equals(template.title.trim(), ignoreCase = true)
+                        val catMatches = item.category.trim().equals(template.category.trim(), ignoreCase = true)
+                        val customMatches = template.customCategoryName.trim().isNotBlank() &&
+                                item.customCategoryName.trim().equals(template.customCategoryName.trim(), ignoreCase = true)
+
+                        (titleMatches && catMatches) || customMatches || (titleMatches && Math.abs(item.amount - template.amount) < 0.01)
                     }
+
                     if (!alreadyPresent) {
                         val nextTenure = if (template.totalTenureMonths > 0) template.currentMonthTenure + 1 else template.currentMonthTenure
                         if (template.totalTenureMonths == 0 || nextTenure <= template.totalTenureMonths) {
@@ -1106,10 +1243,10 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
                 if (newDebitsToInsert.isNotEmpty()) {
                     newDebitsToInsert.forEach { persistExpense(it) }
-                    notifyUser("✓ Prefilled ${newDebitsToInsert.size} recurring expense(s) for this month.")
-                    Log.i("FinMoneyViewModel", "Prefilled ${newDebitsToInsert.size} recurring debits into $targetMonth/$targetYear for $activeUid")
+                    notifyUser("✓ Prefilled ${newDebitsToInsert.size} recurring expense(s) from recent month.")
+                    Log.i("FinMoneyViewModel", "Prefilled ${newDebitsToInsert.size} recurring debits from $recentMonth/$recentYear into $targetMonth/$targetYear for $activeUid")
                 } else {
-                    notifyUser("No new recurring expenses to prefill.")
+                    notifyUser("All recurring expenses from recent month are already added.")
                 }
 
             } catch (e: Exception) {
@@ -1123,18 +1260,22 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
             try {
                 val activeUid = getActiveUserId()
                 val allRecords = dao.getAllSalaryRecordsDirect(activeUid)
-                val templates = linkedMapOf<String, IncomeSource>()
-                for (record in allRecords) {
-                    if (record.month == targetMonth && record.year == targetYear) continue
-                    val sources = FinMoneyRepository.parseIncomeSources(record.incomeSourcesJson)
-                    for (src in sources) {
-                        if (!src.isRecurring) continue
-                        val key = "${src.title.trim().lowercase()}|${src.category.trim().lowercase()}|${src.amount}"
-                        if (!templates.containsKey(key)) {
-                            templates[key] = src
-                        }
-                    }
+                    .filter { !(it.month == targetMonth && it.year == targetYear) }
+
+                if (allRecords.isEmpty()) {
+                    return@launchSafe
                 }
+
+                val targetCode = targetYear * 100 + targetMonth
+                val recentRecord = allRecords
+                    .filter { (it.year * 100 + it.month) < targetCode }
+                    .maxByOrNull { it.year * 100 + it.month }
+                    ?: allRecords.maxByOrNull { it.year * 100 + it.month }
+
+                if (recentRecord == null) return@launchSafe
+
+                val recentSources = FinMoneyRepository.parseIncomeSources(recentRecord.incomeSourcesJson)
+                    .filter { it.isRecurring }
 
                 val existing = dao.getSalaryRecordDirect(targetMonth, targetYear, activeUid)
                 val currentSources = getOrCreateIncomeSources(existing)
@@ -1143,9 +1284,8 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 // Check if target month is missing primary base salary
                 val hasBaseSalary = currentSources.any { it.category == "SALARY" || it.id == "1" } || (existing != null && existing.baseSalary > 0.0)
                 if (!hasBaseSalary) {
-                    val prevRecordWithSalary = allRecords.firstOrNull { (it.month != targetMonth || it.year != targetYear) && (it.baseSalary > 0.0 || it.salaryAmount > 0.0) }
-                    val salaryAmountToCarry = prevRecordWithSalary?.baseSalary?.takeIf { it > 0.0 }
-                        ?: prevRecordWithSalary?.salaryAmount?.takeIf { it > 0.0 }
+                    val salaryAmountToCarry = recentRecord.baseSalary.takeIf { it > 0.0 }
+                        ?: recentRecord.salaryAmount.takeIf { it > 0.0 }
                         ?: 0.0
                     if (salaryAmountToCarry > 0.0) {
                         toAdd.add(
@@ -1163,14 +1303,17 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                     }
                 }
 
-                for (template in templates.values) {
+                for (template in recentSources) {
                     val alreadyPresent = currentSources.any { item ->
-                        item.title.trim().equals(template.title.trim(), ignoreCase = true) &&
-                            item.category.trim().equals(template.category.trim(), ignoreCase = true)
+                        val titleMatches = item.title.trim().isNotBlank() && item.title.trim().equals(template.title.trim(), ignoreCase = true)
+                        val catMatches = item.category.trim().equals(template.category.trim(), ignoreCase = true)
+                        (titleMatches && catMatches) || (catMatches && item.category == "SALARY")
                     } || toAdd.any { item ->
-                        item.title.trim().equals(template.title.trim(), ignoreCase = true) &&
-                            item.category.trim().equals(template.category.trim(), ignoreCase = true)
+                        val titleMatches = item.title.trim().isNotBlank() && item.title.trim().equals(template.title.trim(), ignoreCase = true)
+                        val catMatches = item.category.trim().equals(template.category.trim(), ignoreCase = true)
+                        (titleMatches && catMatches) || (catMatches && item.category == "SALARY")
                     }
+
                     if (!alreadyPresent) {
                         toAdd.add(
                             template.copy(
@@ -1186,7 +1329,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 if (toAdd.isNotEmpty()) {
                     currentSources.addAll(toAdd)
                     saveUpdatedIncomeSources(existing, currentSources, targetMonth, targetYear)
-                    notifyUser("✓ Added ${toAdd.size} recurring income line(s) for this month.")
+                    notifyUser("✓ Added ${toAdd.size} recurring income line(s) from recent month.")
                     Log.i("FinMoneyViewModel", "Prefilled ${toAdd.size} recurring credits into $targetMonth/$targetYear")
                 }
             } catch (e: Exception) {
@@ -1418,8 +1561,35 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                         oldItem = oldItem,
                         newItem = item
                     )
+                    com.example.learning.AdaptiveLearningEngine.learnFromDebitEdit(
+                        context = app,
+                        oldItem = oldItem,
+                        newItem = item
+                    )
                 } catch (e: Exception) {
-                    android.util.Log.w("FinMoneyViewModel", "Audit log for edited debit failed: ${e.message}")
+                    android.util.Log.w("FinMoneyViewModel", "Audit log / self-learning for edited debit failed: ${e.message}")
+                }
+
+                // Axio-style similarity check across past debits and pending bank transactions
+                val isCategoryChanged = !oldItem.category.equals(item.category, ignoreCase = true)
+                val isTitleChanged = !oldItem.title.equals(item.title, ignoreCase = true)
+                val isTagsChanged = !oldItem.tags.equals(item.tags, ignoreCase = true)
+                if (isCategoryChanged || isTitleChanged || isTagsChanged) {
+                    try {
+                        val pendingList = dao.getPendingBankTransactionsDirect(getActiveUserId())
+                        val debits = dao.getAllDebitsDirect(getActiveUserId())
+                        val prompt = com.example.learning.SimilarTransactionsManager.findSimilarForDebit(
+                            oldDebit = oldItem,
+                            newDebit = item,
+                            pendingList = pendingList,
+                            debitList = debits
+                        )
+                        if (prompt != null && prompt.candidates.isNotEmpty()) {
+                            _similarTransactionsPrompt.value = prompt
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("FinMoneyViewModel", "Similarity check failed: ${e.message}")
+                    }
                 }
             }
             repository.updateDebit(item)

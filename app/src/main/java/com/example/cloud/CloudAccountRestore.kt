@@ -342,6 +342,7 @@ object CloudAccountRestore {
             isPaidViaDebitCard = bool(data["isPaidViaDebitCard"]),
             notes = str(data["notes"]),
             customCategoryName = str(data["customCategoryName"]),
+            tags = str(data["tags"]),
             isRecurring = bool(data["isRecurring"]),
             principalAmount = num(data["principalAmount"]),
             interestRate = num(data["interestRate"]),

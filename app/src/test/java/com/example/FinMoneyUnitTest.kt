@@ -5,6 +5,18 @@ import com.example.data.model.DebitItem
 import com.example.data.model.BankTransactionRecord
 import com.example.data.model.isActualCreditCardTransaction
 import com.example.data.model.isCreditCardRecord
+import com.example.data.model.getDisplayTitle
+import com.example.data.model.getTagList
+import com.example.data.model.LearnedTransactionRule
+import com.example.learning.AdaptiveLearningEngine
+import com.example.learning.DueItemType
+import com.example.learning.DuePaymentMatchCandidate
+import com.example.learning.DuePaymentMatchEngine
+import com.example.learning.DuePaymentMatchPrompt
+import com.example.learning.SimilarTransactionsManager
+import com.example.learning.SimilarTransactionsPrompt
+import com.example.data.model.LoanTransaction
+import com.example.data.model.LoanType
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -428,5 +440,343 @@ class FinMoneyUnitTest {
             originalText = "Cash withdrawal of Rs. 5,000.00 from ATM using A/C **5678."
         )
         assertFalse(atmRecord.isCreditCardRecord())
+    }
+
+    @Test
+    fun testParenthesesMerchantExtractionAndVpaMaskedDigitsFix() {
+        val sms1 = "Rs.105.00 is debited from your account ending 0989 towards VPA ******8732@ybl (HONEY BAKERY) on 04-11-26"
+        val parsed1 = com.example.service.TransactionParser.parse(sms1, "AD-HDFCBK")
+        assertEquals(105.0, parsed1.amount!!, 0.01)
+        assertTrue(parsed1.merchantName.equals("HONEY BAKERY", ignoreCase = true))
+        assertEquals("OUTSIDE_FOOD", parsed1.category)
+
+        val sms2 = "Rs.250.00 debited from A/C 1234 towards VPA xyz@apl (TORREWAR LAXMI) on 04-11-26"
+        val parsed2 = com.example.service.TransactionParser.parse(sms2, "AD-HDFCBK")
+        assertEquals(250.0, parsed2.amount!!, 0.01)
+        assertEquals("TORREWAR LAXMI", parsed2.merchantName)
+        assertEquals("GENERAL", parsed2.category)
+    }
+
+    @Test
+    fun testIciciAccountNumberNotCapturedAsAmount() {
+        val sms = "ICICI Bank Account XX501 credited:Rs. 15,000.00 on 04-Nov-26 by NEFT. Avail Bal: Rs. 45,000.00"
+        val parsed = com.example.service.TransactionParser.parse(sms, "BP-ICICIB")
+        assertEquals(15000.0, parsed.amount!!, 0.01)
+        assertEquals(com.example.data.bank.BankTxType.CREDIT, parsed.transactionType)
+    }
+
+    @Test
+    fun testStockMarketNewsAndOrderDealsIgnored() {
+        val news1 = "🚀 Highway Infra’s ₹198 Cr Milestone! 🏗️"
+        assertFalse(com.example.service.TransactionParser.isFinancialText(news1))
+
+        val news2 = "🚢 GRSE Bags ₹32,000 Cr Navy Deal!"
+        assertFalse(com.example.service.TransactionParser.isFinancialText(news2))
+
+        val news3 = "PM-Kisan: ₹2,000 Credited Today! Over ₹18,680 Cr transferred via DBT"
+        assertFalse(com.example.service.TransactionParser.isFinancialText(news3))
+    }
+
+    @Test
+    fun testUtkarshHelplineNotExtractedAsMerchant() {
+        val sms = "Dear Customer, INR 500.00 debited from A/C 1234 to SWIGGY. To dispute call 18003097986 - Utkarsh SFBL"
+        val parsed = com.example.service.TransactionParser.parse(sms, "UTKARSH")
+        assertEquals("Swiggy", parsed.merchantName)
+        assertFalse(parsed.merchantName.contains("dispute", ignoreCase = true))
+        assertFalse(parsed.merchantName.contains("1800", ignoreCase = true))
+    }
+
+    @Test
+    fun testAuditLogMerchantCategories() {
+        val catGroceries = com.example.data.bank.BankTransactionParser.identifyCategory(
+            text = "Paid Rs 300 at Kamakshi Super Store",
+            merchantName = "Kamakshi Super Store"
+        )
+        assertEquals("GROCERIES", catGroceries)
+
+        val catPharmacy = com.example.data.bank.BankTransactionParser.identifyCategory(
+            text = "Rs 450 debited at MedPlus Pharmacy",
+            merchantName = "MedPlus"
+        )
+        assertEquals("PHARMACY", catPharmacy)
+
+        val catGeneral = com.example.data.bank.BankTransactionParser.identifyCategory(
+            text = "Rs 200 debited towards VPA user@upi on 04-11-26. To dispute click here.",
+            merchantName = "RAMESH KUMAR"
+        )
+        assertEquals("GENERAL", catGeneral)
+    }
+
+    @Test
+    fun testHistoricalExpenseTitleFallbackToTagsAndSubcategory() {
+        // Case 1: Title is blank, but tags exist -> title resolves to first tag
+        val itemWithTags = DebitItem(
+            title = "",
+            category = "OUTSIDE_FOOD",
+            tags = "Swiggy,Dinner"
+        )
+        assertEquals("Swiggy", itemWithTags.getDisplayTitle())
+        assertEquals(listOf("Swiggy", "Dinner"), itemWithTags.getTagList())
+
+        // Case 2: Title is blank, no tags, but custom subcategory exists -> resolves to subcategory
+        val itemWithSubcategory = DebitItem(
+            title = "",
+            category = "CUSTOM",
+            customCategoryName = "Maid Salary"
+        )
+        assertEquals("Maid Salary", itemWithSubcategory.getDisplayTitle())
+
+        // Case 3: Title is blank, hashtag in notes -> resolves to hashtag
+        val itemWithNotesHashtag = DebitItem(
+            title = "",
+            category = "GROCERIES",
+            notes = "Weekly shopping at store #Blinkit"
+        )
+        assertEquals("Blinkit", itemWithNotesHashtag.getDisplayTitle())
+        assertEquals(listOf("Blinkit"), itemWithNotesHashtag.getTagList())
+
+        // Case 4: Title is present and explicit -> preserves title
+        val itemWithTitle = DebitItem(
+            title = "Airtel Fiber Broadband",
+            category = "INTERNET",
+            tags = "WiFi,Work"
+        )
+        assertEquals("Airtel Fiber Broadband", itemWithTitle.getDisplayTitle())
+        assertEquals(listOf("WiFi", "Work"), itemWithTitle.getTagList())
+
+        // Case 5: Title is blank and no tags/notes -> falls back to category display
+        val itemGeneral = DebitItem(
+            title = "",
+            category = "FUEL"
+        )
+        assertEquals("FUEL", itemGeneral.getDisplayTitle())
+    }
+
+    @Test
+    fun testAdaptiveLearningPatternExtraction() {
+        // Test normalization of merchant names and suffixes
+        val keySwiggy = AdaptiveLearningEngine.extractPatternKey("SWIGGY BANGALORE", "Spent Rs 290 at SWIGGY")
+        assertEquals("swiggy", keySwiggy)
+
+        val keyNetflix = AdaptiveLearningEngine.extractPatternKey("Netflix Entertainment Services India Pvt Ltd", "Rs 649 debited for Netflix")
+        assertEquals("netflix", keyNetflix)
+
+        // Test UPI VPA pattern extraction
+        val keyVpa = AdaptiveLearningEngine.extractPatternKey("", "Paid Rs 150 to rakesh.kumar@okhdfcbank using UPI")
+        assertEquals("rakesh.kumar@okhdfcbank", keyVpa)
+
+        // Test keyword recognition in text
+        val keyUber = AdaptiveLearningEngine.extractPatternKey("UBER INDIA TECHNOLOGY", "INR 350 debited for Uber ride")
+        assertEquals("uber", keyUber)
+    }
+
+    @Test
+    fun testAdaptiveLearningRuleModelBehavior() {
+        // Rule created from user editing an expense
+        val learnedRule = LearnedTransactionRule(
+            id = 1L,
+            userId = "user1",
+            patternKey = "swiggy",
+            merchantDisplayName = "Swiggy Daily",
+            matchType = "MERCHANT",
+            learnedCategory = "OUTSIDE_FOOD",
+            learnedTitle = "Swiggy Daily Food",
+            learnedTags = "Lunch,Office",
+            isAutoIgnored = false,
+            rejectCount = 0,
+            approveCount = 3,
+            editCount = 1
+        )
+
+        assertFalse(learnedRule.isAutoIgnored)
+        assertEquals("Swiggy Daily Food", learnedRule.learnedTitle)
+        assertEquals("OUTSIDE_FOOD", learnedRule.learnedCategory)
+        assertEquals("Lunch,Office", learnedRule.learnedTags)
+
+        // Rule created from user repeatedly rejecting unwanted alerts (e.g., self-transfers or noise)
+        val noiseRule = LearnedTransactionRule(
+            id = 2L,
+            userId = "user1",
+            patternKey = "selftransfer",
+            merchantDisplayName = "Self Transfer",
+            matchType = "MERCHANT",
+            learnedCategory = "TRANSFER",
+            isAutoIgnored = true,
+            rejectCount = 2,
+            notes = "Auto-rejected based on 2 previous user rejections"
+        )
+
+        assertTrue(noiseRule.isAutoIgnored)
+        assertTrue(noiseRule.rejectCount >= 2)
+    }
+
+    @Test
+    fun testAxioStyleSimilarTransactionsIdentificationWhenOneOfTenIsEdited() {
+        // Scenario from user:
+        // Automatically identifies 10 transactions, user edits 1 transaction.
+        // Immediately asks to update the other 9 similar transactions.
+        val pendingList = (1..10).map { i ->
+            BankTransactionRecord(
+                id = i.toLong(),
+                bankName = "HDFC Bank",
+                merchant = if (i % 2 == 0) "SWIGGY BANGALORE" else "Swiggy",
+                amount = 150.0 + (i * 20),
+                category = "GENERAL",
+                originalText = "Rs ${150 + i * 20} debited for VPA swiggy@hdfcbank on 05-Nov-26",
+                status = "PENDING",
+                isConfirmed = false
+            )
+        }
+
+        val editedTx = pendingList.first() // Tx #1
+        val newCategory = "OUTSIDE_FOOD"
+        val newTitle = "Swiggy Food"
+
+        val prompt = SimilarTransactionsManager.findSimilarForPendingTx(
+            editedTx = editedTx,
+            newCategory = newCategory,
+            newTitle = newTitle,
+            pendingList = pendingList,
+            debitList = emptyList()
+        )
+
+        assertNotNull(prompt)
+        assertEquals("swiggy", prompt!!.patternKey)
+        assertEquals("OUTSIDE_FOOD", prompt.newCategory)
+        assertEquals("Swiggy Food", prompt.newTitle)
+        // Exactly 9 other similar transactions should be detected for bulk update!
+        assertEquals(9, prompt.candidates.size)
+        assertTrue(prompt.candidates.all { it.currentCategory == "GENERAL" })
+    }
+
+    @Test
+    fun testAxioStyleSimilarDebitIdentification() {
+        val historicalDebits = listOf(
+            DebitItem(id = 1L, title = "Blinkit", category = "GENERAL", amount = 340.0),
+            DebitItem(id = 2L, title = "Blinkit Commerce", category = "GENERAL", amount = 560.0),
+            DebitItem(id = 3L, title = "Blinkit Quick", category = "GENERAL", amount = 120.0),
+            DebitItem(id = 4L, title = "Uber Ride", category = "TRAVEL", amount = 220.0)
+        )
+
+        val oldItem = historicalDebits[0]
+        val newItem = oldItem.copy(
+            category = "GROCERIES",
+            title = "Blinkit Groceries",
+            tags = "Home,Kitchen"
+        )
+
+        val prompt = SimilarTransactionsManager.findSimilarForDebit(
+            oldDebit = oldItem,
+            newDebit = newItem,
+            pendingList = emptyList(),
+            debitList = historicalDebits
+        )
+
+        assertNotNull(prompt)
+        assertEquals("blinkit", prompt!!.patternKey)
+        assertEquals("GROCERIES", prompt.newCategory)
+        assertEquals("Blinkit Groceries", prompt.newTitle)
+        assertEquals("Home,Kitchen", prompt.newTags)
+        // Only items 2 and 3 should match (item 4 is Uber)
+        assertEquals(2, prompt.candidates.size)
+    }
+
+    @Test
+    fun testAxioStyleDuePaymentMatchCandidateCreation() {
+        // Test Candidate Model for Due Expense Match
+        val candidateExpense = DuePaymentMatchCandidate(
+            id = "debit_101",
+            itemType = DueItemType.DUE_EXPENSE,
+            title = "Airtel Fiber Broadband",
+            personOrCategoryName = "RECHARGE",
+            amount = 1199.0,
+            dateInfo = "Due on 10 Nov",
+            targetDebit = DebitItem(id = 101L, title = "Airtel Fiber Broadband", amount = 1199.0, isPaid = false)
+        )
+
+        val txDebit = BankTransactionRecord(
+            id = 1001L,
+            amount = 1199.0,
+            type = "DEBIT",
+            merchant = "Airtel Broadband",
+            bankName = "HDFC Bank"
+        )
+
+        val promptExpense = DuePaymentMatchPrompt(transaction = txDebit, candidate = candidateExpense)
+        assertEquals("debit_101", promptExpense.candidate.id)
+        assertEquals(DueItemType.DUE_EXPENSE, promptExpense.candidate.itemType)
+        assertEquals(1199.0, promptExpense.candidate.amount, 0.001)
+
+        // Test Candidate Model for Lent Money Recovery (Credit received)
+        val candidateLent = DuePaymentMatchCandidate(
+            id = "loan_202",
+            itemType = DueItemType.LENT_MONEY_RECOVERY,
+            title = "Lent Money Recovery",
+            personOrCategoryName = "Ramesh Kumar",
+            amount = 5000.0,
+            dateInfo = "Lent to Ramesh Kumar",
+            targetLoan = LoanTransaction(id = 202L, personName = "Ramesh Kumar", totalAmount = 5000.0, type = LoanType.LENT)
+        )
+
+        val txCredit = BankTransactionRecord(
+            id = 1002L,
+            amount = 5000.0,
+            type = "CREDIT",
+            merchant = "Ramesh Kumar",
+            bankName = "ICICI Bank"
+        )
+
+        val promptCredit = DuePaymentMatchPrompt(transaction = txCredit, candidate = candidateLent)
+        assertEquals("loan_202", promptCredit.candidate.id)
+        assertEquals(DueItemType.LENT_MONEY_RECOVERY, promptCredit.candidate.itemType)
+        assertEquals("Ramesh Kumar", promptCredit.candidate.personOrCategoryName)
+    }
+
+    @Test
+    fun testRecentMonthPrefillDeduplicationLogic() {
+        // Recurring debits from August (older month) and September (recent month)
+        val augMaid = DebitItem(id = 1L, month = 8, year = 2026, title = "Maid Salary", category = "GENERAL", amount = 3000.0, isRecurring = true)
+        val sepMaid = DebitItem(id = 2L, month = 9, year = 2026, title = "Maid Salary", category = "GENERAL", amount = 3500.0, isRecurring = true)
+        val sepWifi = DebitItem(id = 3L, month = 9, year = 2026, title = "Airtel Wifi", category = "INTERNET", amount = 999.0, isRecurring = true)
+
+        val allRecurring = listOf(augMaid, sepMaid, sepWifi)
+        val targetMonth = 10
+        val targetYear = 2026
+        val targetCode = targetYear * 100 + targetMonth
+
+        // Find most recent month
+        val recentPair = allRecurring
+            .map { (it.year * 100 + it.month) to (it.year to it.month) }
+            .filter { it.first < targetCode }
+            .maxByOrNull { it.first }
+            ?.second
+
+        assertNotNull(recentPair)
+        assertEquals(2026 to 9, recentPair)
+
+        // Filter recurring items to only September
+        val recentItems = allRecurring.filter { it.year == recentPair!!.first && it.month == recentPair.second }
+        assertEquals(2, recentItems.size) // Maid Salary (₹3500) and Airtel Wifi (₹999)
+
+        // October already has "Maid Salary" (entry already there)
+        val octExisting = listOf(
+            DebitItem(id = 10L, month = 10, year = 2026, title = "Maid Salary", category = "GENERAL", amount = 3500.0)
+        )
+
+        val newToInsert = mutableListOf<DebitItem>()
+        for (template in recentItems) {
+            val alreadyPresent = octExisting.any { item ->
+                val titleMatches = item.title.trim().isNotBlank() && item.title.trim().equals(template.title.trim(), ignoreCase = true)
+                val catMatches = item.category.trim().equals(template.category.trim(), ignoreCase = true)
+                (titleMatches && catMatches) || (titleMatches && Math.abs(item.amount - template.amount) < 0.01)
+            }
+            if (!alreadyPresent) {
+                newToInsert.add(template)
+            }
+        }
+
+        // Only Airtel Wifi should be inserted since Maid Salary is ALREADY present
+        assertEquals(1, newToInsert.size)
+        assertEquals("Airtel Wifi", newToInsert.first().title)
     }
 }

@@ -326,6 +326,12 @@ interface FinMoneyDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBankTransaction(transaction: BankTransactionRecord): Long
 
+    @Update
+    suspend fun updateBankTransaction(transaction: BankTransactionRecord)
+
+    @Query("UPDATE bank_transactions SET category = :category, merchant = :merchant WHERE id = :id")
+    suspend fun updateBankTransactionCategoryAndMerchant(id: Long, category: String, merchant: String)
+
     @Query("UPDATE bank_transactions SET isConfirmed = :confirmed WHERE id = :id")
     suspend fun setBankTransactionConfirmed(id: Long, confirmed: Boolean)
 
@@ -436,4 +442,26 @@ interface FinMoneyDao {
 
     @Query("DELETE FROM user_action_audit_logs")
     suspend fun clearAllAuditLogs()
+
+    // --- Self-Learning Transaction Rules ---
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateLearnedRule(rule: LearnedTransactionRule): Long
+
+    @Query("SELECT * FROM learned_transaction_rules WHERE userId = :userId OR userId = '' ORDER BY updatedAt DESC")
+    fun getAllLearnedRules(userId: String = ""): Flow<List<LearnedTransactionRule>>
+
+    @Query("SELECT * FROM learned_transaction_rules WHERE userId = :userId OR userId = '' ORDER BY updatedAt DESC")
+    suspend fun getAllLearnedRulesDirect(userId: String = ""): List<LearnedTransactionRule>
+
+    @Query("SELECT * FROM learned_transaction_rules WHERE patternKey = :patternKey AND (userId = :userId OR userId = '') LIMIT 1")
+    suspend fun getLearnedRuleByPattern(patternKey: String, userId: String = ""): LearnedTransactionRule?
+
+    @Query("UPDATE learned_transaction_rules SET isAutoIgnored = :isIgnored, updatedAt = :timestamp WHERE id = :id")
+    suspend fun updateRuleAutoIgnored(id: Long, isIgnored: Boolean, timestamp: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM learned_transaction_rules WHERE id = :id")
+    suspend fun deleteLearnedRule(id: Long)
+
+    @Query("DELETE FROM learned_transaction_rules WHERE userId = :userId OR userId = ''")
+    suspend fun clearAllLearnedRules(userId: String = "")
 }

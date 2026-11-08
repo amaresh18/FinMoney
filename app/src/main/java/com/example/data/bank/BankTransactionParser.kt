@@ -238,7 +238,8 @@ object BankTransactionParser {
                     "swiggy", "zomato", "mcdonald", "mcdonalds", "kfc", "domino", "dominos", "pizza",
                     "starbucks", "third wave", "chaayos", "chai point", "haldiram", "eatclub", "eatfit",
                     "box8", "faasos", "behrouz", "burger king", "taco bell", "subway", "baskin", "dineout",
-                    "magicpin", "barbeque nation", "mainland china", "bistro", "cafe", "restaurant", "bakery"
+                    "magicpin", "barbeque nation", "mainland china", "bistro", "cafe", "restaurant", "bakery",
+                    "honey bakery", "baker", "hotel", "tea", "sweets", "mithai", "canteen", "kitchen", "diner", "tiffin"
                 ),
                 textKeywords = listOf(
                     "swiggy", "zomato", "restaurant", "dining", "food", "cafe", "bistro", "eatery",
@@ -255,7 +256,8 @@ object BankTransactionParser {
                 merchantKeywords = listOf(
                     "blinkit", "zepto", "instamart", "bigbasket", "bb daily", "country delight", "jiomart",
                     "dmart", "avenue supermarts", "more retail", "spencer", "spencers", "nature basket",
-                    "star bazaar", "reliance fresh", "reliance smart", "easyday", "milkbasket"
+                    "star bazaar", "reliance fresh", "reliance smart", "easyday", "milkbasket",
+                    "kamakshi", "kamakshi super", "supermarket", "super store", "super market", "kirana", "provision"
                 ),
                 textKeywords = listOf(
                     "groceries", "grocery", "supermarket", "hypermarket", "kirana", "provision",
@@ -430,11 +432,11 @@ object BankTransactionParser {
                 categoryKey = DebitCategory.INSURANCE.name,
                 displayName = "Insurance",
                 merchantKeywords = listOf(
-                    "lic", "life insurance", "policybazaar", "star health", "care health", "hdfc ergo",
-                    "icici lombard", "bajaj allianz", "digit insurance", "acko"
+                    "lic of india", "life insurance", "policybazaar", "star health", "care health", "hdfc ergo",
+                    "icici lombard", "bajaj allianz", "digit insurance", "acko", "max bupa", "niva bupa"
                 ),
                 textKeywords = listOf(
-                    "insurance", "premium", "policy", "mediclaim", "lic"
+                    "insurance premium", "life insurance", "health insurance", "mediclaim", "policy premium"
                 ),
                 priority = 18
             ),
@@ -525,6 +527,15 @@ object BankTransactionParser {
 
             val combined = "$safeTitle $lowerMerchant $safeText"
 
+            fun matchesKeyword(haystack: String, needle: String): Boolean {
+                if (needle.isBlank()) return false
+                return if (needle.length <= 4) {
+                    Regex("""\b${Regex.escape(needle)}\b""", RegexOption.IGNORE_CASE).containsMatchIn(haystack)
+                } else {
+                    haystack.contains(needle)
+                }
+            }
+
             var bestRule: CategoryRule? = null
             var bestScore = 0
 
@@ -533,14 +544,14 @@ object BankTransactionParser {
 
                 // Check merchant keywords (Highest weight)
                 if (lowerMerchant.isNotBlank()) {
-                    if (rule.merchantKeywords.any { lowerMerchant.contains(it) || it.contains(lowerMerchant) }) {
+                    if (rule.merchantKeywords.any { matchesKeyword(lowerMerchant, it) || (it.length > 3 && it.contains(lowerMerchant)) }) {
                         currentScore += 30
                     }
                 }
 
                 // Check if rule's merchant keywords appear anywhere in combined text
                 for (mKeyword in rule.merchantKeywords) {
-                    if (mKeyword.isNotBlank() && combined.contains(mKeyword)) {
+                    if (mKeyword.isNotBlank() && matchesKeyword(combined, mKeyword)) {
                         currentScore += 20
                         break
                     }
@@ -548,7 +559,7 @@ object BankTransactionParser {
 
                 // Check text keywords
                 for (tKeyword in rule.textKeywords) {
-                    if (tKeyword.isNotBlank() && combined.contains(tKeyword)) {
+                    if (tKeyword.isNotBlank() && matchesKeyword(combined, tKeyword)) {
                         currentScore += 10
                         break
                     }
@@ -611,6 +622,23 @@ object BankTransactionParser {
         val normalized = text.replace("\n", " ").trim()
         if (normalized.isBlank()) return ""
 
+        // 1. Beneficiary / Merchant inside parentheses after VPA: e.g. "towards VPA ******8732@ybl (HONEY BAKERY) on 04-11-26"
+        val vpaParenRegex = Regex("""(?:towards|to|via)?\s*vpa\s*[^\s()]+\s*\(([^)]+)\)""", RegexOption.IGNORE_CASE)
+        val vpaParenMatch = vpaParenRegex.find(normalized)
+            ?: Regex("""(?:[\*xXa-z0-9._-]+@[a-z0-9._-]+)\s*\(([^)]+)\)""", RegexOption.IGNORE_CASE).find(normalized)
+        if (vpaParenMatch != null) {
+            val parenCandidate = vpaParenMatch.groupValues[1].trim()
+            if (isValidMerchantCandidate(parenCandidate)) {
+                return parenCandidate
+            }
+        }
+
+        // Strip bank helpline / dispute footers before parsing other patterns
+        val sanitized = normalized.replace(
+            Regex("""(?i)(?:to\s+dispute|if\s+not\s+(?:done|you)|to\s+report\s+fraud|report\s+unauthorized|call\s+1800|helpline\s*(?:no\.?)?\s*[:\d]|call\s+bank|block\s+card).*"""),
+            ""
+        ).trim()
+
         val patterns = listOf(
             Regex(
                 """(?:debited|credited|transfer(?:red)?|sent|paid|spent|charged)\s+(?:from|for)?\s+.*?\s+to\s+([A-Za-z0-9][A-Za-z0-9\s.'&/_-]{1,45}?)(?:\s+on|\s+dated|\s+ref|\s+upi|\s+avl|\s+bal|\.|,|$)""",
@@ -629,14 +657,14 @@ object BankTransactionParser {
                 RegexOption.IGNORE_CASE
             ),
             Regex(
-                """(?:towards|to|at|vpa|info:)\s+([A-Za-z0-9][A-Za-z0-9\s._@&'-]{2,35}?)(?:\s+on|\s+ref|\s+txn|\s+upi|\s+bal|\.|,|$)""",
+                """(?:towards|to(?!\s+(?:dispute|report|block|call|check|avail|view|download|register|opt))|at|vpa|info:)\s+([A-Za-z0-9][A-Za-z0-9\s._@&'-]{2,35}?)(?:\s+on|\s+ref|\s+txn|\s+upi|\s+bal|\.|,|$)""",
                 RegexOption.IGNORE_CASE
             ),
             Regex("""\b([a-z0-9][a-z0-9._-]{1,40}@[a-z]{2,16})\b""", RegexOption.IGNORE_CASE)
         )
 
         for (pattern in patterns) {
-            val match = pattern.find(normalized) ?: continue
+            val match = pattern.find(sanitized) ?: continue
             val candidate = match.groupValues[1].trim().trimEnd('.', ',')
             if (isValidMerchantCandidate(candidate)) {
                 return candidate
@@ -647,10 +675,21 @@ object BankTransactionParser {
 
     private fun isValidMerchantCandidate(candidate: String): Boolean {
         if (candidate.length < 2) return false
-        val lower = candidate.lowercase()
+        val lower = candidate.lowercase().trim()
         if (MERCHANT_STOPWORDS.any { lower == it || lower.startsWith("$it ") }) return false
+        // Rejects pure numbers, account endings, or masked VPA digits like "8732", "3462", "0744", "0018", "**8732", "XX1234"
+        if (lower.matches(Regex("""^[\d\s]+$"""))) return false
+        if (lower.matches(Regex("""^[\*xX\d\s]+$"""))) return false
         if (lower.matches(Regex("""^\*+\d+$"""))) return false
         if (lower.matches(Regex("""^x{2,}\d+$""", RegexOption.IGNORE_CASE))) return false
+
+        // Rejects helpline and dispute phrases (e.g. Utkarsh SFBL helpline)
+        if (lower.contains("dispute") || lower.contains("call 1800") || lower.contains("helpline") ||
+            lower.contains("toll free") || lower.contains("tollfree") || lower.contains("utkarsh sfbl") ||
+            lower.contains("report fraud") || lower.contains("if not you") || lower.contains("block card") ||
+            lower.contains("customer care") || lower.contains("fraud") || lower.contains("unauthorized")) {
+            return false
+        }
         return true
     }
 
@@ -699,7 +738,7 @@ object BankTransactionParser {
 
         // 4. Regex fallbacks on body
         val patterns = listOf(
-            Regex("""(?:towards|to|at|vpa|info:)\s+([A-Za-z0-9\s._@&-]{2,30}?)(?:\s+on|\s+ref|\s+txn|\s+upi|\s+bal|\.|\s*$)""", RegexOption.IGNORE_CASE),
+            Regex("""(?:towards|to(?!\s+(?:dispute|report|block|call))|at|vpa|info:)\s+([A-Za-z0-9\s._@&-]{2,30}?)(?:\s+on|\s+ref|\s+txn|\s+upi|\s+bal|\.|\s*$)""", RegexOption.IGNORE_CASE),
             Regex("""paid\s+(?:to\s+)?([A-Za-z0-9\s._@&-]{2,25}?)(?:\s+using|\s+on|\s+ref|\.|\s*$)""", RegexOption.IGNORE_CASE),
             Regex("""received\s+(?:from\s+)?([A-Za-z0-9\s._@&-]{2,25}?)(?:\s+in|\s+on|\s+ref|\.|\s*$)""", RegexOption.IGNORE_CASE)
         )
