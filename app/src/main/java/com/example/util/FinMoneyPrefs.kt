@@ -69,5 +69,6 @@ object FinMoneyPrefs {
             .putBoolean(KEY_DUE_REMINDERS_ENABLED, enabled)
             .apply()
     }
+
 }
 

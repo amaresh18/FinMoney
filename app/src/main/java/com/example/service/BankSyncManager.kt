@@ -167,10 +167,26 @@ object BankSyncManager {
             )
         }
 
+        var effectiveParseResult = parseResult
+        val aiRefined = kotlinx.coroutines.runBlocking {
+            com.example.service.ai.TransactionAiClassifier.refineIfNeeded(
+                rawText = text,
+                senderOrTitle = title,
+                sourcePackage = packageName,
+                timestamp = timestamp,
+                local = parseResult,
+                parsed = parsed
+            )
+        }
+        if (aiRefined != null) {
+            effectiveParseResult = aiRefined.first
+            parsed = aiRefined.second
+        }
+
         val gateDecision = NotificationTransactionGate.evaluate(
             title = title,
             body = text,
-            parseResult = parseResult,
+            parseResult = effectiveParseResult,
             parsedTx = parsed
         )
 
@@ -194,19 +210,19 @@ object BankSyncManager {
             NotificationTransactionGate.Action.BALANCE_UPDATE_ONLY -> {
                 scope.launch {
                     try {
-                        val balance = gateDecision.balanceToApply ?: parseResult.availableBalance
+                        val balance = gateDecision.balanceToApply ?: effectiveParseResult.availableBalance
                         if (balance != null && balance >= 0.0) {
                             updateReconciliationBankBalance(
                                 dao = dao,
                                 month = month,
                                 year = year,
-                                bankName = parseResult.bankName,
-                                accountLast4 = parseResult.accountEnding,
+                                bankName = effectiveParseResult.bankName,
+                                accountLast4 = effectiveParseResult.accountEnding,
                                 newBalance = balance
                             )
                             android.util.Log.i(
                                 "BankSyncManager",
-                                "Silent balance update for ${parseResult.bankName}: ₹${"%,.2f".format(balance)} (${gateDecision.reason})"
+                                "Silent balance update for ${effectiveParseResult.bankName}: ₹${"%,.2f".format(balance)} (${gateDecision.reason})"
                             )
                         }
                     } catch (e: Exception) {
@@ -218,8 +234,8 @@ object BankSyncManager {
             NotificationTransactionGate.Action.REQUEST_USER_APPROVAL -> { /* continue */ }
         }
 
-        if (!isFinancial || parsed == null || !parseResult.isFinancialNotification) {
-            android.util.Log.i("BankSyncManager", "Filtered non-financial or promotional notification: ${parseResult.debugReason}")
+        if (!isFinancial || parsed == null || !effectiveParseResult.isFinancialNotification) {
+            android.util.Log.i("BankSyncManager", "Filtered non-financial or promotional notification: ${effectiveParseResult.debugReason}")
             return null
         }
 

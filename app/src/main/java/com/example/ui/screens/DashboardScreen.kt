@@ -77,6 +77,8 @@ fun DashboardScreen(
     var creditPendingDelete by remember { mutableStateOf<IncomeSource?>(null) }
     var editingDebitItem by remember { mutableStateOf<DebitItem?>(null) }
     var editingCreditSource by remember { mutableStateOf<IncomeSource?>(null) }
+    var confirmAddAllAutoDetected by remember { mutableStateOf(false) }
+    var confirmDismissAllAutoDetected by remember { mutableStateOf(false) }
 
     val selectedSpecificDay by viewModel.selectedSpecificDay.collectAsStateWithLifecycle()
     val selectedStartDay by viewModel.selectedStartDay.collectAsStateWithLifecycle()
@@ -452,102 +454,115 @@ fun DashboardScreen(
             }
         }
 
-        // Automatically Identified Payment Entries / Pending Bank Transactions Approval Section
-
         if (pendingBankTransactions.isNotEmpty()) {
             item {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                val preview = pendingBankTransactions.take(3)
+                val extraCount = pendingBankTransactions.size - preview.size
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = IndSurface,
+                    border = BorderStroke(1.dp, IndBorderSubtle),
+                    shadowElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(18.dp))
-                            Text(
-                                text = "Auto-Identified Payments (${pendingBankTransactions.size})",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = IndTextPrimary
-                            )
-                        }
-                        TextButton(onClick = { viewModel.approveAllPendingTransactions() }) {
-                            Text("Approve All", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = IndBlue)
-                        }
-                    }
-
-                    pendingBankTransactions.forEach { tx ->
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFFFEF3C7),
-                            border = BorderStroke(1.dp, Color(0xFFFCD34D)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Auto-detected",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = IndTextMuted
+                                )
+                                Text(
+                                    text = "${pendingBankTransactions.size} payment${if (pendingBankTransactions.size == 1) "" else "s"}",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndNavyHeader
+                                )
+                            }
+                            FilledTonalButton(
+                                onClick = onOpenPending,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("dashboard_edit_auto_detected")
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = tx.merchant.ifBlank { "Detected Bank Alert" },
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp,
-                                            color = IndNavyHeader
-                                        )
-                                        Text(
-                                            text = "Category: ${tx.category} • $currencySymbol${"%,.0f".format(tx.amount)}",
-                                            fontSize = 12.sp,
-                                            color = IndTextSecondary
-                                        )
-                                        if (tx.originalText.isNotBlank()) {
-                                            Text(
-                                                text = "\"${tx.originalText}\"",
-                                                fontSize = 10.sp,
-                                                color = IndTextMuted,
-                                                maxLines = 2
-                                            )
-                                        }
-                                    }
-                                }
+                                Icon(Icons.Outlined.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Edit", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Button(
-                                        onClick = { viewModel.approvePendingTransaction(tx) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f).height(36.dp)
-                                    ) {
-                                        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Approve", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
-
-                                    OutlinedButton(
-                                        onClick = { viewModel.rejectPendingTransaction(tx) },
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
-                                        border = BorderStroke(1.dp, Color(0xFFDC2626)),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f).height(36.dp)
-                                    ) {
-                                        Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Reject", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
+                        preview.forEach { tx ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = tx.merchant.ifBlank { tx.bankName }.ifBlank { "Bank alert" },
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = IndTextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${tx.category.replace('_', ' ')} · $currencySymbol${"%,.0f".format(tx.amount)}",
+                                        fontSize = 11.sp,
+                                        color = IndTextSecondary,
+                                        maxLines = 1
+                                    )
                                 }
+                                Text(
+                                    text = if (tx.type.equals("CREDIT", true)) "In" else "Out",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (tx.type.equals("CREDIT", true)) IndGreenDark else IndRed,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (tx.type.equals("CREDIT", true)) IndGreenLight else Color(0xFFFEE2E2)
+                                        )
+                                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                        if (extraCount > 0) {
+                            TextButton(
+                                onClick = onOpenPending,
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Text("+$extraCount more — open editor", fontSize = 12.sp, color = IndBlue)
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { confirmDismissAllAutoDetected = true },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Dismiss all", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            Button(
+                                onClick = { confirmAddAllAutoDetected = true },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = IndBlue)
+                            ) {
+                                Text("Add all", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -1687,6 +1702,66 @@ fun DashboardScreen(
             },
             onDismiss = {
                 viewModel.dismissSimilarTransactionsPrompt()
+            }
+        )
+    }
+
+    if (confirmAddAllAutoDetected) {
+        val n = pendingBankTransactions.size
+        AlertDialog(
+            onDismissRequest = { confirmAddAllAutoDetected = false },
+            title = { Text("Add all $n payments?", fontWeight = FontWeight.Bold, color = IndNavyHeader) },
+            text = {
+                Text(
+                    "Each detected bank alert will be added to your ledger using its suggested category and title. You can still edit them later.",
+                    color = IndTextSecondary,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmAddAllAutoDetected = false
+                        viewModel.approveAllPendingTransactions()
+                    }
+                ) {
+                    Text("Add all", color = IndBlue, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmAddAllAutoDetected = false }) {
+                    Text("Cancel", color = IndTextMuted)
+                }
+            }
+        )
+    }
+
+    if (confirmDismissAllAutoDetected) {
+        val n = pendingBankTransactions.size
+        AlertDialog(
+            onDismissRequest = { confirmDismissAllAutoDetected = false },
+            title = { Text("Dismiss all $n?", fontWeight = FontWeight.Bold, color = IndNavyHeader) },
+            text = {
+                Text(
+                    "These alerts will be ignored and will not appear as expenses or income.",
+                    color = IndTextSecondary,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDismissAllAutoDetected = false
+                        viewModel.dismissAllPendingTransactions()
+                    }
+                ) {
+                    Text("Dismiss all", color = IndRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDismissAllAutoDetected = false }) {
+                    Text("Cancel", color = IndTextMuted)
+                }
             }
         )
     }

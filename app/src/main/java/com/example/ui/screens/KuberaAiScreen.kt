@@ -126,7 +126,6 @@ fun KuberaAiScreen(
     val allLoans by viewModel.allLoans.collectAsStateWithLifecycle()
 
     var userQueryText by remember { mutableStateOf("") }
-    var showApiKeyDialog by remember { mutableStateOf(false) }
     var showJsonContextDialog by remember { mutableStateOf(false) }
     var showLoreCodexDialog by remember { mutableStateOf(false) }
 
@@ -255,19 +254,6 @@ fun KuberaAiScreen(
                                     imageVector = Icons.Filled.DataObject,
                                     contentDescription = "View Context JSON",
                                     tint = KuberaTextSecondary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-
-                            // Key configuration
-                            IconButton(
-                                onClick = { showApiKeyDialog = true },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Key,
-                                    contentDescription = "Configure Groq API Key",
-                                    tint = if (groqApiKey.isNotBlank()) KuberaGold else Color(0xFFFFB74D),
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -538,21 +524,6 @@ fun KuberaAiScreen(
                 }
             }
         }
-    }
-
-    // API Key & Model Configuration Dialog
-    if (showApiKeyDialog) {
-        ApiKeyConfigDialog(
-            currentKey = groqApiKey,
-            currentModel = selectedModel,
-            onDismiss = { showApiKeyDialog = false },
-            onSave = { key, model ->
-                viewModel.saveGroqApiKey(key)
-                viewModel.setSelectedGroqModel(model)
-                showApiKeyDialog = false
-                Toast.makeText(context, "Groq AI preferences updated successfully", Toast.LENGTH_SHORT).show()
-            }
-        )
     }
 
     // View Live JSON Context Dialog
