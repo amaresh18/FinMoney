@@ -802,48 +802,20 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun reclassifyTransactionWithGemini(txId: Long) {
         launchSafe {
-            val tx = dao.getBankTransactionById(txId)
-            if (tx != null) {
-                val parseResult = TransactionParser.parse(
-                    rawText = tx.originalText,
-                    senderOrTitle = tx.bankName,
-                    sourcePackage = tx.source
-                )
-                if (parseResult.amount != null && parseResult.amount > 0.0) {
-                    val catStr: String = parseResult.category
-                    val updated = tx.copy(
-                        bankName = parseResult.bankName,
-                        amount = parseResult.amount,
-                        type = parseResult.transactionType.name,
-                        category = catStr,
-                        merchant = parseResult.merchantName,
-                        classification = parseResult.classification
-                    )
-                    dao.insertBankTransaction(updated)
-                    notifyUser("Updated transaction: ${parseResult.merchantName} • ₹${parseResult.amount}")
-                }
-            }
+            val ctx = getApplication<Application>()
+            com.example.service.gemini.GeminiNotificationClassificationService
+                .updateTransactionClassification(ctx, txId)
+                .onSuccess { c -> notifyUser("Updated: ${c.displayTitle} • ${c.category}") }
+                .onFailure { err -> notifyUser(err.message ?: "Could not refine") }
         }
     }
 
     fun batchRefineWithGemini() {
         launchSafe {
-            val pendingList = dao.getRecentBankTransactionsDirect(100).filter { !it.isConfirmed }
-            var updatedCount = 0
-            for (tx in pendingList) {
-                val parseResult = TransactionParser.parse(rawText = tx.originalText, senderOrTitle = tx.bankName)
-                if (parseResult.amount != null && parseResult.amount > 0.0) {
-                    val catStr: String = parseResult.category
-                    val updated = tx.copy(
-                        category = catStr,
-                        merchant = parseResult.merchantName,
-                        classification = parseResult.classification
-                    )
-                    dao.insertBankTransaction(updated)
-                    updatedCount++
-                }
-            }
-            notifyUser("Refined $updatedCount pending transactions using local rule engine.")
+            val ctx = getApplication<Application>()
+            val n = com.example.service.gemini.GeminiNotificationClassificationService
+                .batchRefinePendingTransactions(ctx)
+            notifyUser(if (n > 0) "Refined $n pending item(s) with AI." else "Nothing to refine.")
         }
     }
 
@@ -877,6 +849,22 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 if (ok == 0) "Nothing to approve."
                 else "Saved $ok ${if (ok == 1) "entry" else "entries"} on this device. Cloud will follow."
             )
+        }
+    }
+
+    fun dismissAllPendingTransactions() {
+        launchSafe {
+            val pending = dao.getPendingBankTransactionsDirect(getActiveUserId())
+            if (pending.isEmpty()) {
+                notifyUser("Nothing to dismiss.")
+                return@launchSafe
+            }
+            var count = 0
+            pending.forEach { tx ->
+                BankSyncManager.rejectTransaction(context = app, txId = tx.id)
+                count++
+            }
+            notifyUser("Dismissed $count auto-detected ${if (count == 1) "payment" else "payments"}.")
         }
     }
 
@@ -1040,7 +1028,7 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
     private val _isKuberaSpeaking = MutableStateFlow(false)
     val isKuberaSpeaking: StateFlow<Boolean> = _isKuberaSpeaking.asStateFlow()
 
-    private val _groqApiKey = MutableStateFlow("")
+    private val _groqApiKey = MutableStateFlow(groqApiClient.getApiKey())
     val groqApiKey: StateFlow<String> = _groqApiKey.asStateFlow()
 
     private val _selectedGroqModel = MutableStateFlow("llama-3.3-70b-versatile")
@@ -1053,10 +1041,6 @@ class FinMoneyViewModel(private val app: Application) : AndroidViewModel(app) {
                 text = "Greetings! I am Lord Kubera, Guardian of Celestial Wealth. How may I guide your financial prosperity today?"
             )
         )
-    }
-
-    fun saveGroqApiKey(key: String) {
-        _groqApiKey.value = key
     }
 
     fun setSelectedGroqModel(model: String) {

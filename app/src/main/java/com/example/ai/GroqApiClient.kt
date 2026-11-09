@@ -74,21 +74,12 @@ class GroqApiClient(private val context: Context) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun getApiKey(): String {
-        val userKey = prefs.getString(KEY_CUSTOM_GROQ_API_KEY, "")?.trim() ?: ""
-        if (userKey.isNotBlank()) return userKey
-
-        // Fallback to BuildConfig if present and not default placeholder
-        val buildKey = try {
+        return try {
             val key = BuildConfig::class.java.getField("GROQ_API_KEY").get(null) as? String
             if (key != null && key.isNotBlank() && key != "default_groq_key") key else ""
         } catch (_: Exception) {
             ""
         }
-        return buildKey
-    }
-
-    fun saveApiKey(apiKey: String) {
-        prefs.edit().putString(KEY_CUSTOM_GROQ_API_KEY, apiKey.trim()).apply()
     }
 
     fun getSelectedModel(): String {
@@ -155,7 +146,7 @@ class GroqApiClient(private val context: Context) {
         val apiKey = getApiKey()
         if (apiKey.isBlank()) {
             return@withContext Result.failure(
-                IllegalStateException("Groq API Key is not configured. Please enter your free Groq API key from console.groq.com to awaken Lord Kubera.")
+                IllegalStateException("Kubera AI is offline right now.")
             )
         }
 

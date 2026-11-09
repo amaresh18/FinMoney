@@ -163,12 +163,10 @@ fun MainScreen(
     var pendingCustomCategoryRowId by remember { mutableStateOf<String?>(null) }
     var lastAddedCustomCategoryForEntry by remember { mutableStateOf<String?>(null) }
     var showAnalytics by remember { mutableStateOf(false) }
-    var showKuberaAi by remember { mutableStateOf(false) }
     var showProfileScreen by remember { mutableStateOf(false) }
 
     fun dismissFullScreenOverlays() {
         showPendingTransactions = false
-        showKuberaAi = false
         showAnalytics = false
         showProfileScreen = false
     }
@@ -178,7 +176,7 @@ fun MainScreen(
         selectedTab = tab
     }
 
-    val overlayObscuresMainContent = showPendingTransactions || showKuberaAi || showProfileScreen
+    val overlayObscuresMainContent = showPendingTransactions || showProfileScreen
 
     // Intercept back button on secondary views or tabs to navigate back safely
     if (showProfileScreen) {
@@ -188,10 +186,6 @@ fun MainScreen(
     } else if (showPendingTransactions) {
         BackHandler {
             showPendingTransactions = false
-        }
-    } else if (showKuberaAi) {
-        BackHandler {
-            showKuberaAi = false
         }
     } else if (selectedTab != 0 || showAnalytics) {
         BackHandler {
@@ -289,30 +283,6 @@ fun MainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                        // Kubera AI Quick Action
-                        IconButton(
-                            onClick = {
-                                if (showKuberaAi) {
-                                    showKuberaAi = false
-                                } else {
-                                    showPendingTransactions = false
-                                    showAnalytics = false
-                                    showKuberaAi = true
-                                }
-                            },
-                            modifier = Modifier
-                                .testTag("top_ai_button")
-                                .clip(CircleShape)
-                                .background(if (showKuberaAi) Color(0xFFFDE68A) else Color(0xFFFEF3C7))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.AutoAwesome,
-                                contentDescription = "Kubera AI Assistant",
-                                tint = Color(0xFFD97706),
-                                modifier = Modifier.size(19.dp)
-                            )
-                        }
-
                         // Quick Add Multi-Debit FAB icon
                         IconButton(
                             onClick = { showQuickMultiAddSheet = true },
@@ -336,7 +306,6 @@ fun MainScreen(
                                 } else if (showPendingTransactions) {
                                     showPendingTransactions = false
                                 } else {
-                                    showKuberaAi = false
                                     showAnalytics = false
                                     showPendingTransactions = true
                                 }
@@ -375,37 +344,6 @@ fun MainScreen(
                             }
                         }
 
-                        // My Bills Quick Action in place of old profile icon
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = if (selectedTab == 4 && !showProfileScreen) Color(0xFF0F172A) else Color(0xFFEFF6FF),
-                            border = BorderStroke(1.dp, if (selectedTab == 4 && !showProfileScreen) Color(0xFF0F172A) else Color(0xFF2563EB).copy(alpha = 0.3f)),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .clickable {
-                                    navigateToTab(4)
-                                }
-                                .testTag("top_my_bills_button")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.ReceiptLong,
-                                    contentDescription = "My Bills",
-                                    tint = if (selectedTab == 4 && !showProfileScreen) Color.White else Color(0xFF2563EB),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "My Bills",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (selectedTab == 4 && !showProfileScreen) Color.White else Color(0xFF2563EB)
-                                )
-                            }
-                        }
                     }
                 }
                 }
@@ -511,32 +449,7 @@ fun MainScreen(
                     NavigationBarItem(
                         icon = {
                             Icon(
-                                imageVector = if (selectedTab == 3) Icons.Filled.AccountBalance else Icons.Outlined.AccountBalance,
-                                contentDescription = "Reconcile"
-                            )
-                        },
-                        label = {
-                            Text(
-                                "Reconcile",
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                softWrap = false
-                            )
-                        },
-                        selected = selectedTab == 3 && !overlayObscuresMainContent,
-                        onClick = { navigateToTab(3) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = IndBlue,
-                            selectedTextColor = IndBlue,
-                            indicatorColor = IndBlueLight
-                        )
-                    )
-
-                    NavigationBarItem(
-                        icon = {
-                            Icon(
-                                imageVector = if (selectedTab == 4 && !showKuberaAi && !showProfileScreen) Icons.Filled.ReceiptLong else Icons.Outlined.ReceiptLong,
+                                imageVector = if (selectedTab == 3 && !showProfileScreen) Icons.Filled.ReceiptLong else Icons.Outlined.ReceiptLong,
                                 contentDescription = "My Bills"
                             )
                         },
@@ -549,8 +462,8 @@ fun MainScreen(
                                 softWrap = false
                             )
                         },
-                        selected = selectedTab == 4 && !overlayObscuresMainContent && !showProfileScreen,
-                        onClick = { navigateToTab(4) },
+                        selected = selectedTab == 3 && !overlayObscuresMainContent && !showProfileScreen,
+                        onClick = { navigateToTab(3) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = IndBlue,
                             selectedTextColor = IndBlue,
@@ -586,11 +499,6 @@ fun MainScreen(
                         selectedTab = 1
                     }
                 )
-            } else if (showKuberaAi) {
-                KuberaAiScreen(
-                    viewModel = viewModel,
-                    onClose = { showKuberaAi = false }
-                )
             } else {
                 Crossfade(
                     targetState = selectedTab,
@@ -608,7 +516,6 @@ fun MainScreen(
                                     viewModel = viewModel,
                                     onOpenAnalytics = { showAnalytics = true },
                                     onOpenPending = {
-                                        showKuberaAi = false
                                         showAnalytics = false
                                         showPendingTransactions = true
                                     },
@@ -630,11 +537,7 @@ fun MainScreen(
                         viewModel = viewModel,
                         onBackToDashboard = { selectedTab = 0 }
                     )
-                    3 -> BankReconciliationScreen(
-                        viewModel = viewModel,
-                        onBack = { selectedTab = 0 }
-                    )
-                    4 -> MyBillsScreen(
+                    3 -> MyBillsScreen(
                         viewModel = viewModel,
                         onBack = { selectedTab = 0 }
                     )

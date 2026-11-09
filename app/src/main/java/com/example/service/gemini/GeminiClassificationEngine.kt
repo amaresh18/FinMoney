@@ -19,7 +19,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * Robust classification engine using Google Gemini (gemini-3.5-flash) to parse
+ * Robust classification engine using Google Gemini 2.0 Flash (free tier via AI Studio) to parse
  * SMS and notification strings for financial transaction details.
  */
 class GeminiClassificationEngine(
@@ -27,7 +27,7 @@ class GeminiClassificationEngine(
 ) {
     companion object {
         private const val TAG = "GeminiClassifier"
-        private const val GEMINI_MODEL = "gemini-3.5-flash"
+        private const val GEMINI_MODEL = "gemini-2.0-flash"
         private const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
         val SYSTEM_INSTRUCTION = """
@@ -42,8 +42,10 @@ class GeminiClassificationEngine(
             - type (string): "CREDIT" or "DEBIT".
               * Use "CREDIT" ONLY for actual money received, settled refunds, settled cashback credited to account, salary deposits, transfers to you.
               * Use "DEBIT" ONLY for money paid, spent, sent, ATM withdrawals, auto-debits, bill payments already completed.
-            - merchant (string): The counterparty, payee, or merchant involved (e.g. "Swiggy", "Zomato", "Uber", "Chai Point", "Ramesh Kumar", "Amazon").
-            - category (string): One of ["OUTSIDE_FOOD", "GROCERIES", "SHOPPING", "RECHARGE", "ELECTRICITY", "INTERNET", "FUEL", "TRAVEL", "OTT", "PHARMACY", "INVESTMENT", "EMI", "INSURANCE", "RENT", "MAINTENANCE", "SALARY", "GENERAL"].
+            - title (string): Clean short name for the expense/income line in the app (brand or person), NOT the bank name.
+            - merchant (string): Same as title if unsure; counterparty or payee.
+            - category (string): One FinMoney enum: OUTSIDE_FOOD, GROCERIES, SHOPPING, DINING, RECHARGE, ELECTRICITY, INTERNET, FUEL, TRANSPORT, TRAVEL, OTT, PHARMACY, INVESTMENT, EMI, INSURANCE, RENT, MAINTENANCE, SUBSCRIPTION, SALARY, UTILITIES, GENERAL.
+            - sub_category (string): Finer label when useful (e.g. "Food Delivery", "UPI P2P", "ATM Withdrawal") using enum name when it fits.
             - account_ending (string): Last 4 digits of the bank account or card (e.g. "1234"), or empty string if not mentioned.
             - reference_number (string): UTR, transaction ID, or reference number, or empty string.
             - available_balance (number or null): Available balance or credit limit after transaction if mentioned, else null.
@@ -71,6 +73,8 @@ class GeminiClassificationEngine(
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
+
+    fun hasConfiguredApiKey(): Boolean = getResolvedApiKey().isNotBlank()
 
     private fun getResolvedApiKey(): String {
         val custom = customApiKey?.trim()
@@ -158,18 +162,19 @@ class GeminiClassificationEngine(
                 return@withContext fallbackLocalParse(rawText, senderOrTitle, timestamp)
             }
 
-            parseGeminiJsonResponse(textOutput, rawText, senderOrTitle, timestamp)
+            parseStructuredLlmJson(textOutput, rawText, senderOrTitle, timestamp, "GEMINI_AI")
         } catch (e: Exception) {
             Log.w(TAG, "Exception during Gemini parsing: ${e.message}. Falling back to heuristic parse.")
             fallbackLocalParse(rawText, senderOrTitle, timestamp)
         }
     }
 
-    private fun parseGeminiJsonResponse(
+    fun parseStructuredLlmJson(
         jsonString: String,
         rawText: String,
         senderOrTitle: String,
-        timestamp: Long
+        timestamp: Long,
+        sourceLabel: String = "GEMINI_AI"
     ): TransactionClassificationResult {
         return try {
             val json = JSONObject(jsonString)
@@ -179,7 +184,9 @@ class GeminiClassificationEngine(
             val typeStr = json.optString("type", "DEBIT").uppercase()
             val type = if (typeStr == "CREDIT" || typeStr == "INCOME") TransactionType.CREDIT else TransactionType.DEBIT
             val merchant = json.optString("merchant", "")
+            val title = json.optString("title", "").ifBlank { merchant }
             val category = json.optString("category", "GENERAL")
+            val subCategory = json.optString("sub_category", "")
             val accountEnding = json.optString("account_ending", "")
             val referenceNumber = json.optString("reference_number", "")
             val availableBalance = if (json.has("available_balance") && !json.isNull("available_balance")) {
@@ -200,6 +207,8 @@ class GeminiClassificationEngine(
                     sender = sender,
                     type = type,
                     merchant = merchant,
+                    title = title,
+                    subCategory = subCategory,
                     category = "NON_FINANCIAL",
                     accountEnding = accountEnding,
                     referenceNumber = referenceNumber,
@@ -207,7 +216,7 @@ class GeminiClassificationEngine(
                     isFinancial = false,
                     rawText = rawText,
                     confidence = 0.99f,
-                    source = "GEMINI_AI"
+                    source = sourceLabel
                 )
             }
 
@@ -218,8 +227,10 @@ class GeminiClassificationEngine(
                     return heuristic.copy(
                         sender = sender.ifBlank { heuristic.sender },
                         merchant = merchant.ifBlank { heuristic.merchant },
+                        title = title.ifBlank { heuristic.merchant },
+                        subCategory = subCategory,
                         category = if (category != "GENERAL") category else heuristic.category,
-                        source = "GEMINI_HYBRID"
+                        source = "${sourceLabel}_HYBRID"
                     )
                 } else {
                     return TransactionClassificationResult(
@@ -229,7 +240,7 @@ class GeminiClassificationEngine(
                         type = type,
                         isFinancial = false,
                         rawText = rawText,
-                        source = "GEMINI_AI"
+                        source = sourceLabel
                     )
                 }
             }
@@ -240,6 +251,8 @@ class GeminiClassificationEngine(
                 sender = sender,
                 type = type,
                 merchant = merchant,
+                title = title,
+                subCategory = subCategory,
                 category = category,
                 accountEnding = accountEnding,
                 referenceNumber = referenceNumber,
@@ -247,7 +260,7 @@ class GeminiClassificationEngine(
                 isFinancial = isFinancial,
                 rawText = rawText,
                 confidence = 0.95f,
-                source = "GEMINI_AI"
+                source = sourceLabel
             )
         } catch (e: Exception) {
             Log.w(TAG, "Could not deserialize Gemini JSON ($jsonString): ${e.message}")

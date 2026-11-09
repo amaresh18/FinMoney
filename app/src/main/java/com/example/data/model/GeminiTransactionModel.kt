@@ -34,7 +34,10 @@ data class TransactionClassificationResult(
     val sender: String,
     val type: TransactionType,
     val merchant: String = "",
+    /** Short UI title (e.g. Swiggy, Amazon Pay). */
+    val title: String = "",
     val category: String = "GENERAL",
+    val subCategory: String = "",
     val accountEnding: String = "",
     val referenceNumber: String = "",
     val availableBalance: Double? = null,
@@ -50,7 +53,14 @@ data class TransactionClassificationResult(
         get() = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(date))
 
     val displayTitle: String
-        get() = if (merchant.isNotBlank() && merchant != sender) merchant else sender.ifBlank { "Bank Transaction" }
+        get() {
+            val t = title.ifBlank { merchant }
+            return if (t.isNotBlank() && !t.equals(sender, ignoreCase = true)) {
+                t
+            } else {
+                sender.ifBlank { "Bank Transaction" }
+            }
+        }
 
     val summaryText: String
         get() {
